@@ -133,8 +133,9 @@ public sealed class ServerHostIntegrationTests
         Assert.Equal(inputCount, snapshotsByTick.Count);
         for (int tick = firstInputTick; tick <= lastInputTick; tick++)
         {
-            Assert.True(snapshotsByTick.TryGetValue(tick, out Snapshot? snapshot), $"Missing snapshot for tick {tick}.");
-            AppendSnapshot(checksum, snapshot!);
+            bool found = snapshotsByTick.TryGetValue(tick, out Snapshot snapshot);
+            Assert.True(found, $"Missing snapshot for tick {tick}.");
+            AppendSnapshot(checksum, snapshot);
         return Convert.ToHexString(checksum.GetHashAndReset());
     }
 
