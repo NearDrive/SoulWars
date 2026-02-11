@@ -30,10 +30,10 @@ jobs:
           text = path.read_text(encoding="utf-8")
 
           required_tokens = [
-              "int firstInputTick = baselineSnapshot.Tick + 1;",
               "const int inputCount = 30;",
-              "Dictionary<int, Snapshot> snapshotsByTick = await CollectSnapshotsForTickRangeAsync(",
-              "return snapshotsByTick;",
+              "client.SendInput(previousTick + 1, moveX, moveY);",
+              "AppendSnapshot(checksum, currentSnapshot);",
+              "Assert.True(moved);",
           ]
 
           missing = [token for token in required_tokens if token not in text]

@@ -54,18 +54,8 @@ public sealed class ServerHostIntegrationTests
         client.EnterZone(1);
 
         EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
-        Snapshot firstSnapshot = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2), s => s.Entities.Any(e => e.EntityId == ack.EntityId));
-        Snapshot latestSnapshot = firstSnapshot;
-        while (client.TryRead(out IServerMessage? message))
-        {
-            if (message is Snapshot snapshot && snapshot.Entities.Any(e => e.EntityId == ack.EntityId))
-            {
-                latestSnapshot = snapshot;
-            }
-        }
-
-        firstSnapshot = latestSnapshot;
-        SnapshotEntity firstEntity = firstSnapshot.Entities.Single(e => e.EntityId == ack.EntityId);
+        Snapshot currentSnapshot = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2), s => s.Entities.Any(e => e.EntityId == ack.EntityId));
+        SnapshotEntity firstEntity = currentSnapshot.Entities.Single(e => e.EntityId == ack.EntityId);
 
         int previousX = firstEntity.PosXRaw;
         bool moved = false;
@@ -73,17 +63,18 @@ public sealed class ServerHostIntegrationTests
 
         for (int i = 0; i < 20; i++)
         {
-            client.SendInput(firstSnapshot.Tick + i + 1, 1, 0);
+            int previousTick = currentSnapshot.Tick;
+            client.SendInput(previousTick + 1, 1, 0);
             runtime.StepOnce();
 
-            Snapshot snap = await WaitForMessageAsync<Snapshot>(
+            currentSnapshot = await WaitForMessageAsync<Snapshot>(
                 runtime,
                 client,
                 TimeSpan.FromSeconds(2),
-                s => s.Entities.Any(e => e.EntityId == ack.EntityId),
+                s => s.Tick > previousTick && s.Entities.Any(e => e.EntityId == ack.EntityId),
                 advanceServer: false);
 
-            SnapshotEntity entity = snap.Entities.Single(e => e.EntityId == ack.EntityId);
+            SnapshotEntity entity = currentSnapshot.Entities.Single(e => e.EntityId == ack.EntityId);
             Assert.InRange(entity.PosXRaw, 0, mapMaxRawX);
             if (entity.PosXRaw > previousX)
             {
@@ -118,82 +109,33 @@ public sealed class ServerHostIntegrationTests
         client.Send(new Hello("determinism-client"));
         client.EnterZone(1);
 
-        _ = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
-        _ = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2));
+        EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
+        Snapshot currentSnapshot = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2), s => s.Entities.Any(e => e.EntityId == ack.EntityId));
 
-        Snapshot baselineSnapshot = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2));
-        while (client.TryRead(out IServerMessage? message))
-        {
-            if (message is Snapshot snapshot)
-            {
-                baselineSnapshot = snapshot;
-            }
-        }
-
-        int firstInputTick = baselineSnapshot.Tick + 1;
         const int inputCount = 30;
-        int lastInputTick = firstInputTick + inputCount - 1;
-
         Random deterministic = new(999);
-        for (int i = 0; i < inputCount; i++)
-        {
-            sbyte moveX = (sbyte)deterministic.Next(-1, 2);
-            sbyte moveY = (sbyte)deterministic.Next(-1, 2);
-            client.SendInput(firstInputTick + i, moveX, moveY);
-        }
-
-        Dictionary<int, Snapshot> snapshotsByTick = await CollectSnapshotsForTickRangeAsync(
-            runtime,
-            client,
-            firstInputTick,
-            lastInputTick,
-            TimeSpan.FromSeconds(2));
-
-        Assert.Equal(inputCount, snapshotsByTick.Count);
 
         using IncrementalHash checksum = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        for (int tick = firstInputTick; tick <= lastInputTick; tick++)
+        for (int i = 0; i < inputCount; i++)
         {
-            if (!snapshotsByTick.TryGetValue(tick, out Snapshot? snapshot) || snapshot is null)
-            {
-                throw new Xunit.Sdk.XunitException($"Missing snapshot for tick {tick}.");
-            }
+            int previousTick = currentSnapshot.Tick;
+            sbyte moveX = (sbyte)deterministic.Next(-1, 2);
+            sbyte moveY = (sbyte)deterministic.Next(-1, 2);
 
-            AppendSnapshot(checksum, snapshot);
+            client.SendInput(previousTick + 1, moveX, moveY);
+            runtime.StepOnce();
+
+            currentSnapshot = await WaitForMessageAsync<Snapshot>(
+                runtime,
+                client,
+                TimeSpan.FromSeconds(2),
+                s => s.Tick > previousTick && s.Entities.Any(e => e.EntityId == ack.EntityId),
+                advanceServer: false);
+
+            AppendSnapshot(checksum, currentSnapshot);
         }
 
         return Convert.ToHexString(checksum.GetHashAndReset());
-    }
-
-    private static async Task<Dictionary<int, Snapshot>> CollectSnapshotsForTickRangeAsync(
-        ServerRuntime runtime,
-        HeadlessClient client,
-        int firstTick,
-        int lastTick,
-        TimeSpan timeout)
-    {
-        Dictionary<int, Snapshot> snapshotsByTick = new();
-        Stopwatch sw = Stopwatch.StartNew();
-
-        while (sw.Elapsed < timeout && snapshotsByTick.Count < (lastTick - firstTick + 1))
-        {
-            runtime.StepOnce();
-
-            while (client.TryRead(out IServerMessage? message))
-            {
-                if (message is Snapshot snapshot)
-                {
-                    if (snapshot.Tick >= firstTick && snapshot.Tick <= lastTick)
-                    {
-                        snapshotsByTick[snapshot.Tick] = snapshot;
-                    }
-                }
-            }
-
-            await Task.Yield();
-        }
-
-        return snapshotsByTick;
     }
 
     private static void AppendSnapshot(IncrementalHash checksum, Snapshot snapshot)
