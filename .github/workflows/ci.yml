@@ -20,11 +20,31 @@ jobs:
       - name: Restore
         run: dotnet restore
 
-      - name: Debug checkout and test file (pre-build)
+      - name: Verify integration test file integrity (pre-build)
         run: |
           echo "HEAD=$(git rev-parse HEAD)"
-          git status --short
-          nl -ba tests/Game.Server.Tests/ServerHostIntegrationTests.cs | sed -n '90,210p'
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/Game.Server.Tests/ServerHostIntegrationTests.cs")
+          text = path.read_text(encoding="utf-8")
+
+          required_tokens = [
+              "const int firstInputTick = 100;",
+              "const int inputCount = 30;",
+              "Dictionary<int, Snapshot> snapshotsByTick = await CollectSnapshotsForTickRangeAsync(",
+              "return snapshotsByTick;",
+          ]
+
+          missing = [token for token in required_tokens if token not in text]
+          if missing:
+              raise SystemExit(
+                  "ServerHostIntegrationTests.cs appears corrupted/truncated. Missing tokens:\n"
+                  + "\n".join(f" - {token}" for token in missing)
+              )
+
+          print(f"Verified {path} integrity checks ({len(required_tokens)} tokens).")
+          PY
 
       - name: Build
         run: dotnet build -c Release --no-restore
