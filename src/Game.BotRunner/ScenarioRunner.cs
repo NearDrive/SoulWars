@@ -20,6 +20,7 @@ public sealed class ScenarioRunner
 
         using ScenarioChecksumBuilder checksum = new();
         List<BotClient> clients = new(cfg.BotCount);
+        List<ReceivedSnapshot> snapshots = new();
         ServerRuntime runtime = new();
 
         try
@@ -54,9 +55,17 @@ public sealed class ScenarioRunner
                 {
                     if (msg is Snapshot snapshot)
                     {
-                        checksum.AppendSnapshot(index, snapshot);
+                        snapshots.Add(new ReceivedSnapshot(index, snapshot));
                     }
                 });
+            }
+
+            foreach (ReceivedSnapshot received in snapshots
+                         .OrderBy(s => s.Snapshot.Tick)
+                         .ThenBy(s => s.BotIndex)
+                         .ThenBy(s => s.Snapshot.ZoneId))
+            {
+                checksum.AppendSnapshot(received.BotIndex, received.Snapshot);
             }
 
             string finalChecksum = checksum.BuildHexLower();
@@ -133,4 +142,6 @@ public sealed class ScenarioRunner
             throw new ArgumentOutOfRangeException(nameof(cfg), "BotCount must be > 0.");
         }
     }
+
+    private readonly record struct ReceivedSnapshot(int BotIndex, Snapshot Snapshot);
 }
