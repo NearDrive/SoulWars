@@ -171,26 +171,27 @@ public sealed class ScenarioRunner
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
             Task connectTask = client.ConnectAndEnterAsync("127.0.0.1", runtime.BoundPort, ct);
-            int maxConnectSteps = Math.Max(64, clients.Count * 32);
+            int maxConnectSteps = Math.Max(10_000, clients.Count * 2_000);
             int connectSteps = 0;
 
             while (!connectTask.IsCompleted)
             {
                 if (connectSteps++ >= maxConnectSteps)
                 {
-                    throw new InvalidOperationException($"Bot {client.BotIndex} did not finish connect/enter handshake deterministically.");
+                    throw new InvalidOperationException(
+                        $"Bot {client.BotIndex} did not finish connect/enter handshake deterministically after {connectSteps} steps (boundPort={runtime.BoundPort}).");
                 }
 
                 ct.ThrowIfCancellationRequested();
                 runtime.StepOnce();
-                DrainAll(clients, (_, _) => { });
+                DrainAll(clients, (_, _) => { }, skipBotIndex: client.BotIndex);
             }
 
             connectTask.GetAwaiter().GetResult();
         }
     }
 
-    private static void DrainAll(IReadOnlyList<BotClient> clients, Action<int, IServerMessage> onMessage)
+    private static void DrainAll(IReadOnlyList<BotClient> clients, Action<int, IServerMessage> onMessage, int? skipBotIndex = null)
     {
         bool drainedAny;
         do
@@ -198,6 +199,11 @@ public sealed class ScenarioRunner
             drainedAny = false;
             foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
             {
+                if (skipBotIndex == client.BotIndex)
+                {
+                    continue;
+                }
+
                 client.DrainMessages(message =>
                 {
                     drainedAny = true;
