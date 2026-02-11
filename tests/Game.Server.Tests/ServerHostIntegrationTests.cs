@@ -60,11 +60,12 @@ public sealed class ServerHostIntegrationTests
         int previousX = firstEntity.PosXRaw;
         bool moved = false;
         int mapMaxRawX = config.MapWidth * Fix32.OneRaw;
+        sbyte moveX = firstEntity.PosXRaw >= (mapMaxRawX / 2) ? (sbyte)-1 : (sbyte)1;
 
         for (int i = 0; i < 20; i++)
         {
             int previousTick = currentSnapshot.Tick;
-            client.SendInput(previousTick + 1, 1, 0);
+            client.SendInput(previousTick + 1, moveX, 0);
             runtime.StepOnce();
 
             currentSnapshot = await WaitForMessageAsync<Snapshot>(
@@ -76,7 +77,7 @@ public sealed class ServerHostIntegrationTests
 
             SnapshotEntity entity = currentSnapshot.Entities.Single(e => e.EntityId == ack.EntityId);
             Assert.InRange(entity.PosXRaw, 0, mapMaxRawX);
-            if (entity.PosXRaw > previousX)
+            if ((moveX > 0 && entity.PosXRaw > previousX) || (moveX < 0 && entity.PosXRaw < previousX))
             {
                 moved = true;
             }
@@ -132,7 +133,7 @@ public sealed class ServerHostIntegrationTests
                 s => s.Tick > previousTick && s.Entities.Any(e => e.EntityId == ack.EntityId),
                 advanceServer: false);
 
-            AppendSnapshot(checksum, currentSnapshot);
+            AppendSnapshot(checksum, currentSnapshot with { Tick = i + 1 });
         }
 
         return Convert.ToHexString(checksum.GetHashAndReset());
