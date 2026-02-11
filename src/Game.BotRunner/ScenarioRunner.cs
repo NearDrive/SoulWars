@@ -93,18 +93,17 @@ public sealed class ScenarioRunner
 
     private static void ConnectBots(ServerRuntime runtime, IReadOnlyList<BotClient> clients, CancellationToken ct)
     {
-        List<Task> tasks = clients
-            .OrderBy(client => client.BotIndex)
-            .Select(client => client.ConnectAndEnterAsync("127.0.0.1", runtime.BoundPort, ct))
-            .ToList();
-
-        while (!tasks.All(task => task.IsCompleted))
+        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
-            runtime.StepOnce();
-            DrainAll(clients, (_, _) => { });
-        }
+            Task connectTask = client.ConnectAndEnterAsync("127.0.0.1", runtime.BoundPort, ct);
+            while (!connectTask.IsCompleted)
+            {
+                runtime.StepOnce();
+                DrainAll(clients, (_, _) => { });
+            }
 
-        Task.WhenAll(tasks).GetAwaiter().GetResult();
+            connectTask.GetAwaiter().GetResult();
+        }
     }
 
     private static void DrainAll(IReadOnlyList<BotClient> clients, Action<int, IServerMessage> onMessage)
