@@ -1,0 +1,9 @@
+namespace Game.BotRunner;
+
+public sealed record ScenarioConfig(
+    int ServerSeed,
+    int TickCount,
+    int SnapshotEveryTicks,
+    int BotCount,
+    int ZoneId,
+    int BaseBotSeed);
