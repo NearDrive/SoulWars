@@ -82,6 +82,83 @@ public sealed class ServerHostIntegrationTests
         Assert.Equal(firstRun, secondRun);
     }
 
+    [Fact]
+    public void EnterZone_UnknownZone_ReturnsErrorAndDoesNotSwitchSessionZone()
+    {
+        ServerHost host = new(ServerConfig.Default(seed: 5) with { SnapshotEveryTicks = 1 });
+        InMemoryEndpoint endpoint = new();
+
+        host.Connect(endpoint);
+        _ = AssertMessage<Welcome>(endpoint);
+
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(999)));
+        host.StepOnce();
+
+        Error error = AssertMessage<Error>(endpoint);
+        Assert.Equal("UnknownZone", error.Code);
+        Assert.Contains("999", error.Message);
+
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
+        host.StepOnce();
+
+        EnterZoneAck ack = AssertMessage<EnterZoneAck>(endpoint);
+        Assert.Equal(1, ack.ZoneId);
+
+        Snapshot snapshot = AssertMessage<Snapshot>(endpoint);
+        Assert.Equal(1, snapshot.ZoneId);
+        Assert.Contains(snapshot.Entities, entity => entity.EntityId == ack.EntityId);
+    }
+
+    [Fact]
+    public void InputCommand_DuplicateTick_IsCoalescedPerSession()
+    {
+        ServerHost host = new(ServerConfig.Default(seed: 17) with { SnapshotEveryTicks = 1 });
+        InMemoryEndpoint endpoint = new();
+
+        host.Connect(endpoint);
+        _ = AssertMessage<Welcome>(endpoint);
+
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
+        host.StepOnce();
+
+        EnterZoneAck ack = AssertMessage<EnterZoneAck>(endpoint);
+        Snapshot initial = AssertMessage<Snapshot>(endpoint);
+        SnapshotEntity before = Assert.Single(initial.Entities, e => e.EntityId == ack.EntityId);
+
+        int duplicateTick = initial.Tick + 1;
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(duplicateTick, 1, 0)));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(duplicateTick, 1, 0)));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(duplicateTick, 1, 0)));
+
+        host.StepOnce();
+
+        Snapshot after = AssertMessage<Snapshot>(endpoint);
+        SnapshotEntity afterEntity = Assert.Single(after.Entities, e => e.EntityId == ack.EntityId);
+
+        int deltaWithDuplicates = afterEntity.PosXRaw - before.PosXRaw;
+        Assert.True(deltaWithDuplicates > 0);
+
+        ServerHost singleInputHost = new(ServerConfig.Default(seed: 17) with { SnapshotEveryTicks = 1 });
+        InMemoryEndpoint singleInputEndpoint = new();
+        singleInputHost.Connect(singleInputEndpoint);
+        _ = AssertMessage<Welcome>(singleInputEndpoint);
+        singleInputEndpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
+        singleInputHost.StepOnce();
+
+        EnterZoneAck singleAck = AssertMessage<EnterZoneAck>(singleInputEndpoint);
+        Snapshot singleInitial = AssertMessage<Snapshot>(singleInputEndpoint);
+        SnapshotEntity singleBefore = Assert.Single(singleInitial.Entities, e => e.EntityId == singleAck.EntityId);
+
+        singleInputEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(duplicateTick, 1, 0)));
+        singleInputHost.StepOnce();
+
+        Snapshot singleAfter = AssertMessage<Snapshot>(singleInputEndpoint);
+        SnapshotEntity singleAfterEntity = Assert.Single(singleAfter.Entities, e => e.EntityId == singleAck.EntityId);
+
+        int deltaSingle = singleAfterEntity.PosXRaw - singleBefore.PosXRaw;
+        Assert.Equal(deltaSingle, deltaWithDuplicates);
+    }
+
     private static List<string> RunScenarioAndCollectChecksums()
     {
         ServerHost host = new(ServerConfig.Default(seed: 123) with { SnapshotEveryTicks = 1 });
