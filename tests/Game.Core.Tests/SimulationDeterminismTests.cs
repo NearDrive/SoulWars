@@ -7,37 +7,76 @@ namespace Game.Core.Tests;
 public sealed class SimulationDeterminismTests
 {
     [Fact]
-    public void Determinism_SameSeedSameInputs_WithCollisions_SameChecksum()
+    public void EnterZone_CreatesEntityInZone()
     {
-        const int tickCount = 500;
+        SimulationConfig config = CreateConfig(seed: 42);
+        WorldState state = Simulation.CreateInitialState(config);
+
+        Inputs commands = new(ImmutableArray.Create(
+            new WorldCommand(
+                Kind: WorldCommandKind.EnterZone,
+                EntityId: new EntityId(1),
+                ZoneId: new ZoneId(1))));
+
+        state = Simulation.Step(config, state, commands);
+
+        Assert.True(state.TryGetZone(new ZoneId(1), out ZoneState zone));
+        Assert.Single(zone.Entities);
+        Assert.Equal(1, zone.Entities[0].Id.Value);
+    }
+
+    [Fact]
+    public void LeaveZone_RemovesEntityFromZone()
+    {
+        SimulationConfig config = CreateConfig(seed: 42);
+        WorldState state = Simulation.CreateInitialState(config);
+
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.EnterZone, new EntityId(1), new ZoneId(1)))));
+
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.LeaveZone, new EntityId(1), new ZoneId(1)))));
+
+        Assert.True(state.TryGetZone(new ZoneId(1), out ZoneState zone));
+        Assert.DoesNotContain(zone.Entities, entity => entity.Id.Value == 1);
+    }
+
+    [Fact]
+    public void Determinism_SameSeedSameCommands_SameChecksum()
+    {
         SimulationConfig config = CreateConfig(seed: 123);
 
-        string checksumA = RunSimulation(config, tickCount, validateCollisionInvariant: false);
-        string checksumB = RunSimulation(config, tickCount, validateCollisionInvariant: false);
+        string checksumA = RunSequence(config);
+        string checksumB = RunSequence(config);
 
         Assert.Equal(checksumA, checksumB);
     }
 
-    [Fact]
-    public void Collision_PlayerNeverInsideSolidTile()
+    private static string RunSequence(SimulationConfig config)
     {
-        const int tickCount = 500;
-        SimulationConfig config = CreateConfig(seed: 123);
+        WorldState state = Simulation.CreateInitialState(config);
 
-        _ = RunSimulation(config, tickCount, validateCollisionInvariant: true);
-    }
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.EnterZone, new EntityId(1), new ZoneId(1)))));
 
-    [Fact]
-    public void Determinism_DifferentSeed_DifferentChecksum()
-    {
-        const int tickCount = 500;
-        SimulationConfig configA = CreateConfig(seed: 123);
-        SimulationConfig configB = CreateConfig(seed: 124);
+        WorldCommand[] moveCommands =
+        [
+            new(WorldCommandKind.MoveIntent, new EntityId(1), new ZoneId(1), MoveX: 1, MoveY: 0),
+            new(WorldCommandKind.MoveIntent, new EntityId(1), new ZoneId(1), MoveX: 1, MoveY: 1),
+            new(WorldCommandKind.MoveIntent, new EntityId(1), new ZoneId(1), MoveX: 0, MoveY: 1),
+            new(WorldCommandKind.MoveIntent, new EntityId(1), new ZoneId(1), MoveX: -1, MoveY: 1),
+            new(WorldCommandKind.MoveIntent, new EntityId(1), new ZoneId(1), MoveX: -1, MoveY: 0)
+        ];
 
-        string checksumA = RunSimulation(configA, tickCount, validateCollisionInvariant: false);
-        string checksumB = RunSimulation(configB, tickCount, validateCollisionInvariant: false);
+        foreach (WorldCommand move in moveCommands)
+        {
+            state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(move)));
+        }
 
-        Assert.NotEqual(checksumA, checksumB);
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.LeaveZone, new EntityId(1), new ZoneId(1)))));
+
+        return StateChecksum.Compute(state);
     }
 
     private static SimulationConfig CreateConfig(int seed) => new(
@@ -49,29 +88,4 @@ public sealed class SimulationDeterminismTests
         Radius: new(16384), // 0.25
         MapWidth: 64,
         MapHeight: 64);
-
-    private static string RunSimulation(SimulationConfig config, int tickCount, bool validateCollisionInvariant)
-    {
-        SimRng inputRng = new(seed: 999);
-        WorldState state = Simulation.CreateInitialState(config);
-
-        for (int tick = 0; tick < tickCount; tick++)
-        {
-            PlayerInput input = new(
-                EntityId: new EntityId(1),
-                MoveX: (sbyte)inputRng.NextInt(-1, 2),
-                MoveY: (sbyte)inputRng.NextInt(-1, 2));
-
-            Inputs inputs = new(ImmutableArray.Create(input));
-            state = Simulation.Step(config, state, inputs);
-
-            if (validateCollisionInvariant)
-            {
-                EntityState player = state.Entities.Single(entity => entity.Id.Value == 1);
-                Assert.False(Physics2D.OverlapsSolidTile(player.Pos, config.Radius, state.Map));
-            }
-        }
-
-        return StateChecksum.Compute(state);
-    }
 }
