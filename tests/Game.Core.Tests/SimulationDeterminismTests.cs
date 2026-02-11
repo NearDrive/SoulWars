@@ -25,6 +25,35 @@ public sealed class SimulationDeterminismTests
         Assert.Equal(1, zone.Entities[0].Id.Value);
     }
 
+
+    [Fact]
+    public void EnterZone_RemovesExistingEntityFromOtherZones()
+    {
+        SimulationConfig config = CreateConfig(seed: 42);
+        WorldState state = Simulation.CreateInitialState(config);
+
+        Assert.True(state.TryGetZone(new ZoneId(1), out ZoneState zoneOne));
+
+        ZoneState zoneTwo = new(
+            Id: new ZoneId(2),
+            Map: zoneOne.Map,
+            Entities: ImmutableArray<EntityState>.Empty);
+
+        state = state.WithZoneUpdated(zoneTwo);
+
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.EnterZone, new EntityId(1), new ZoneId(1)))));
+
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.EnterZone, new EntityId(1), new ZoneId(2)))));
+
+        Assert.True(state.TryGetZone(new ZoneId(1), out zoneOne));
+        Assert.True(state.TryGetZone(new ZoneId(2), out ZoneState updatedZoneTwo));
+
+        Assert.DoesNotContain(zoneOne.Entities, entity => entity.Id.Value == 1);
+        Assert.Contains(updatedZoneTwo.Entities, entity => entity.Id.Value == 1);
+    }
+
     [Fact]
     public void LeaveZone_RemovesEntityFromZone()
     {
