@@ -48,7 +48,7 @@ public sealed class ServerHostIntegrationTests
 
         EnterZoneAck ack = AssertMessage<EnterZoneAck>(endpoint);
         Snapshot initial = AssertMessage<Snapshot>(endpoint);
-        SnapshotEntity initialEntity = Assert.Single(initial.Entities.Where(e => e.EntityId == ack.EntityId));
+        SnapshotEntity initialEntity = Assert.Single(initial.Entities, e => e.EntityId == ack.EntityId);
 
         int previousX = initialEntity.PosXRaw;
         bool moved = false;
@@ -58,7 +58,7 @@ public sealed class ServerHostIntegrationTests
             endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(initial.Tick + step + 1, 1, 0)));
             host.StepOnce();
             Snapshot snapshot = AssertMessage<Snapshot>(endpoint);
-            SnapshotEntity entity = Assert.Single(snapshot.Entities.Where(e => e.EntityId == ack.EntityId));
+            SnapshotEntity entity = Assert.Single(snapshot.Entities, e => e.EntityId == ack.EntityId);
 
             Assert.True(entity.PosXRaw >= previousX);
             if (entity.PosXRaw > previousX)
