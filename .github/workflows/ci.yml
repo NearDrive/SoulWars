@@ -38,10 +38,13 @@ jobs:
 
           missing = [token for token in required_tokens if token not in text]
           if missing:
-              raise SystemExit(
-                  "ServerHostIntegrationTests.cs appears corrupted/truncated. Missing tokens:\n"
-                  + "\n".join(f" - {token}" for token in missing)
-              )
+              print(f"{path} appears corrupted/truncated. Missing tokens:")
+              for token in missing:
+                  print(f" - {token}")
+              print("\nSuggested fix:")
+              print(" - Restore tests/Game.Server.Tests/ServerHostIntegrationTests.cs from a known-good commit and push again.")
+              print(" - Example: git checkout <good_sha> -- tests/Game.Server.Tests/ServerHostIntegrationTests.cs")
+              raise SystemExit(1)
 
           print(f"Verified {path} integrity checks ({len(required_tokens)} tokens).")
           PY
