@@ -115,28 +115,56 @@ public sealed class ServerHostIntegrationTests
         using IncrementalHash checksum = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         Random deterministic = new(999);
 
-        Dictionary<int, Snapshot> snapshotsByTick = new();
-        Stopwatch sw = Stopwatch.StartNew();
-
-        while (sw.Elapsed < TimeSpan.FromSeconds(2) && snapshotsByTick.Count < inputCount)
-        {
-            DrainMessages(client, message =>
-                if (message is Snapshot snapshot && snapshot.Tick >= firstInputTick && snapshot.Tick <= lastInputTick)
-                {
-                    snapshotsByTick[snapshot.Tick] = snapshot;
-                }
-            });
-
-            await Task.Yield();
-        }
+        Dictionary<int, Snapshot> snapshotsByTick = await CollectSnapshotsForTickRangeAsync(
+            runtime,
+            client,
+            firstInputTick,
+            lastInputTick,
+            TimeSpan.FromSeconds(2));
 
         Assert.Equal(inputCount, snapshotsByTick.Count);
         for (int tick = firstInputTick; tick <= lastInputTick; tick++)
         {
-            bool found = snapshotsByTick.TryGetValue(tick, out Snapshot snapshot);
+            Snapshot snapshot;
+            bool found = snapshotsByTick.TryGetValue(tick, out snapshot);
             Assert.True(found, $"Missing snapshot for tick {tick}.");
             AppendSnapshot(checksum, snapshot);
+        }
+
         return Convert.ToHexString(checksum.GetHashAndReset());
+    }
+
+    private static async Task<Dictionary<int, Snapshot>> CollectSnapshotsForTickRangeAsync(
+        ServerRuntime runtime,
+        HeadlessClient client,
+        int firstTick,
+        int lastTick,
+        TimeSpan timeout)
+    {
+        Dictionary<int, Snapshot> snapshotsByTick = new Dictionary<int, Snapshot>();
+        Stopwatch sw = Stopwatch.StartNew();
+
+        while (sw.Elapsed < timeout && snapshotsByTick.Count < (lastTick - firstTick + 1))
+        {
+
+            IServerMessage? message;
+            while (client.TryRead(out message))
+                Snapshot? snapshot = message as Snapshot;
+                if (snapshot is null)
+                {
+                    continue;
+                }
+
+                if (snapshot.Tick < firstTick || snapshot.Tick > lastTick)
+                {
+                    continue;
+                }
+
+                snapshotsByTick[snapshot.Tick] = snapshot;
+            }
+
+            await Task.Yield();
+        return snapshotsByTick;
     }
 
     private static void AppendSnapshot(IncrementalHash checksum, Snapshot snapshot)
