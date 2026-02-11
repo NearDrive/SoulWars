@@ -20,6 +20,12 @@ jobs:
       - name: Restore
         run: dotnet restore
 
+      - name: Debug checkout and test file (pre-build)
+        run: |
+          echo "HEAD=$(git rev-parse HEAD)"
+          git status --short
+          nl -ba tests/Game.Server.Tests/ServerHostIntegrationTests.cs | sed -n '90,210p'
+
       - name: Build
         run: dotnet build -c Release --no-restore
 
