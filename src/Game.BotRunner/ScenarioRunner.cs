@@ -21,6 +21,7 @@ public sealed class ScenarioRunner
         using ScenarioChecksumBuilder checksum = new();
         List<BotClient> clients = new(cfg.BotCount);
         Dictionary<(int BotIndex, int SnapshotTick), Snapshot> snapshots = new();
+        Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot = new();
         ServerRuntime runtime = new();
 
         try
@@ -52,18 +53,62 @@ public sealed class ScenarioRunner
 
                 runtime.StepOnce();
 
-                bool expectsSnapshots = tick % cfg.SnapshotEveryTicks == 0;
-                do
+                DrainAll(clients, (index, msg) =>
+                {
+                    if (msg is not Snapshot snapshot)
+                    {
+                        return;
+                    }
+
+                    if (!pendingSnapshotsByBot.TryGetValue(index, out SortedDictionary<int, Snapshot>? pendingByTick))
+                    {
+                        pendingByTick = new SortedDictionary<int, Snapshot>();
+                        pendingSnapshotsByBot[index] = pendingByTick;
+                    }
+
+                    pendingByTick[snapshot.Tick] = snapshot;
+                });
+
+                if (tick % cfg.SnapshotEveryTicks != 0)
+                {
+                    continue;
+                }
+
+                while (!AllBotsHaveSnapshotForTick(clients, pendingSnapshotsByBot, tick))
                 {
                     DrainAll(clients, (index, msg) =>
                     {
-                        if (msg is Snapshot snapshot)
+                        if (msg is not Snapshot snapshot)
                         {
-                            snapshots[(index, snapshot.Tick)] = snapshot;
+                            return;
                         }
+
+                        if (!pendingSnapshotsByBot.TryGetValue(index, out SortedDictionary<int, Snapshot>? pendingByTick))
+                        {
+                            pendingByTick = new SortedDictionary<int, Snapshot>();
+                            pendingSnapshotsByBot[index] = pendingByTick;
+                        }
+
+                        pendingByTick[snapshot.Tick] = snapshot;
                     });
                 }
-                while (expectsSnapshots && !AllBotsHaveSnapshotForTick(clients, tick));
+
+                foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
+                {
+                    SortedDictionary<int, Snapshot> pendingByTick = pendingSnapshotsByBot[client.BotIndex];
+                    snapshots[(client.BotIndex, tick)] = pendingByTick[tick];
+                    pendingByTick.Remove(tick);
+                }
+
+                while (TryTakeSynchronizedSnapshotSet(clients, pendingSnapshotsByBot, out int synchronizedTick))
+                {
+                    foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
+                    {
+                        SortedDictionary<int, Snapshot> pendingByTick = pendingSnapshotsByBot[client.BotIndex];
+                        snapshots[(client.BotIndex, synchronizedTick)] = pendingByTick[synchronizedTick];
+                        pendingByTick.Remove(synchronizedTick);
+                    }
+                }
             }
 
             foreach (((int botIndex, int snapshotTick), Snapshot snapshot) in snapshots
@@ -148,8 +193,68 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static bool AllBotsHaveSnapshotForTick(IReadOnlyList<BotClient> clients, int tick)
+    private static bool TryTakeSynchronizedSnapshotSet(
+        IReadOnlyList<BotClient> clients,
+        Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
+        out int snapshotTick)
     {
-        return clients.All(client => client.LastSnapshotTick >= tick);
+        snapshotTick = 0;
+
+        if (clients.Count == 0)
+        {
+            return false;
+        }
+
+        List<int>[] tickLists = clients
+            .OrderBy(client => client.BotIndex)
+            .Select(client =>
+            {
+                if (!pendingSnapshotsByBot.TryGetValue(client.BotIndex, out SortedDictionary<int, Snapshot>? pending))
+                {
+                    return new List<int>();
+                }
+
+                return pending.Keys.ToList();
+            })
+            .ToArray();
+
+        if (tickLists.Any(list => list.Count == 0))
+        {
+            return false;
+        }
+
+        HashSet<int> common = new(tickLists[0]);
+        for (int i = 1; i < tickLists.Length; i++)
+        {
+            common.IntersectWith(tickLists[i]);
+            if (common.Count == 0)
+            {
+                return false;
+            }
+        }
+
+        snapshotTick = common.Min();
+        return true;
+    }
+
+    private static bool AllBotsHaveSnapshotForTick(
+        IReadOnlyList<BotClient> clients,
+        Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
+        int snapshotTick)
+    {
+        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
+        {
+            if (!pendingSnapshotsByBot.TryGetValue(client.BotIndex, out SortedDictionary<int, Snapshot>? pendingByTick))
+            {
+                return false;
+            }
+
+            if (!pendingByTick.ContainsKey(snapshotTick))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
