@@ -115,18 +115,26 @@ public sealed class ServerHostIntegrationTests
         using IncrementalHash checksum = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         Random deterministic = new(999);
 
-        for (int i = 0; i < 30; i++)
+        Dictionary<int, Snapshot> snapshotsByTick = new();
+        Stopwatch sw = Stopwatch.StartNew();
+
+        while (sw.Elapsed < TimeSpan.FromSeconds(2) && snapshotsByTick.Count < inputCount)
         {
-            sbyte moveX = (sbyte)deterministic.Next(-1, 2);
-            sbyte moveY = (sbyte)deterministic.Next(-1, 2);
+            DrainMessages(client, message =>
+                if (message is Snapshot snapshot && snapshot.Tick >= firstInputTick && snapshot.Tick <= lastInputTick)
+                {
+                    snapshotsByTick[snapshot.Tick] = snapshot;
+                }
+            });
 
-            client.SendInput(i + 2, moveX, moveY);
-            runtime.StepOnce();
-
-            Snapshot snapshot = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2), advanceServer: false);
-            AppendSnapshot(checksum, snapshot);
+            await Task.Yield();
         }
 
+        Assert.Equal(inputCount, snapshotsByTick.Count);
+        for (int tick = firstInputTick; tick <= lastInputTick; tick++)
+        {
+            Assert.True(snapshotsByTick.TryGetValue(tick, out Snapshot? snapshot), $"Missing snapshot for tick {tick}.");
+            AppendSnapshot(checksum, snapshot!);
         return Convert.ToHexString(checksum.GetHashAndReset());
     }
 
