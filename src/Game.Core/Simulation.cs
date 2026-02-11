@@ -7,7 +7,7 @@ public static class Simulation
     public static WorldState CreateInitialState(SimulationConfig config)
     {
         SimRng rng = new(config.Seed);
-        EntityState player = new(new EntityId(1), rng.NextInt(-2, 3), rng.NextInt(-2, 3));
+        EntityState player = new(new EntityId(1), config.Seed, rng.NextInt(-2, 3));
 
         return new WorldState(
             Tick: 0,
