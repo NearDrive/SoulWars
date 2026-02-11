@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
-using System.Diagnostics;
 using Game.BotRunner;
 using Game.Core;
 using Game.Protocol;
@@ -22,7 +22,7 @@ public sealed class ServerHostIntegrationTests
         await using HeadlessClient client = new();
         await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);
 
-        Welcome welcome = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
+        _ = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
         client.Send(new Hello("test-client"));
         client.EnterZone(1);
 
@@ -31,9 +31,8 @@ public sealed class ServerHostIntegrationTests
             runtime,
             client,
             TimeSpan.FromSeconds(2),
-            s => s.Entities.Any(entity => entity.EntityId == ack.EntityId));
+            s => s.Entities.Any(e => e.EntityId == ack.EntityId));
 
-        Assert.NotNull(welcome);
         Assert.Equal(1, ack.ZoneId);
         Assert.Equal(1, snapshot.ZoneId);
     }
@@ -56,7 +55,7 @@ public sealed class ServerHostIntegrationTests
 
         EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
         Snapshot firstSnapshot = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2), s => s.Entities.Any(e => e.EntityId == ack.EntityId));
-        SnapshotEntity firstEntity = firstSnapshot.Entities.Single(entity => entity.EntityId == ack.EntityId);
+        SnapshotEntity firstEntity = firstSnapshot.Entities.Single(e => e.EntityId == ack.EntityId);
 
         int previousX = firstEntity.PosXRaw;
         bool moved = false;
@@ -67,14 +66,14 @@ public sealed class ServerHostIntegrationTests
             client.SendInput(firstSnapshot.Tick + i + 1, 1, 0);
             runtime.StepOnce();
 
-            Snapshot snapshot = await WaitForMessageAsync<Snapshot>(
+            Snapshot snap = await WaitForMessageAsync<Snapshot>(
                 runtime,
                 client,
                 TimeSpan.FromSeconds(2),
-                s => s.Entities.Any(entity => entity.EntityId == ack.EntityId),
+                s => s.Entities.Any(e => e.EntityId == ack.EntityId),
                 advanceServer: false);
-            SnapshotEntity entity = snapshot.Entities.Single(e => e.EntityId == ack.EntityId);
 
+            SnapshotEntity entity = snap.Entities.Single(e => e.EntityId == ack.EntityId);
             Assert.InRange(entity.PosXRaw, 0, mapMaxRawX);
             if (entity.PosXRaw > previousX)
             {
@@ -84,7 +83,7 @@ public sealed class ServerHostIntegrationTests
             previousX = entity.PosXRaw;
         }
 
-        Assert.True(moved, "Expected at least one positive X movement in snapshots.");
+        Assert.True(moved);
     }
 
     [Fact]
@@ -112,10 +111,8 @@ public sealed class ServerHostIntegrationTests
         _ = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
         _ = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2));
 
-        using IncrementalHash checksum = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        int lastInputTick = firstInputTick + inputCount - 1;
         Random deterministic = new(999);
-
-        Dictionary<int, Snapshot> snapshotsByTick = await CollectSnapshotsForTickRangeAsync(
             runtime,
             client,
             firstInputTick,
@@ -123,11 +120,13 @@ public sealed class ServerHostIntegrationTests
             TimeSpan.FromSeconds(2));
 
         Assert.Equal(inputCount, snapshotsByTick.Count);
+
+        using IncrementalHash checksum = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         for (int tick = firstInputTick; tick <= lastInputTick; tick++)
         {
-            Snapshot snapshot;
-            bool found = snapshotsByTick.TryGetValue(tick, out snapshot);
-            Assert.True(found, $"Missing snapshot for tick {tick}.");
+            bool ok = snapshotsByTick.TryGetValue(tick, out Snapshot? snapshot);
+            Assert.True(ok, $"Missing snapshot for tick {tick}.");
+            Assert.NotNull(snapshot);
             AppendSnapshot(checksum, snapshot);
         }
 
@@ -141,26 +140,20 @@ public sealed class ServerHostIntegrationTests
         int lastTick,
         TimeSpan timeout)
     {
-        Dictionary<int, Snapshot> snapshotsByTick = new Dictionary<int, Snapshot>();
+        Dictionary<int, Snapshot> snapshotsByTick = new();
         Stopwatch sw = Stopwatch.StartNew();
 
         while (sw.Elapsed < timeout && snapshotsByTick.Count < (lastTick - firstTick + 1))
         {
 
-            IServerMessage? message;
-            while (client.TryRead(out message))
-                Snapshot? snapshot = message as Snapshot;
-                if (snapshot is null)
+            while (client.TryRead(out IServerMessage? message))
+                if (message is Snapshot snapshot)
                 {
-                    continue;
+                    if (snapshot.Tick >= firstTick && snapshot.Tick <= lastTick)
+                    {
+                        snapshotsByTick[snapshot.Tick] = snapshot;
+                    }
                 }
-
-                if (snapshot.Tick < firstTick || snapshot.Tick > lastTick)
-                {
-                    continue;
-                }
-
-                snapshotsByTick[snapshot.Tick] = snapshot;
             }
 
             await Task.Yield();
@@ -199,20 +192,12 @@ public sealed class ServerHostIntegrationTests
 
         while (sw.Elapsed < timeout)
         {
-            T? found = null;
-            bool matched = false;
-            DrainMessages(client, message =>
+            while (client.TryRead(out IServerMessage? message))
             {
-                if (!matched && message is T typed && (predicate is null || predicate(typed)))
+                if (message is T typed && (predicate is null || predicate(typed)))
                 {
-                    found = typed;
-                    matched = true;
+                    return typed;
                 }
-            });
-
-            if (found is not null)
-            {
-                return found;
             }
 
             if (advanceServer)
@@ -224,16 +209,5 @@ public sealed class ServerHostIntegrationTests
         }
 
         throw new Xunit.Sdk.XunitException($"No message of type {typeof(T).Name} received within {timeout.TotalMilliseconds}ms.");
-    }
-
-    private static void DrainMessages(HeadlessClient client, Action<IServerMessage> onMessage)
-    {
-        while (client.TryRead(out IServerMessage? message))
-        {
-            if (message is not null)
-            {
-                onMessage(message);
-            }
-        }
     }
 }
