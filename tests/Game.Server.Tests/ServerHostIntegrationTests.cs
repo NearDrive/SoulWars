@@ -111,8 +111,19 @@ public sealed class ServerHostIntegrationTests
         _ = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
         _ = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2));
 
+        const int firstInputTick = 100;
+        const int inputCount = 30;
         int lastInputTick = firstInputTick + inputCount - 1;
+
         Random deterministic = new(999);
+        for (int i = 0; i < inputCount; i++)
+        {
+            sbyte moveX = (sbyte)deterministic.Next(-1, 2);
+            sbyte moveY = (sbyte)deterministic.Next(-1, 2);
+            client.SendInput(firstInputTick + i, moveX, moveY);
+        }
+
+        Dictionary<int, Snapshot> snapshotsByTick = await CollectSnapshotsForTickRangeAsync(
             runtime,
             client,
             firstInputTick,
@@ -124,11 +135,9 @@ public sealed class ServerHostIntegrationTests
         using IncrementalHash checksum = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         for (int tick = firstInputTick; tick <= lastInputTick; tick++)
         {
-            if (!snapshotsByTick.TryGetValue(tick, out Snapshot? snapshot) || snapshot is null)
-            {
-                throw new Xunit.Sdk.XunitException($"Missing snapshot for tick {tick}.");
-            }
-
+            bool ok = snapshotsByTick.TryGetValue(tick, out Snapshot? snapshot);
+            Assert.True(ok, $"Missing snapshot for tick {tick}.");
+            Assert.NotNull(snapshot);
             AppendSnapshot(checksum, snapshot);
         }
 
@@ -147,8 +156,10 @@ public sealed class ServerHostIntegrationTests
 
         while (sw.Elapsed < timeout && snapshotsByTick.Count < (lastTick - firstTick + 1))
         {
+            runtime.StepOnce();
 
             while (client.TryRead(out IServerMessage? message))
+            {
                 if (message is Snapshot snapshot)
                 {
                     if (snapshot.Tick >= firstTick && snapshot.Tick <= lastTick)
@@ -159,6 +170,8 @@ public sealed class ServerHostIntegrationTests
             }
 
             await Task.Yield();
+        }
+
         return snapshotsByTick;
     }
 
