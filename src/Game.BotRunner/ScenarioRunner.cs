@@ -20,7 +20,7 @@ public sealed class ScenarioRunner
 
         using ScenarioChecksumBuilder checksum = new();
         List<BotClient> clients = new(cfg.BotCount);
-        List<ReceivedSnapshot> snapshots = new();
+        Dictionary<(int BotIndex, int SnapshotTick), Snapshot> snapshots = new();
         ServerRuntime runtime = new();
 
         try
@@ -51,21 +51,27 @@ public sealed class ScenarioRunner
                 }
 
                 runtime.StepOnce();
-                DrainAll(clients, (index, msg) =>
+
+                bool expectsSnapshots = tick % cfg.SnapshotEveryTicks == 0;
+                do
                 {
-                    if (msg is Snapshot snapshot)
+                    DrainAll(clients, (index, msg) =>
                     {
-                        snapshots.Add(new ReceivedSnapshot(tick, index, snapshot));
-                    }
-                });
+                        if (msg is Snapshot snapshot)
+                        {
+                            snapshots[(index, snapshot.Tick)] = snapshot;
+                        }
+                    });
+                }
+                while (expectsSnapshots && !AllBotsHaveSnapshotForTick(clients, tick));
             }
 
-            foreach (ReceivedSnapshot received in snapshots
-                         .OrderBy(s => s.ScenarioTick)
-                         .ThenBy(s => s.BotIndex)
-                         .ThenBy(s => s.Snapshot.ZoneId))
+            foreach (((int botIndex, int snapshotTick), Snapshot snapshot) in snapshots
+                         .OrderBy(kvp => kvp.Key.SnapshotTick)
+                         .ThenBy(kvp => kvp.Key.BotIndex)
+                         .Select(kvp => (kvp.Key, kvp.Value)))
             {
-                checksum.AppendSnapshot(received.ScenarioTick, received.BotIndex, received.Snapshot);
+                checksum.AppendSnapshot(snapshotTick, botIndex, snapshot);
             }
 
             string finalChecksum = checksum.BuildHexLower();
@@ -142,5 +148,8 @@ public sealed class ScenarioRunner
         }
     }
 
-    private readonly record struct ReceivedSnapshot(int ScenarioTick, int BotIndex, Snapshot Snapshot);
+    private static bool AllBotsHaveSnapshotForTick(IReadOnlyList<BotClient> clients, int tick)
+    {
+        return clients.All(client => client.LastSnapshotTick >= tick);
+    }
 }

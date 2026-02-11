@@ -27,6 +27,8 @@ public sealed class BotClient : IAsyncDisposable
 
     public int SnapshotsReceived { get; private set; }
 
+    public int LastSnapshotTick { get; private set; }
+
     public async Task ConnectAndEnterAsync(string host, int port, CancellationToken ct)
     {
         await _client.ConnectAsync(host, port, ct).ConfigureAwait(false);
@@ -89,8 +91,9 @@ public sealed class BotClient : IAsyncDisposable
                 case EnterZoneAck ack:
                     EntityId = ack.EntityId;
                     break;
-                case Snapshot:
+                case Snapshot snapshot:
                     SnapshotsReceived++;
+                    LastSnapshotTick = Math.Max(LastSnapshotTick, snapshot.Tick);
                     break;
             }
 
