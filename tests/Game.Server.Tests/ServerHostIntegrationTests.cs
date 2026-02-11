@@ -124,9 +124,11 @@ public sealed class ServerHostIntegrationTests
         using IncrementalHash checksum = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         for (int tick = firstInputTick; tick <= lastInputTick; tick++)
         {
-            bool ok = snapshotsByTick.TryGetValue(tick, out Snapshot? snapshot);
-            Assert.True(ok, $"Missing snapshot for tick {tick}.");
-            Assert.NotNull(snapshot);
+            if (!snapshotsByTick.TryGetValue(tick, out Snapshot? snapshot) || snapshot is null)
+            {
+                throw new Xunit.Sdk.XunitException($"Missing snapshot for tick {tick}.");
+            }
+
             AppendSnapshot(checksum, snapshot);
         }
 
