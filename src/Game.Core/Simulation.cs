@@ -46,6 +46,12 @@ public static class Simulation
                 continue;
             }
 
+            if (command.Kind is WorldCommandKind.EnterZone)
+            {
+                updated = RemoveEntityFromOtherZones(updated, command.EntityId, command.ZoneId);
+                _ = updated.TryGetZone(command.ZoneId, out zone);
+            }
+
             ZoneState nextZone = command.Kind switch
             {
                 WorldCommandKind.EnterZone => ApplyEnterZone(config, zone, command),
@@ -58,6 +64,36 @@ public static class Simulation
         }
 
         _ = config.MaxSpeed;
+
+        return updated;
+    }
+
+    private static WorldState RemoveEntityFromOtherZones(WorldState state, EntityId entityId, ZoneId targetZoneId)
+    {
+        WorldState updated = state;
+
+        foreach (ZoneState zone in state.Zones)
+        {
+            if (zone.Id.Value == targetZoneId.Value)
+            {
+                continue;
+            }
+
+            if (!zone.Entities.Any(entity => entity.Id.Value == entityId.Value))
+            {
+                continue;
+            }
+
+            ZoneState cleanedZone = zone with
+            {
+                Entities = zone.Entities
+                    .Where(entity => entity.Id.Value != entityId.Value)
+                    .OrderBy(entity => entity.Id.Value)
+                    .ToImmutableArray()
+            };
+
+            updated = updated.WithZoneUpdated(cleanedZone);
+        }
 
         return updated;
     }
