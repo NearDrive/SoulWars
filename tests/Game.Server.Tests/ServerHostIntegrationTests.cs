@@ -71,7 +71,8 @@ public sealed class ServerHostIntegrationTests
                 runtime,
                 client,
                 TimeSpan.FromSeconds(2),
-                s => s.Entities.Any(entity => entity.EntityId == ack.EntityId));
+                s => s.Entities.Any(entity => entity.EntityId == ack.EntityId),
+                advanceServer: false);
             SnapshotEntity entity = snapshot.Entities.Single(e => e.EntityId == ack.EntityId);
 
             Assert.InRange(entity.PosXRaw, 0, mapMaxRawX);
@@ -122,7 +123,7 @@ public sealed class ServerHostIntegrationTests
             client.SendInput(i + 2, moveX, moveY);
             runtime.StepOnce();
 
-            Snapshot snapshot = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2));
+            Snapshot snapshot = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2), advanceServer: false);
             AppendSnapshot(checksum, snapshot);
         }
 
@@ -153,7 +154,8 @@ public sealed class ServerHostIntegrationTests
         ServerRuntime runtime,
         HeadlessClient client,
         TimeSpan timeout,
-        Func<T, bool>? predicate = null)
+        Func<T, bool>? predicate = null,
+        bool advanceServer = true)
         where T : class, IServerMessage
     {
         Stopwatch sw = Stopwatch.StartNew();
@@ -161,11 +163,13 @@ public sealed class ServerHostIntegrationTests
         while (sw.Elapsed < timeout)
         {
             T? found = null;
+            bool matched = false;
             DrainMessages(client, message =>
             {
-                if (message is T typed && (predicate is null || predicate(typed)))
+                if (!matched && message is T typed && (predicate is null || predicate(typed)))
                 {
                     found = typed;
+                    matched = true;
                 }
             });
 
@@ -174,7 +178,11 @@ public sealed class ServerHostIntegrationTests
                 return found;
             }
 
-            runtime.StepOnce();
+            if (advanceServer)
+            {
+                runtime.StepOnce();
+            }
+
             await Task.Yield();
         }
 
