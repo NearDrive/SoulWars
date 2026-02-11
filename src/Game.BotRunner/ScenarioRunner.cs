@@ -22,6 +22,7 @@ public sealed class ScenarioRunner
         List<BotClient> clients = new(cfg.BotCount);
         Dictionary<(int BotIndex, int SnapshotTick), Snapshot> snapshots = new();
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot = new();
+        int lastCommittedSnapshotTick = 0;
         ServerRuntime runtime = new();
 
         try
@@ -74,8 +75,23 @@ public sealed class ScenarioRunner
                     continue;
                 }
 
-                while (!AllBotsHaveSnapshotForTick(clients, pendingSnapshotsByBot, tick))
+                int maxDrainAttempts = Math.Max(32, cfg.BotCount * 8);
+                int attempts = 0;
+                int synchronizedTick;
+
+                while (!TryTakeSynchronizedSnapshotSetAfter(
+                           clients,
+                           pendingSnapshotsByBot,
+                           lastCommittedSnapshotTick,
+                           out synchronizedTick))
                 {
+                    if (attempts++ >= maxDrainAttempts)
+                    {
+                        throw new InvalidOperationException($"Unable to synchronize snapshots after tick {lastCommittedSnapshotTick} (loopTick={tick}).");
+                    }
+
+                    cts.Token.ThrowIfCancellationRequested();
+
                     DrainAll(clients, (index, msg) =>
                     {
                         if (msg is not Snapshot snapshot)
@@ -96,18 +112,26 @@ public sealed class ScenarioRunner
                 foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
                     SortedDictionary<int, Snapshot> pendingByTick = pendingSnapshotsByBot[client.BotIndex];
-                    snapshots[(client.BotIndex, tick)] = pendingByTick[tick];
-                    pendingByTick.Remove(tick);
+                    snapshots[(client.BotIndex, synchronizedTick)] = pendingByTick[synchronizedTick];
+                    pendingByTick.Remove(synchronizedTick);
                 }
 
-                while (TryTakeSynchronizedSnapshotSet(clients, pendingSnapshotsByBot, out int synchronizedTick))
+                lastCommittedSnapshotTick = synchronizedTick;
+
+                while (TryTakeSynchronizedSnapshotSetAfter(
+                           clients,
+                           pendingSnapshotsByBot,
+                           lastCommittedSnapshotTick,
+                           out int additionalSynchronizedTick))
                 {
                     foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                     {
                         SortedDictionary<int, Snapshot> pendingByTick = pendingSnapshotsByBot[client.BotIndex];
-                        snapshots[(client.BotIndex, synchronizedTick)] = pendingByTick[synchronizedTick];
-                        pendingByTick.Remove(synchronizedTick);
+                        snapshots[(client.BotIndex, additionalSynchronizedTick)] = pendingByTick[additionalSynchronizedTick];
+                        pendingByTick.Remove(additionalSynchronizedTick);
                     }
+
+                    lastCommittedSnapshotTick = additionalSynchronizedTick;
                 }
             }
 
@@ -147,8 +171,17 @@ public sealed class ScenarioRunner
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
             Task connectTask = client.ConnectAndEnterAsync("127.0.0.1", runtime.BoundPort, ct);
+            int maxConnectSteps = Math.Max(64, clients.Count * 32);
+            int connectSteps = 0;
+
             while (!connectTask.IsCompleted)
             {
+                if (connectSteps++ >= maxConnectSteps)
+                {
+                    throw new InvalidOperationException($"Bot {client.BotIndex} did not finish connect/enter handshake deterministically.");
+                }
+
+                ct.ThrowIfCancellationRequested();
                 runtime.StepOnce();
                 DrainAll(clients, (_, _) => { });
             }
@@ -193,9 +226,10 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static bool TryTakeSynchronizedSnapshotSet(
+    private static bool TryTakeSynchronizedSnapshotSetAfter(
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
+        int afterTick,
         out int snapshotTick)
     {
         snapshotTick = 0;
@@ -214,7 +248,7 @@ public sealed class ScenarioRunner
                     return new List<int>();
                 }
 
-                return pending.Keys.ToList();
+                return pending.Keys.Where(key => key > afterTick).ToList();
             })
             .ToArray();
 
@@ -234,27 +268,6 @@ public sealed class ScenarioRunner
         }
 
         snapshotTick = common.Min();
-        return true;
-    }
-
-    private static bool AllBotsHaveSnapshotForTick(
-        IReadOnlyList<BotClient> clients,
-        Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
-        int snapshotTick)
-    {
-        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
-        {
-            if (!pendingSnapshotsByBot.TryGetValue(client.BotIndex, out SortedDictionary<int, Snapshot>? pendingByTick))
-            {
-                return false;
-            }
-
-            if (!pendingByTick.ContainsKey(snapshotTick))
-            {
-                return false;
-            }
-        }
-
         return true;
     }
 }
