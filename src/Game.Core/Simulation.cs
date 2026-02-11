@@ -7,75 +7,162 @@ public static class Simulation
     public static WorldState CreateInitialState(SimulationConfig config)
     {
         TileMap map = WorldGen.Generate(config, config.MapWidth, config.MapHeight);
-        Vec2Fix spawn = FindSpawn(map, config.Radius);
 
-        EntityState player = new(
-            Id: new EntityId(1),
-            Pos: spawn,
-            Vel: Vec2Fix.Zero);
+        ZoneState localZone = new(
+            Id: new ZoneId(1),
+            Map: map,
+            Entities: ImmutableArray<EntityState>.Empty);
 
         return new WorldState(
             Tick: 0,
-            Map: map,
-            Entities: ImmutableArray.Create(player));
+            Zones: ImmutableArray.Create(localZone));
     }
 
     public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs)
     {
         ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(inputs);
 
-        ImmutableArray<PlayerInput> playerInputs = inputs.Players.IsDefault
-            ? ImmutableArray<PlayerInput>.Empty
-            : inputs.Players;
+        ImmutableArray<WorldCommand> commands = inputs.Commands.IsDefault
+            ? ImmutableArray<WorldCommand>.Empty
+            : inputs.Commands;
 
-        Dictionary<int, PlayerInput> inputsByEntityId = new();
-        foreach (PlayerInput input in playerInputs)
-        {
-            if (input.MoveX is < -1 or > 1)
-            {
-                throw new ArgumentOutOfRangeException(nameof(inputs), "MoveX must be in range [-1..1].");
-            }
-
-            if (input.MoveY is < -1 or > 1)
-            {
-                throw new ArgumentOutOfRangeException(nameof(inputs), "MoveY must be in range [-1..1].");
-            }
-
-            inputsByEntityId[input.EntityId.Value] = input;
-        }
-
-        ImmutableArray<EntityState> orderedEntities = state.Entities
-            .OrderBy(entity => entity.Id.Value)
+        ImmutableArray<(WorldCommand Command, int OriginalIndex)> ordered = commands
+            .Select((command, index) => (Command: command, OriginalIndex: index))
+            .OrderBy(item => item.Command.ZoneId.Value)
+            .ThenBy(item => item.Command.EntityId.Value)
+            .ThenBy(item => CommandPriority(item.Command.Kind))
+            .ThenBy(item => item.OriginalIndex)
             .ToImmutableArray();
 
-        ImmutableArray<EntityState>.Builder updatedEntities = ImmutableArray.CreateBuilder<EntityState>(orderedEntities.Length);
+        WorldState updated = state with { Tick = state.Tick + 1 };
 
-        foreach (EntityState entity in orderedEntities)
+        foreach ((WorldCommand command, _) in ordered)
         {
-            PlayerInput input = inputsByEntityId.TryGetValue(entity.Id.Value, out PlayerInput? mapped) && mapped is not null
-                ? mapped
-                : new PlayerInput(entity.Id, 0, 0);
+            ValidateCommand(command);
 
-            EntityState updated = Physics2D.Integrate(
-                entity,
-                input,
-                state.Map,
-                config.DtFix,
-                config.MoveSpeed,
-                config.Radius);
+            if (!updated.TryGetZone(command.ZoneId, out ZoneState zone))
+            {
+                continue;
+            }
 
-            updatedEntities.Add(updated);
+            ZoneState nextZone = command.Kind switch
+            {
+                WorldCommandKind.EnterZone => ApplyEnterZone(config, zone, command),
+                WorldCommandKind.LeaveZone => ApplyLeaveZone(zone, command),
+                WorldCommandKind.MoveIntent => ApplyMoveIntent(config, zone, command),
+                _ => zone
+            };
+
+            updated = updated.WithZoneUpdated(nextZone);
         }
 
         _ = config.MaxSpeed;
 
-        return new WorldState(
-            Tick: state.Tick + 1,
-            Map: state.Map,
-            Entities: updatedEntities
-                .ToImmutable()
+        return updated;
+    }
+
+    private static void ValidateCommand(WorldCommand command)
+    {
+        if (command.Kind is WorldCommandKind.MoveIntent)
+        {
+            if (command.MoveX is < -1 or > 1)
+            {
+                throw new ArgumentOutOfRangeException(nameof(command), "MoveX must be in range [-1..1].");
+            }
+
+            if (command.MoveY is < -1 or > 1)
+            {
+                throw new ArgumentOutOfRangeException(nameof(command), "MoveY must be in range [-1..1].");
+            }
+        }
+    }
+
+    private static int CommandPriority(WorldCommandKind kind) => kind switch
+    {
+        WorldCommandKind.EnterZone => 0,
+        WorldCommandKind.MoveIntent => 1,
+        WorldCommandKind.LeaveZone => 2,
+        _ => 3
+    };
+
+    private static ZoneState ApplyEnterZone(SimulationConfig config, ZoneState zone, WorldCommand command)
+    {
+        bool exists = zone.Entities.Any(entity => entity.Id.Value == command.EntityId.Value);
+        if (exists)
+        {
+            return zone;
+        }
+
+        Vec2Fix spawn = command.SpawnPos ?? FindSpawn(zone.Map, config.Radius);
+
+        EntityState entity = new(
+            Id: command.EntityId,
+            Pos: spawn,
+            Vel: Vec2Fix.Zero);
+
+        return zone with
+        {
+            Entities = zone.Entities
+                .Add(entity)
+                .OrderBy(e => e.Id.Value)
+                .ToImmutableArray()
+        };
+    }
+
+    private static ZoneState ApplyLeaveZone(ZoneState zone, WorldCommand command)
+    {
+        return zone with
+        {
+            Entities = zone.Entities
+                .Where(entity => entity.Id.Value != command.EntityId.Value)
                 .OrderBy(entity => entity.Id.Value)
-                .ToImmutableArray());
+                .ToImmutableArray()
+        };
+    }
+
+    private static ZoneState ApplyMoveIntent(SimulationConfig config, ZoneState zone, WorldCommand command)
+    {
+        int entityIndex = -1;
+        for (int i = 0; i < zone.Entities.Length; i++)
+        {
+            if (zone.Entities[i].Id.Value == command.EntityId.Value)
+            {
+                entityIndex = i;
+                break;
+            }
+        }
+
+        if (entityIndex < 0)
+        {
+            return zone;
+        }
+
+        EntityState entity = zone.Entities[entityIndex];
+        PlayerInput playerInput = new(entity.Id, command.MoveX, command.MoveY);
+
+        EntityState updated = Physics2D.Integrate(
+            entity,
+            playerInput,
+            zone.Map,
+            config.DtFix,
+            config.MoveSpeed,
+            config.Radius);
+
+        ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(zone.Entities.Length);
+
+        for (int i = 0; i < zone.Entities.Length; i++)
+        {
+            builder.Add(i == entityIndex ? updated : zone.Entities[i]);
+        }
+
+        return zone with
+        {
+            Entities = builder
+                .ToImmutable()
+                .OrderBy(e => e.Id.Value)
+                .ToImmutableArray()
+        };
     }
 
     private static Vec2Fix FindSpawn(TileMap map, Fix32 radius)

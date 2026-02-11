@@ -13,26 +13,37 @@ public static class StateChecksum
         using BinaryWriter writer = new(stream);
 
         writer.Write(state.Tick);
-        writer.Write(state.Map.Width);
-        writer.Write(state.Map.Height);
 
-        byte[] mapHash = ComputeMapHash(state.Map);
-        writer.Write(mapHash.Length);
-        writer.Write(mapHash);
-
-        ImmutableArray<EntityState> orderedEntities = state.Entities
-            .OrderBy(entity => entity.Id.Value)
+        ImmutableArray<ZoneState> orderedZones = state.Zones
+            .OrderBy(zone => zone.Id.Value)
             .ToImmutableArray();
 
-        writer.Write(orderedEntities.Length);
+        writer.Write(orderedZones.Length);
 
-        foreach (EntityState entity in orderedEntities)
+        foreach (ZoneState zone in orderedZones)
         {
-            writer.Write(entity.Id.Value);
-            writer.Write(entity.Pos.X.Raw);
-            writer.Write(entity.Pos.Y.Raw);
-            writer.Write(entity.Vel.X.Raw);
-            writer.Write(entity.Vel.Y.Raw);
+            writer.Write(zone.Id.Value);
+            writer.Write(zone.Map.Width);
+            writer.Write(zone.Map.Height);
+
+            byte[] mapHash = ComputeMapHash(zone.Map);
+            writer.Write(mapHash.Length);
+            writer.Write(mapHash);
+
+            ImmutableArray<EntityState> orderedEntities = zone.Entities
+                .OrderBy(entity => entity.Id.Value)
+                .ToImmutableArray();
+
+            writer.Write(orderedEntities.Length);
+
+            foreach (EntityState entity in orderedEntities)
+            {
+                writer.Write(entity.Id.Value);
+                writer.Write(entity.Pos.X.Raw);
+                writer.Write(entity.Pos.Y.Raw);
+                writer.Write(entity.Vel.X.Raw);
+                writer.Write(entity.Vel.Y.Raw);
+            }
         }
 
         writer.Flush();
