@@ -46,18 +46,18 @@ public static class Simulation
 
         foreach (EntityState entity in orderedEntities)
         {
-            if (inputsByEntityId.TryGetValue(entity.Id.Value, out PlayerInput input))
+            if (inputsByEntityId.TryGetValue(entity.Id.Value, out PlayerInput? input) && input is not null)
             {
                 updatedEntities.Add(entity with
                 {
                     X = entity.X + input.Dx,
                     Y = entity.Y + input.Dy
                 });
+
+                continue;
             }
-            else
-            {
-                updatedEntities.Add(entity);
-            }
+
+            updatedEntities.Add(entity);
         }
 
         _ = config;
