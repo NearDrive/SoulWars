@@ -101,7 +101,17 @@ public sealed class ServerHost
                     break;
                 case InputCommand inputCommand:
                     int normalizedTick = Math.Max(targetTick, inputCommand.Tick);
-                    session.PendingInputs.Add(new PendingInput(normalizedTick, session.SessionId, inputCommand.MoveX, inputCommand.MoveY));
+                    PendingInput pendingInput = new(normalizedTick, session.SessionId, inputCommand.MoveX, inputCommand.MoveY);
+                    int duplicateIndex = session.PendingInputs.FindIndex(existing => existing.Tick == normalizedTick);
+                    if (duplicateIndex >= 0)
+                    {
+                        session.PendingInputs[duplicateIndex] = pendingInput;
+                    }
+                    else
+                    {
+                        session.PendingInputs.Add(pendingInput);
+                    }
+
                     break;
                 case LeaveZoneRequest leaveZoneRequest:
                     HandleLeaveZone(session, leaveZoneRequest, worldCommands);
@@ -112,6 +122,15 @@ public sealed class ServerHost
 
     private void HandleEnterZone(SessionState session, EnterZoneRequest request, List<WorldCommand> worldCommands)
     {
+        ZoneId zoneId = new(request.ZoneId);
+        if (!_world.TryGetZone(zoneId, out _))
+        {
+            session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Error(
+                Code: "UnknownZone",
+                Message: $"Zone {request.ZoneId} does not exist.")));
+            return;
+        }
+
         if (session.EntityId is null)
         {
             session.EntityId = _nextEntityId++;
@@ -122,7 +141,7 @@ public sealed class ServerHost
         worldCommands.Add(new WorldCommand(
             Kind: WorldCommandKind.EnterZone,
             EntityId: new EntityId(session.EntityId.Value),
-            ZoneId: new ZoneId(request.ZoneId)));
+            ZoneId: zoneId));
 
         session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new EnterZoneAck(request.ZoneId, session.EntityId.Value)));
     }
