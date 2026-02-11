@@ -17,3 +17,9 @@ Or run:
 ```
 
 CI is the source of truth.
+
+## Deterministic simulation note (PR-01)
+
+PR-01 keeps positions as integer coordinates to avoid floating-point drift. PR-02 is expected to introduce `Vec2` float movement and collision logic.
+
+State checksums are computed from a stable binary serialization and do not depend on JSON formatting.
