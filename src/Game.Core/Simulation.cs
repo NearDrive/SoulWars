@@ -52,7 +52,7 @@ public static class Simulation
 
         foreach (EntityState entity in orderedEntities)
         {
-            PlayerInput input = inputsByEntityId.TryGetValue(entity.Id.Value, out PlayerInput mapped)
+            PlayerInput input = inputsByEntityId.TryGetValue(entity.Id.Value, out PlayerInput? mapped) && mapped is not null
                 ? mapped
                 : new PlayerInput(entity.Id, 0, 0);
 

@@ -33,6 +33,11 @@ public readonly record struct Fix32(int Raw) : IComparable<Fix32>
 
     public int CompareTo(Fix32 other) => Raw.CompareTo(other.Raw);
 
+    public static bool operator <(Fix32 left, Fix32 right) => left.Raw < right.Raw;
+    public static bool operator >(Fix32 left, Fix32 right) => left.Raw > right.Raw;
+    public static bool operator <=(Fix32 left, Fix32 right) => left.Raw <= right.Raw;
+    public static bool operator >=(Fix32 left, Fix32 right) => left.Raw >= right.Raw;
+
     public static Fix32 operator +(Fix32 left, Fix32 right) => new(checked(left.Raw + right.Raw));
     public static Fix32 operator -(Fix32 left, Fix32 right) => new(checked(left.Raw - right.Raw));
     public static Fix32 operator -(Fix32 value) => new(checked(-value.Raw));
