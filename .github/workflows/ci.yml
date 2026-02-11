@@ -20,6 +20,35 @@ jobs:
       - name: Restore
         run: dotnet restore
 
+      - name: Verify integration test file integrity (pre-build)
+        run: |
+          echo "HEAD=$(git rev-parse HEAD)"
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/Game.Server.Tests/ServerHostIntegrationTests.cs")
+          text = path.read_text(encoding="utf-8")
+
+          required_tokens = [
+              "const int inputCount = 30;",
+              "client.SendInput(previousTick + 1, moveX, moveY);",
+              "AppendSnapshot(checksum, currentSnapshot with { Tick = i + 1 });",
+              "Assert.True(moved);",
+          ]
+
+          missing = [token for token in required_tokens if token not in text]
+          if missing:
+              print(f"{path} appears corrupted/truncated. Missing tokens:")
+              for token in missing:
+                  print(f" - {token}")
+              print("\nSuggested fix:")
+              print(" - Restore tests/Game.Server.Tests/ServerHostIntegrationTests.cs from a known-good commit and push again.")
+              print(" - Example: git checkout <good_sha> -- tests/Game.Server.Tests/ServerHostIntegrationTests.cs")
+              raise SystemExit(1)
+
+          print(f"Verified {path} integrity checks ({len(required_tokens)} tokens).")
+          PY
+
       - name: Build
         run: dotnet build -c Release --no-restore
 
