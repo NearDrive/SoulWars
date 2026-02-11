@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Net;
 using System.Security.Cryptography;
+using System.Diagnostics;
 using Game.BotRunner;
 using Game.Core;
 using Game.Protocol;
@@ -20,36 +21,21 @@ public sealed class ServerHostIntegrationTests
 
         await using HeadlessClient client = new();
         await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);
+
+        Welcome welcome = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
         client.Send(new Hello("test-client"));
         client.EnterZone(1);
 
-        Welcome? welcome = null;
-        EnterZoneAck? ack = null;
-        Snapshot? snapshot = null;
-
-        for (int i = 0; i < 20 && (welcome is null || ack is null || snapshot is null); i++)
-        {
-            runtime.StepOnce();
-            DrainMessages(client, message =>
-            {
-                welcome ??= message as Welcome;
-                ack ??= message as EnterZoneAck;
-
-                if (message is Snapshot snap && ack is not null)
-                {
-                    if (snap.Entities.Any(entity => entity.EntityId == ack.EntityId))
-                    {
-                        snapshot ??= snap;
-                    }
-                }
-            });
-        }
+        EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
+        Snapshot snapshot = await WaitForMessageAsync<Snapshot>(
+            runtime,
+            client,
+            TimeSpan.FromSeconds(2),
+            s => s.Entities.Any(entity => entity.EntityId == ack.EntityId));
 
         Assert.NotNull(welcome);
-        Assert.NotNull(ack);
-        Assert.NotNull(snapshot);
-        Assert.Equal(1, ack!.ZoneId);
-        Assert.Equal(1, snapshot!.ZoneId);
+        Assert.Equal(1, ack.ZoneId);
+        Assert.Equal(1, snapshot.ZoneId);
     }
 
     [Fact]
@@ -63,11 +49,13 @@ public sealed class ServerHostIntegrationTests
 
         await using HeadlessClient client = new();
         await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);
+
+        _ = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
         client.Send(new Hello("test-client"));
         client.EnterZone(1);
 
-        EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, 20);
-        Snapshot firstSnapshot = await WaitForMessageAsync<Snapshot>(runtime, client, 20, s => s.Entities.Any(e => e.EntityId == ack.EntityId));
+        EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
+        Snapshot firstSnapshot = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2), s => s.Entities.Any(e => e.EntityId == ack.EntityId));
         SnapshotEntity firstEntity = firstSnapshot.Entities.Single(entity => entity.EntityId == ack.EntityId);
 
         int previousX = firstEntity.PosXRaw;
@@ -79,7 +67,11 @@ public sealed class ServerHostIntegrationTests
             client.SendInput(firstSnapshot.Tick + i + 1, 1, 0);
             runtime.StepOnce();
 
-            Snapshot snapshot = ReadLatestSnapshotForEntity(client, ack.EntityId);
+            Snapshot snapshot = await WaitForMessageAsync<Snapshot>(
+                runtime,
+                client,
+                TimeSpan.FromSeconds(2),
+                s => s.Entities.Any(entity => entity.EntityId == ack.EntityId));
             SnapshotEntity entity = snapshot.Entities.Single(e => e.EntityId == ack.EntityId);
 
             Assert.InRange(entity.PosXRaw, 0, mapMaxRawX);
@@ -111,11 +103,13 @@ public sealed class ServerHostIntegrationTests
 
         await using HeadlessClient client = new();
         await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);
+
+        _ = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
         client.Send(new Hello("determinism-client"));
         client.EnterZone(1);
 
-        _ = await WaitForMessageAsync<EnterZoneAck>(runtime, client, 20);
-        _ = await WaitForMessageAsync<Snapshot>(runtime, client, 20);
+        _ = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
+        _ = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2));
 
         using IncrementalHash checksum = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         Random deterministic = new(999);
@@ -128,7 +122,7 @@ public sealed class ServerHostIntegrationTests
             client.SendInput(i + 2, moveX, moveY);
             runtime.StepOnce();
 
-            Snapshot snapshot = ReadLatestSnapshot(client);
+            Snapshot snapshot = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2));
             AppendSnapshot(checksum, snapshot);
         }
 
@@ -155,41 +149,17 @@ public sealed class ServerHostIntegrationTests
         }
     }
 
-    private static Snapshot ReadLatestSnapshotForEntity(HeadlessClient client, int entityId)
-    {
-        Snapshot? latest = null;
-        DrainMessages(client, msg =>
-        {
-            if (msg is Snapshot snapshot && snapshot.Entities.Any(e => e.EntityId == entityId))
-            {
-                latest = snapshot;
-            }
-        });
-
-        return latest ?? throw new Xunit.Sdk.XunitException("No snapshot received for tracked entity.");
-    }
-
-    private static Snapshot ReadLatestSnapshot(HeadlessClient client)
-    {
-        Snapshot? latest = null;
-        DrainMessages(client, msg =>
-        {
-            if (msg is Snapshot snapshot)
-            {
-                latest = snapshot;
-            }
-        });
-
-        return latest ?? throw new Xunit.Sdk.XunitException("No snapshot available.");
-    }
-
-    private static async Task<T> WaitForMessageAsync<T>(ServerRuntime runtime, HeadlessClient client, int maxTicks, Func<T, bool>? predicate = null)
+    private static async Task<T> WaitForMessageAsync<T>(
+        ServerRuntime runtime,
+        HeadlessClient client,
+        TimeSpan timeout,
+        Func<T, bool>? predicate = null)
         where T : class, IServerMessage
     {
-        for (int i = 0; i < maxTicks; i++)
-        {
-            runtime.StepOnce();
+        Stopwatch sw = Stopwatch.StartNew();
 
+        while (sw.Elapsed < timeout)
+        {
             T? found = null;
             DrainMessages(client, message =>
             {
@@ -204,10 +174,11 @@ public sealed class ServerHostIntegrationTests
                 return found;
             }
 
+            runtime.StepOnce();
             await Task.Yield();
         }
 
-        throw new Xunit.Sdk.XunitException($"No message of type {typeof(T).Name} received within {maxTicks} ticks.");
+        throw new Xunit.Sdk.XunitException($"No message of type {typeof(T).Name} received within {timeout.TotalMilliseconds}ms.");
     }
 
     private static void DrainMessages(HeadlessClient client, Action<IServerMessage> onMessage)
