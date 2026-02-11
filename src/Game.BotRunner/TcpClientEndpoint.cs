@@ -10,13 +10,11 @@ public sealed class TcpClientEndpoint : IAsyncDisposable
 
     private readonly TcpClient _client = new();
     private readonly ConcurrentQueue<byte[]> _inbound = new();
-    private readonly ConcurrentQueue<byte[]> _outbound = new();
-    private readonly SemaphoreSlim _outboundSignal = new(0);
     private readonly CancellationTokenSource _cts = new();
+    private readonly object _writeGate = new();
 
     private NetworkStream? _stream;
     private Task? _readerTask;
-    private Task? _writerTask;
 
     public async Task ConnectAsync(string host, int port, CancellationToken ct)
     {
@@ -24,20 +22,36 @@ public sealed class TcpClientEndpoint : IAsyncDisposable
         _stream = _client.GetStream();
 
         _readerTask = Task.Run(ReadLoopAsync);
-        _writerTask = Task.Run(WriteLoopAsync);
     }
 
     public void EnqueueToServer(byte[] payload)
     {
         ArgumentNullException.ThrowIfNull(payload);
 
-        if (_cts.IsCancellationRequested)
+        if (_cts.IsCancellationRequested || _stream is null)
         {
             return;
         }
 
-        _outbound.Enqueue(payload);
-        _outboundSignal.Release();
+        byte[] framePrefix = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(framePrefix, payload.Length);
+
+        try
+        {
+            lock (_writeGate)
+            {
+                _stream.Write(framePrefix);
+                _stream.Write(payload);
+            }
+        }
+        catch (IOException)
+        {
+            Close();
+        }
+        catch (ObjectDisposedException)
+        {
+            Close();
+        }
     }
 
     public bool TryDequeueFromServer(out byte[] payload) => _inbound.TryDequeue(out payload!);
@@ -57,21 +71,19 @@ public sealed class TcpClientEndpoint : IAsyncDisposable
         catch
         {
         }
-
-        _outboundSignal.Release();
     }
 
     public async ValueTask DisposeAsync()
     {
         Close();
-        if (_readerTask is not null && _writerTask is not null)
+
+        if (_readerTask is not null)
         {
-            await Task.WhenAll(_readerTask, _writerTask).ConfigureAwait(false);
+            await _readerTask.ConfigureAwait(false);
         }
 
         _stream?.Dispose();
         _client.Dispose();
-        _outboundSignal.Dispose();
         _cts.Dispose();
     }
 
@@ -97,42 +109,6 @@ public sealed class TcpClientEndpoint : IAsyncDisposable
                 byte[] payload = new byte[length];
                 await ReadExactlyAsync(_stream, payload, _cts.Token).ConfigureAwait(false);
                 _inbound.Enqueue(payload);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (IOException)
-        {
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-        finally
-        {
-            Close();
-        }
-    }
-
-    private async Task WriteLoopAsync()
-    {
-        if (_stream is null)
-        {
-            return;
-        }
-
-        byte[] framePrefix = new byte[4];
-        try
-        {
-            while (!_cts.IsCancellationRequested)
-            {
-                await _outboundSignal.WaitAsync(_cts.Token).ConfigureAwait(false);
-                while (_outbound.TryDequeue(out byte[]? payload))
-                {
-                    BinaryPrimitives.WriteInt32LittleEndian(framePrefix, payload.Length);
-                    await _stream.WriteAsync(framePrefix, _cts.Token).ConfigureAwait(false);
-                    await _stream.WriteAsync(payload, _cts.Token).ConfigureAwait(false);
-                }
             }
         }
         catch (OperationCanceledException)
