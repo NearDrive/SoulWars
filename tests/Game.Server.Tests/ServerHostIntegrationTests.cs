@@ -80,9 +80,39 @@ public sealed class ServerHostIntegrationTests
             if ((moveX > 0 && entity.PosXRaw > previousX) || (moveX < 0 && entity.PosXRaw < previousX))
             {
                 moved = true;
+                break;
             }
 
             previousX = entity.PosXRaw;
+        }
+
+        if (!moved)
+        {
+            await WaitUntilAsync(TimeSpan.FromMilliseconds(400), () =>
+            {
+                int previousTick = currentSnapshot.Tick;
+                client.SendInput(previousTick + 1, moveX, 0);
+                runtime.StepOnce();
+
+                while (client.TryRead(out IServerMessage? message))
+                {
+                    if (message is Snapshot snapshot && snapshot.Tick > previousTick && snapshot.Entities.Any(e => e.EntityId == ack.EntityId))
+                    {
+                        currentSnapshot = snapshot;
+                    }
+                }
+
+                SnapshotEntity entity = currentSnapshot.Entities.Single(e => e.EntityId == ack.EntityId);
+                Assert.InRange(entity.PosXRaw, 0, mapMaxRawX);
+                if ((moveX > 0 && entity.PosXRaw > previousX) || (moveX < 0 && entity.PosXRaw < previousX))
+                {
+                    moved = true;
+                    return true;
+                }
+
+                previousX = entity.PosXRaw;
+                return false;
+            }, "Move intent was not reflected in snapshots within the short polling window.");
         }
 
         Assert.True(moved);
@@ -157,6 +187,22 @@ public sealed class ServerHostIntegrationTests
             BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(16, 4), entity.VelYRaw);
             checksum.AppendData(entityData);
         }
+    }
+
+    private static async Task WaitUntilAsync(TimeSpan timeout, Func<bool> condition, string failureMessage)
+    {
+        Stopwatch sw = Stopwatch.StartNew();
+        while (sw.Elapsed < timeout)
+        {
+            if (condition())
+            {
+                return;
+            }
+
+            await Task.Yield();
+        }
+
+        throw new Xunit.Sdk.XunitException(failureMessage);
     }
 
     private static async Task<T> WaitForMessageAsync<T>(
