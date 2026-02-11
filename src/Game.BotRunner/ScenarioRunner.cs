@@ -55,17 +55,17 @@ public sealed class ScenarioRunner
                 {
                     if (msg is Snapshot snapshot)
                     {
-                        snapshots.Add(new ReceivedSnapshot(index, snapshot));
+                        snapshots.Add(new ReceivedSnapshot(tick, index, snapshot));
                     }
                 });
             }
 
             foreach (ReceivedSnapshot received in snapshots
-                         .OrderBy(s => s.Snapshot.Tick)
+                         .OrderBy(s => s.ScenarioTick)
                          .ThenBy(s => s.BotIndex)
                          .ThenBy(s => s.Snapshot.ZoneId))
             {
-                checksum.AppendSnapshot(received.BotIndex, received.Snapshot);
+                checksum.AppendSnapshot(received.ScenarioTick, received.BotIndex, received.Snapshot);
             }
 
             string finalChecksum = checksum.BuildHexLower();
@@ -142,5 +142,5 @@ public sealed class ScenarioRunner
         }
     }
 
-    private readonly record struct ReceivedSnapshot(int BotIndex, Snapshot Snapshot);
+    private readonly record struct ReceivedSnapshot(int ScenarioTick, int BotIndex, Snapshot Snapshot);
 }

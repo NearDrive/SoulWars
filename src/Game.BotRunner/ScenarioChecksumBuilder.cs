@@ -8,12 +8,12 @@ public sealed class ScenarioChecksumBuilder : IDisposable
 {
     private readonly IncrementalHash _hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 
-    public void AppendSnapshot(int recipientIndex, Snapshot snapshot)
+    public void AppendSnapshot(int scenarioTick, int recipientIndex, Snapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
         byte[] header = new byte[16];
-        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0, 4), snapshot.Tick);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0, 4), scenarioTick);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(4, 4), snapshot.ZoneId);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(8, 4), recipientIndex);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(12, 4), snapshot.Entities.Length);
