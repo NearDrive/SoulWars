@@ -10,7 +10,7 @@ public sealed class SimulationDeterminismTests
     public void Determinism_SameSeedSameInputs_SameChecksum()
     {
         const int tickCount = 200;
-        SimulationConfig config = new(seed: 123, TickHz: 20, Dt: 0.05f);
+        SimulationConfig config = new(Seed: 123, TickHz: 20, Dt: 0.05f);
 
         string checksumA = RunSimulation(config, tickCount);
         string checksumB = RunSimulation(config, tickCount);
@@ -22,8 +22,8 @@ public sealed class SimulationDeterminismTests
     public void Determinism_DifferentSeed_DifferentChecksum()
     {
         const int tickCount = 200;
-        SimulationConfig configA = new(seed: 123, TickHz: 20, Dt: 0.05f);
-        SimulationConfig configB = new(seed: 124, TickHz: 20, Dt: 0.05f);
+        SimulationConfig configA = new(Seed: 123, TickHz: 20, Dt: 0.05f);
+        SimulationConfig configB = new(Seed: 124, TickHz: 20, Dt: 0.05f);
 
         string checksumA = RunSimulation(configA, tickCount);
         string checksumB = RunSimulation(configB, tickCount);
