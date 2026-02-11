@@ -15,5 +15,6 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Game.Server/Game.Server.csproj" />
+    <ProjectReference Include="../../src/Game.BotRunner/Game.BotRunner.csproj" />
   </ItemGroup>
 </Project>

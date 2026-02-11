@@ -26,7 +26,7 @@ public sealed class ServerHost
         _world = Simulation.CreateInitialState(_simulationConfig);
     }
 
-    public SessionId Connect(InMemoryEndpoint endpoint)
+    public SessionId Connect(IServerEndpoint endpoint)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
@@ -213,7 +213,7 @@ public sealed class ServerHost
 
     private sealed class SessionState
     {
-        public SessionState(SessionId sessionId, InMemoryEndpoint endpoint)
+        public SessionState(SessionId sessionId, IServerEndpoint endpoint)
         {
             SessionId = sessionId;
             Endpoint = endpoint;
@@ -221,7 +221,7 @@ public sealed class ServerHost
 
         public SessionId SessionId { get; }
 
-        public InMemoryEndpoint Endpoint { get; }
+        public IServerEndpoint Endpoint { get; }
 
         public int? EntityId { get; set; }
 

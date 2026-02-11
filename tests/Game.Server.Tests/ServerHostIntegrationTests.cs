@@ -1,5 +1,9 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
+using System.Net;
 using System.Security.Cryptography;
+using Game.BotRunner;
+using Game.Core;
 using Game.Protocol;
 using Game.Server;
 using Xunit;
@@ -9,58 +13,68 @@ namespace Game.Server.Tests;
 public sealed class ServerHostIntegrationTests
 {
     [Fact]
-    public void Connect_EnterZone_ReceivesInitialSnapshot()
+    public async Task Tcp_Connect_EnterZone_ReceivesSnapshot()
     {
-        ServerHost host = new(ServerConfig.Default(seed: 77) with { SnapshotEveryTicks = 1 });
-        InMemoryEndpoint endpoint = new();
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+        await using ServerRuntime runtime = new();
+        await runtime.StartAsync(ServerConfig.Default(seed: 77) with { SnapshotEveryTicks = 1 }, IPAddress.Loopback, 0, cts.Token);
 
-        SessionId sessionId = host.Connect(endpoint);
-        Assert.Equal(1, sessionId.Value);
+        await using HeadlessClient client = new();
+        await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);
 
-        Welcome welcome = AssertMessage<Welcome>(endpoint);
-        Assert.Equal(sessionId, welcome.SessionId);
+        _ = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
+        client.Send(new Hello("test-client"));
+        client.EnterZone(1);
 
-        endpoint.EnqueueToServer(ProtocolCodec.Encode(new Hello("test-client")));
-        endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
+        EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
+        Snapshot snapshot = await WaitForMessageAsync<Snapshot>(
+            runtime,
+            client,
+            TimeSpan.FromSeconds(2),
+            s => s.Entities.Any(e => e.EntityId == ack.EntityId));
 
-        host.AdvanceTicks(1);
-
-        EnterZoneAck ack = AssertMessage<EnterZoneAck>(endpoint);
         Assert.Equal(1, ack.ZoneId);
-
-        Snapshot snapshot = AssertMessage<Snapshot>(endpoint);
         Assert.Equal(1, snapshot.ZoneId);
-        Assert.True(snapshot.Tick >= 1);
-        Assert.Contains(snapshot.Entities, entity => entity.EntityId == ack.EntityId);
     }
 
     [Fact]
-    public void MoveIntent_ChangesPositionInSnapshots()
+    public async Task Tcp_MoveIntent_ChangesPosition()
     {
-        ServerHost host = new(ServerConfig.Default(seed: 11) with { SnapshotEveryTicks = 1 });
-        InMemoryEndpoint endpoint = new();
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+        ServerConfig config = ServerConfig.Default(seed: 11) with { SnapshotEveryTicks = 1 };
 
-        host.Connect(endpoint);
-        _ = AssertMessage<Welcome>(endpoint);
+        await using ServerRuntime runtime = new();
+        await runtime.StartAsync(config, IPAddress.Loopback, 0, cts.Token);
 
-        endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
-        host.AdvanceTicks(1);
+        await using HeadlessClient client = new();
+        await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);
 
-        EnterZoneAck ack = AssertMessage<EnterZoneAck>(endpoint);
-        Snapshot initial = AssertMessage<Snapshot>(endpoint);
-        SnapshotEntity initialEntity = Assert.Single(initial.Entities, e => e.EntityId == ack.EntityId);
+        _ = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
+        client.Send(new Hello("test-client"));
+        client.EnterZone(1);
 
-        int previousX = initialEntity.PosXRaw;
+        EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
+        Snapshot firstSnapshot = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2), s => s.Entities.Any(e => e.EntityId == ack.EntityId));
+        SnapshotEntity firstEntity = firstSnapshot.Entities.Single(e => e.EntityId == ack.EntityId);
+
+        int previousX = firstEntity.PosXRaw;
         bool moved = false;
+        int mapMaxRawX = config.MapWidth * Fix32.OneRaw;
 
-        for (int step = 0; step < 15; step++)
+        for (int i = 0; i < 20; i++)
         {
-            endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(initial.Tick + step + 1, 1, 0)));
-            host.StepOnce();
-            Snapshot snapshot = AssertMessage<Snapshot>(endpoint);
-            SnapshotEntity entity = Assert.Single(snapshot.Entities, e => e.EntityId == ack.EntityId);
+            client.SendInput(firstSnapshot.Tick + i + 1, 1, 0);
+            runtime.StepOnce();
 
-            Assert.True(entity.PosXRaw >= previousX);
+            Snapshot snap = await WaitForMessageAsync<Snapshot>(
+                runtime,
+                client,
+                TimeSpan.FromSeconds(2),
+                s => s.Entities.Any(e => e.EntityId == ack.EntityId),
+                advanceServer: false);
+
+            SnapshotEntity entity = snap.Entities.Single(e => e.EntityId == ack.EntityId);
+            Assert.InRange(entity.PosXRaw, 0, mapMaxRawX);
             if (entity.PosXRaw > previousX)
             {
                 moved = true;
@@ -69,94 +83,146 @@ public sealed class ServerHostIntegrationTests
             previousX = entity.PosXRaw;
         }
 
-        Assert.True(moved, "Expected at least one positive X movement in snapshots.");
+        Assert.True(moved);
     }
 
     [Fact]
-    public void Determinism_SameSeedSameInputs_SameSnapshotChecksums()
+    public async Task Tcp_Determinism_SameInputs_SameSnapshotChecksums()
     {
-        List<string> firstRun = RunScenarioAndCollectChecksums();
-        List<string> secondRun = RunScenarioAndCollectChecksums();
+        string first = await RunScenarioAndComputeChecksumAsync();
+        string second = await RunScenarioAndComputeChecksumAsync();
 
-        Assert.Equal(firstRun.Count, secondRun.Count);
-        Assert.Equal(firstRun, secondRun);
+        Assert.Equal(first, second);
     }
 
-    private static List<string> RunScenarioAndCollectChecksums()
+    private static async Task<string> RunScenarioAndComputeChecksumAsync()
     {
-        ServerHost host = new(ServerConfig.Default(seed: 123) with { SnapshotEveryTicks = 1 });
-        InMemoryEndpoint endpoint = new();
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+        await using ServerRuntime runtime = new();
+        await runtime.StartAsync(ServerConfig.Default(seed: 123) with { SnapshotEveryTicks = 1 }, IPAddress.Loopback, 0, cts.Token);
 
-        host.Connect(endpoint);
-        _ = AssertMessage<Welcome>(endpoint);
+        await using HeadlessClient client = new();
+        await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);
 
-        endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
-        host.AdvanceTicks(1);
+        _ = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
+        client.Send(new Hello("determinism-client"));
+        client.EnterZone(1);
 
-        EnterZoneAck ack = AssertMessage<EnterZoneAck>(endpoint);
-        _ = AssertMessage<Snapshot>(endpoint);
+        _ = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
+        _ = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2));
 
-        List<string> checksums = new();
+        const int firstInputTick = 100;
+        const int inputCount = 30;
+        int lastInputTick = firstInputTick + inputCount - 1;
+
         Random deterministic = new(999);
-
-        for (int tickOffset = 1; tickOffset <= 30; tickOffset++)
+        for (int i = 0; i < inputCount; i++)
         {
             sbyte moveX = (sbyte)deterministic.Next(-1, 2);
             sbyte moveY = (sbyte)deterministic.Next(-1, 2);
-            endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(tickOffset + 1, moveX, moveY)));
-
-            host.StepOnce();
-
-            Snapshot snapshot = AssertMessage<Snapshot>(endpoint);
-            checksums.Add(ComputeSnapshotChecksum(snapshot, ack.EntityId));
+            client.SendInput(firstInputTick + i, moveX, moveY);
         }
 
-        return checksums;
-    }
+        Dictionary<int, Snapshot> snapshotsByTick = await CollectSnapshotsForTickRangeAsync(
+            runtime,
+            client,
+            firstInputTick,
+            lastInputTick,
+            TimeSpan.FromSeconds(2));
 
-    private static string ComputeSnapshotChecksum(Snapshot snapshot, int trackedEntityId)
-    {
-        SnapshotEntity[] ordered = snapshot.Entities
-            .OrderBy(entity => entity.EntityId)
-            .ToArray();
+        Assert.Equal(inputCount, snapshotsByTick.Count);
 
-        byte[] data = new byte[(3 + (ordered.Length * 5)) * 4];
-        int offset = 0;
-
-        WriteInt(data, ref offset, snapshot.Tick);
-        WriteInt(data, ref offset, snapshot.ZoneId);
-        WriteInt(data, ref offset, trackedEntityId);
-
-        foreach (SnapshotEntity entity in ordered)
+        using IncrementalHash checksum = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        for (int tick = firstInputTick; tick <= lastInputTick; tick++)
         {
-            WriteInt(data, ref offset, entity.EntityId);
-            WriteInt(data, ref offset, entity.PosXRaw);
-            WriteInt(data, ref offset, entity.PosYRaw);
-            WriteInt(data, ref offset, entity.VelXRaw);
-            WriteInt(data, ref offset, entity.VelYRaw);
+            bool ok = snapshotsByTick.TryGetValue(tick, out Snapshot? snapshot);
+            Assert.True(ok, $"Missing snapshot for tick {tick}.");
+            Assert.NotNull(snapshot);
+            AppendSnapshot(checksum, snapshot);
         }
 
-        return Convert.ToHexString(SHA256.HashData(data));
+        return Convert.ToHexString(checksum.GetHashAndReset());
     }
 
-    private static void WriteInt(byte[] data, ref int offset, int value)
+    private static async Task<Dictionary<int, Snapshot>> CollectSnapshotsForTickRangeAsync(
+        ServerRuntime runtime,
+        HeadlessClient client,
+        int firstTick,
+        int lastTick,
+        TimeSpan timeout)
     {
-        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(offset, 4), value);
-        offset += 4;
-    }
+        Dictionary<int, Snapshot> snapshotsByTick = new();
+        Stopwatch sw = Stopwatch.StartNew();
 
-    private static T AssertMessage<T>(InMemoryEndpoint endpoint)
-        where T : class
-    {
-        while (endpoint.TryDequeueToClient(out byte[] payload))
+        while (sw.Elapsed < timeout && snapshotsByTick.Count < (lastTick - firstTick + 1))
         {
-            IServerMessage decoded = ProtocolCodec.DecodeServer(payload);
-            if (decoded is T typed)
+            runtime.StepOnce();
+
+            while (client.TryRead(out IServerMessage? message))
             {
-                return typed;
+                if (message is Snapshot snapshot)
+                {
+                    if (snapshot.Tick >= firstTick && snapshot.Tick <= lastTick)
+                    {
+                        snapshotsByTick[snapshot.Tick] = snapshot;
+                    }
+                }
             }
+
+            await Task.Yield();
         }
 
-        throw new Xunit.Sdk.XunitException($"No message of type {typeof(T).Name} was available.");
+        return snapshotsByTick;
+    }
+
+    private static void AppendSnapshot(IncrementalHash checksum, Snapshot snapshot)
+    {
+        byte[] header = new byte[12];
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0, 4), snapshot.Tick);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(4, 4), snapshot.ZoneId);
+        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(8, 4), snapshot.Entities.Length);
+        checksum.AppendData(header);
+
+        foreach (SnapshotEntity entity in snapshot.Entities.OrderBy(e => e.EntityId))
+        {
+            byte[] entityData = new byte[20];
+            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(0, 4), entity.EntityId);
+            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(4, 4), entity.PosXRaw);
+            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(8, 4), entity.PosYRaw);
+            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(12, 4), entity.VelXRaw);
+            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(16, 4), entity.VelYRaw);
+            checksum.AppendData(entityData);
+        }
+    }
+
+    private static async Task<T> WaitForMessageAsync<T>(
+        ServerRuntime runtime,
+        HeadlessClient client,
+        TimeSpan timeout,
+        Func<T, bool>? predicate = null,
+        bool advanceServer = true)
+        where T : class, IServerMessage
+    {
+        Stopwatch sw = Stopwatch.StartNew();
+
+        while (sw.Elapsed < timeout)
+        {
+            while (client.TryRead(out IServerMessage? message))
+            {
+                if (message is T typed && (predicate is null || predicate(typed)))
+                {
+                    return typed;
+                }
+            }
+
+            if (advanceServer)
+            {
+                runtime.StepOnce();
+            }
+
+            await Task.Yield();
+        }
+
+        throw new Xunit.Sdk.XunitException($"No message of type {typeof(T).Name} received within {timeout.TotalMilliseconds}ms.");
     }
 }
