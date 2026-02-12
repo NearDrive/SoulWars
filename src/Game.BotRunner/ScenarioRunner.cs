@@ -142,6 +142,7 @@ public sealed class ScenarioRunner
 
                 ct.ThrowIfCancellationRequested();
                 runtime.PumpTransportOnce();
+                runtime.ProcessInboundOnce();
                 DrainAllMessages(clients);
 
                 if (client.HasWelcome)

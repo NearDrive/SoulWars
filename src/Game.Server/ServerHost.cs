@@ -12,6 +12,7 @@ public sealed class ServerHost
 
     private int _nextSessionId = 1;
     private int _nextEntityId = 1;
+    private readonly List<WorldCommand> _pendingWorldCommands = new();
     private WorldState _world;
 
     public ServerHost(ServerConfig config)
@@ -41,13 +42,25 @@ public sealed class ServerHost
 
     public void StepOnce()
     {
+        ProcessInboundOnce();
+        AdvanceSimulationOnce();
+    }
+
+    public void ProcessInboundOnce()
+    {
         int targetTick = _world.Tick + 1;
-        List<WorldCommand> worldCommands = new();
 
         foreach (SessionState session in OrderedSessions())
         {
-            DrainSessionMessages(session, targetTick, worldCommands);
+            DrainSessionMessages(session, targetTick, _pendingWorldCommands);
         }
+    }
+
+    public void AdvanceSimulationOnce()
+    {
+        int targetTick = _world.Tick + 1;
+        List<WorldCommand> worldCommands = _pendingWorldCommands.ToList();
+        _pendingWorldCommands.Clear();
 
         foreach (PendingInput pending in OrderedPendingInputs(targetTick))
         {
