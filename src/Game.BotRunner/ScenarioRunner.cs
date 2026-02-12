@@ -8,7 +8,17 @@ public sealed class ScenarioRunner
 {
     public static string Run(ScenarioConfig cfg) => RunDetailed(cfg).Checksum;
 
-    public static ScenarioResult RunDetailed(ScenarioConfig cfg)
+    public static ScenarioResult RunDetailed(ScenarioConfig cfg) => RunDetailedInternal(cfg, replayWriter: null);
+
+    public static ScenarioResult RunAndRecord(ScenarioConfig cfg, Stream replayOut)
+    {
+        ArgumentNullException.ThrowIfNull(replayOut);
+        ReplayHeader header = ReplayHeader.FromScenarioConfig(cfg);
+        using ReplayWriter writer = new(replayOut, header);
+        return RunDetailedInternal(cfg, writer);
+    }
+
+    private static ScenarioResult RunDetailedInternal(ScenarioConfig cfg, ReplayWriter? replayWriter)
     {
         Validate(cfg);
 
@@ -22,7 +32,6 @@ public sealed class ScenarioRunner
         List<BotClient> clients = new(cfg.BotCount);
         Dictionary<(int BotIndex, int Tick), Snapshot> committedSnapshots = new();
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot = new();
-        Dictionary<int, int> lastCommittedSnapshotTickByBot = new();
         ServerRuntime runtime = new();
 
         try
@@ -41,36 +50,39 @@ public sealed class ScenarioRunner
                 clients.Add(client);
                 agents.Add(new BotAgent(botConfig));
                 pendingSnapshotsByBot[i] = new SortedDictionary<int, Snapshot>();
-                lastCommittedSnapshotTickByBot[i] = 0;
             }
 
-            ConnectBots(runtime, clients, cts.Token);
+            ConnectBotsForTests(runtime, clients, cts.Token);
 
             // Ignore snapshots that may have been received during handshake.
-            DrainAllMessages(clients);
+            DrainAllMessagesForTests(clients);
             foreach (SortedDictionary<int, Snapshot> pending in pendingSnapshotsByBot.Values)
             {
                 pending.Clear();
             }
+
+            ReplayMove[] tickMoves = new ReplayMove[cfg.BotCount];
 
             for (int tick = 1; tick <= cfg.TickCount; tick++)
             {
                 for (int i = 0; i < agents.Count; i++)
                 {
                     (sbyte mx, sbyte my) = agents[i].GetMoveForTick(tick);
+                    tickMoves[i] = new ReplayMove(mx, my);
                     clients[i].SendInput(tick, mx, my);
                 }
 
+                replayWriter?.WriteTickInputs(tick, tickMoves);
+
                 runtime.StepOnce();
-                DrainSnapshots(clients, pendingSnapshotsByBot);
+                DrainSnapshotsForTests(clients, pendingSnapshotsByBot);
 
                 if (tick % cfg.SnapshotEveryTicks != 0)
                 {
                     continue;
                 }
 
-                int expectedSnapshotTick = (tick / cfg.SnapshotEveryTicks) * cfg.SnapshotEveryTicks;
-                int commitSnapshotTick = WaitForExpectedSnapshotTick(runtime, clients, pendingSnapshotsByBot, cfg.TickCount, tick, expectedSnapshotTick, cts.Token);
+                int commitSnapshotTick = WaitForExpectedSnapshotTickForTests(runtime, clients, pendingSnapshotsByBot, cfg.TickCount, tick, tick, cts.Token);
 
                 foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
@@ -81,11 +93,9 @@ public sealed class ScenarioRunner
                             $"Missing synchronized snapshot for bot={client.BotIndex} scenarioTick={tick} commitSnapshotTick={commitSnapshotTick}.");
                     }
 
-                    int selectedTick = commitSnapshotTick;
                     committedSnapshots[(client.BotIndex, tick)] = snapshot;
-                    lastCommittedSnapshotTickByBot[client.BotIndex] = selectedTick;
 
-                    foreach (int oldTick in pending.Keys.Where(t => t <= selectedTick).ToList())
+                    foreach (int oldTick in pending.Keys.Where(t => t <= commitSnapshotTick).ToList())
                     {
                         pending.Remove(oldTick);
                     }
@@ -101,6 +111,8 @@ public sealed class ScenarioRunner
             }
 
             string finalChecksum = checksum.BuildHexLower();
+            replayWriter?.WriteFinalChecksum(finalChecksum);
+
             BotScenarioStats[] stats = clients
                 .OrderBy(client => client.BotIndex)
                 .Select(client => new BotScenarioStats(
@@ -123,7 +135,7 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static void ConnectBots(ServerRuntime runtime, IReadOnlyList<BotClient> clients, CancellationToken ct)
+    internal static void ConnectBotsForTests(ServerRuntime runtime, IReadOnlyList<BotClient> clients, CancellationToken ct)
     {
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
@@ -143,7 +155,7 @@ public sealed class ScenarioRunner
                 ct.ThrowIfCancellationRequested();
                 runtime.PumpTransportOnce();
                 runtime.ProcessInboundOnce();
-                DrainAllMessages(clients);
+                DrainAllMessagesForTests(clients);
 
                 if (client.HasWelcome)
                 {
@@ -154,7 +166,7 @@ public sealed class ScenarioRunner
 
     }
 
-    private static void DrainAllMessages(IReadOnlyList<BotClient> clients)
+    internal static void DrainAllMessagesForTests(IReadOnlyList<BotClient> clients)
     {
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
@@ -162,7 +174,7 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static void DrainSnapshots(
+    internal static void DrainSnapshotsForTests(
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot)
     {
@@ -178,7 +190,7 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static int WaitForExpectedSnapshotTick(
+    internal static int WaitForExpectedSnapshotTickForTests(
         ServerRuntime runtime,
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
@@ -193,7 +205,7 @@ public sealed class ScenarioRunner
         {
             ct.ThrowIfCancellationRequested();
             runtime.PumpTransportOnce();
-            DrainSnapshots(clients, pendingSnapshotsByBot);
+            DrainSnapshotsForTests(clients, pendingSnapshotsByBot);
 
             bool ready = clients
                 .OrderBy(c => c.BotIndex)
