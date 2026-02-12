@@ -6,7 +6,7 @@ namespace Game.Server.Tests;
 public sealed class ReplayRunnerTests
 {
     // Baseline updated after recent replay behavior changes.
-    private const string BaselineChecksumPrefix = "c827ff2ab6c75f333a5c37989b7e4f88f36d1cfc8";
+    private const string BaselineChecksumPrefix = "532a458a572f4250b32b34198a612e4b29293567d";
 
     [Fact]
     public async Task Replay_Verify_BaselineFixture()

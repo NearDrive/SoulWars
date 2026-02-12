@@ -13,6 +13,7 @@ public sealed class ScenarioRunnerTests
         string checksum1 = ScenarioRunner.Run(cfg);
         string checksum2 = ScenarioRunner.Run(cfg);
 
+        Assert.Equal("63b5fe29bb2abc0eda67465f608382da5944461e0", checksum1);
         Assert.Equal(checksum1, checksum2);
     }
 
