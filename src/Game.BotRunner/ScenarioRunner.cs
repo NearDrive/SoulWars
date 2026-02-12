@@ -109,6 +109,8 @@ public sealed class ScenarioRunner
                         throw new InvalidOperationException($"Unable to synchronize snapshots after tick {lastCommittedSnapshotTick} (loopTick={tick}).");
                     }
 
+                    runtime.StepOnce();
+
                     DrainAll(clients, (index, msg) =>
                     {
                         if (msg is not Snapshot snapshot)
