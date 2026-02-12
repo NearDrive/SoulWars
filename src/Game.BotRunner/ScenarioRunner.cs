@@ -128,25 +128,29 @@ public sealed class ScenarioRunner
 
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
-            Task connectTask = client.ConnectAndEnterAsync("127.0.0.1", runtime.BoundPort, ct);
-            int maxConnectSteps = Math.Max(10_000, clients.Count * 2_000);
+            client.ConnectAsync("127.0.0.1", runtime.BoundPort, ct).GetAwaiter().GetResult();
+
+            int maxConnectSteps = Math.Max(50_000, clients.Count * 10_000);
             int connectSteps = 0;
 
-            while (!connectTask.IsCompleted)
+            while (!client.HandshakeDone)
             {
                 if (connectSteps++ >= maxConnectSteps)
                 {
                     throw new InvalidOperationException(
-                        $"Bot {client.BotIndex} did not finish connect/enter handshake deterministically after {connectSteps} steps (boundPort={runtime.BoundPort}).");
+                        $"Bot {client.BotIndex} handshake failed (boundPort={runtime.BoundPort}, steps={connectSteps}, hasWelcome={client.HasWelcome}, hasEntered={client.HasEntered}, sessionId={client.SessionId?.Value.ToString() ?? "null"}, entityId={client.EntityId?.ToString() ?? "null"}, lastSnapshotTick={client.LastSnapshotTick}, snapshotsReceived={client.SnapshotsReceived}).");
                 }
 
                 ct.ThrowIfCancellationRequested();
                 runtime.StepOnce();
                 serverSteps++;
-                Thread.Yield();
-            }
+                DrainAllMessages(clients);
 
-            connectTask.GetAwaiter().GetResult();
+                if (client.HasWelcome)
+                {
+                    client.EnterZone();
+                }
+            }
         }
 
         return serverSteps;
@@ -156,7 +160,7 @@ public sealed class ScenarioRunner
     {
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
-            client.DrainMessages(_ => { });
+            client.PumpMessages(_ => { });
         }
     }
 
@@ -166,7 +170,7 @@ public sealed class ScenarioRunner
     {
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
-            client.DrainMessages(message =>
+            client.PumpMessages(message =>
             {
                 if (message is Snapshot snapshot)
                 {

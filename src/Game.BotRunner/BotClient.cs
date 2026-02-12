@@ -29,37 +29,33 @@ public sealed class BotClient : IAsyncDisposable
 
     public int LastSnapshotTick { get; private set; }
 
-    public async Task ConnectAndEnterAsync(string host, int port, CancellationToken ct)
+    private bool _enterZoneSent;
+
+    public bool HasWelcome => SessionId is not null;
+
+    public bool HasEntered => EntityId is not null;
+
+    public bool HandshakeDone => HasWelcome && HasEntered;
+
+    public Task ConnectAsync(string host, int port, CancellationToken ct)
     {
-        await _client.ConnectAsync(host, port, ct).ConfigureAwait(false);
+        return _client.ConnectAsync(host, port, ct);
+    }
 
-        while (!ct.IsCancellationRequested)
+    public void EnterZone()
+    {
+        if (_enterZoneSent || !HasWelcome)
         {
-            DrainMessages(_ => { });
-
-            if (SessionId is not null)
-            {
-                break;
-            }
-
-            await Task.Yield();
+            return;
         }
 
         _client.EnterZone(ZoneId);
+        _enterZoneSent = true;
+    }
 
-        while (!ct.IsCancellationRequested)
-        {
-            DrainMessages(_ => { });
-
-            if (EntityId is not null)
-            {
-                return;
-            }
-
-            await Task.Yield();
-        }
-
-        ct.ThrowIfCancellationRequested();
+    public void PumpMessages(Action<IServerMessage> onMsg)
+    {
+        DrainMessages(onMsg);
     }
 
     public void SendInput(int tick, sbyte mx, sbyte my)
