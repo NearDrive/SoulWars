@@ -5,15 +5,18 @@ namespace Game.Server.Tests;
 
 public sealed class ScenarioRunnerTests
 {
+    // Baseline updated to compare against full checksum hex.
+    private const string BaselineChecksumFullHex = "63b5fe29bb2abc0eda67465f608382da5944461e0e74d3b0d898889fc1da2f";
+
     [Fact]
     public void ScenarioRunner_Baseline_IsDeterministic()
     {
         ScenarioConfig cfg = BaselineScenario.Config;
 
-        string checksum1 = ScenarioRunner.Run(cfg);
-        string checksum2 = ScenarioRunner.Run(cfg);
+        string checksum1 = TestChecksum.NormalizeFullHex(ScenarioRunner.Run(cfg));
+        string checksum2 = TestChecksum.NormalizeFullHex(ScenarioRunner.Run(cfg));
 
-        Assert.Equal("63b5fe29bb2abc0eda67465f608382da5944461e0", checksum1);
+        Assert.Equal(BaselineChecksumFullHex, checksum1);
         Assert.Equal(checksum1, checksum2);
     }
 

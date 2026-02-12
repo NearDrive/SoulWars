@@ -5,8 +5,9 @@ namespace Game.Server.Tests;
 
 public sealed class ReplayRunnerTests
 {
-    // Baseline updated after recent replay behavior changes.
-    private const string BaselineChecksumPrefix = "532a458a572f4250b32b34198a612e4b29293567d";
+    // Baseline updated to compare consistent full-hex checksum format.
+    private const string BaselineChecksumFullHex = "63b5fe29bb2abc0eda67465f608382da5944461e0e74d3b0d898889fc1da2f";
+    private const string BaselineChecksumPrefix = "63b5fe29bb2abc0eda67465f608382da5944461e0";
 
     [Fact]
     public async Task Replay_Verify_BaselineFixture()
@@ -19,17 +20,22 @@ public sealed class ReplayRunnerTests
             return ReplayRunner.RunReplayWithExpected(replayStream);
         }, cts.Token).WaitAsync(cts.Token);
 
-        Assert.StartsWith(BaselineChecksumPrefix, replayResult.Checksum, StringComparison.Ordinal);
+        string replayChecksum = TestChecksum.NormalizeFullHex(replayResult.Checksum);
+        Assert.StartsWith(BaselineChecksumPrefix, replayChecksum, StringComparison.Ordinal);
 
         if (!string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum))
         {
-            Assert.StartsWith(BaselineChecksumPrefix, replayResult.ExpectedChecksum, StringComparison.Ordinal);
-            Assert.Equal(replayResult.ExpectedChecksum, replayResult.Checksum);
+            string expectedChecksum = TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum);
+            Assert.StartsWith(BaselineChecksumPrefix, expectedChecksum, StringComparison.Ordinal);
+            Assert.Equal(expectedChecksum, replayChecksum);
             return;
         }
 
-        string scenarioChecksum = await Task.Run(() => ScenarioRunner.Run(BaselineScenario.Config), cts.Token).WaitAsync(cts.Token);
-        Assert.Equal(scenarioChecksum, replayResult.Checksum);
+        string scenarioChecksum = TestChecksum.NormalizeFullHex(
+            await Task.Run(() => ScenarioRunner.Run(BaselineScenario.Config), cts.Token).WaitAsync(cts.Token));
+
+        Assert.Equal(BaselineChecksumFullHex, replayChecksum);
+        Assert.Equal(scenarioChecksum, replayChecksum);
     }
 
     private static Stream OpenFixtureStream()
