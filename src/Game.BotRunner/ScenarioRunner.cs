@@ -60,14 +60,15 @@ public sealed class ScenarioRunner
                     continue;
                 }
 
-                int commitTick = WaitForSnapshotTick(runtime, clients, pendingSnapshotsByBot, cfg.TickCount, tick, tick, cts.Token);
+                WaitForSnapshotTick(runtime, clients, pendingSnapshotsByBot, cfg.TickCount, tick, tick, cts.Token);
 
                 foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
                     SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
-                    committedSnapshots.Add((tick, client.BotIndex, GetSnapshotForCommitTick(pending, commitTick)));
+                    (int selectedTick, Snapshot selectedSnapshot) = GetSnapshotAtOrAfterTick(pending, tick);
+                    committedSnapshots.Add((tick, client.BotIndex, selectedSnapshot));
 
-                    foreach (int oldTick in pending.Keys.Where(t => t <= commitTick).ToList())
+                    foreach (int oldTick in pending.Keys.Where(t => t <= selectedTick).ToList())
                     {
                         pending.Remove(oldTick);
                     }
@@ -156,7 +157,7 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static int WaitForSnapshotTick(
+    private static void WaitForSnapshotTick(
         ServerRuntime runtime,
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
@@ -170,35 +171,15 @@ public sealed class ScenarioRunner
         for (int passes = 0; passes < maxPasses; passes++)
         {
             ct.ThrowIfCancellationRequested();
-            runtime.StepOnce();
             DrainSnapshots(clients, pendingSnapshotsByBot);
 
-            List<int> candidateMaxTicks = new();
-            bool ready = true;
+            bool ready = clients
+                .OrderBy(c => c.BotIndex)
+                .All(client => pendingSnapshotsByBot[client.BotIndex].Keys.Any(t => t >= snapshotTick));
 
-            foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
+            if (ready)
             {
-                SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
-                int botMax = pending.Keys.Where(t => t >= snapshotTick).DefaultIfEmpty(-1).Max();
-                if (botMax < snapshotTick)
-                {
-                    ready = false;
-                    break;
-                }
-
-                candidateMaxTicks.Add(botMax);
-            }
-
-            if (!ready)
-            {
-                Thread.Yield();
-                continue;
-            }
-
-            int commitTick = candidateMaxTicks.Min();
-            if (clients.All(client => HasSnapshotAtOrBeforeTick(pendingSnapshotsByBot[client.BotIndex], commitTick)))
-            {
-                return commitTick;
+                return;
             }
 
             Thread.Yield();
@@ -218,22 +199,17 @@ public sealed class ScenarioRunner
             $"Unable to synchronize snapshots (tickCount={tickCount}, loopTick={loopTick}, expectedSnapshotTick={snapshotTick}, {perBot}).");
     }
 
-    private static Snapshot GetSnapshotForCommitTick(SortedDictionary<int, Snapshot> pending, int commitTick)
+    private static (int Tick, Snapshot Snapshot) GetSnapshotAtOrAfterTick(SortedDictionary<int, Snapshot> pending, int expectedTick)
     {
-        foreach ((int tick, Snapshot snapshot) in pending.Reverse())
+        foreach ((int tick, Snapshot snapshot) in pending)
         {
-            if (tick <= commitTick)
+            if (tick >= expectedTick)
             {
-                return snapshot;
+                return (tick, snapshot);
             }
         }
 
-        throw new InvalidOperationException($"No snapshot at or before commitTick={commitTick}.");
-    }
-
-    private static bool HasSnapshotAtOrBeforeTick(SortedDictionary<int, Snapshot> pending, int commitTick)
-    {
-        return pending.Keys.Any(tick => tick <= commitTick);
+        throw new InvalidOperationException($"No snapshot at or after expectedTick={expectedTick}.");
     }
 
     private static void Validate(ScenarioConfig cfg)
