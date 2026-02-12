@@ -1,22 +1,56 @@
 using Game.Protocol;
+using Game.Server;
 
 namespace Game.BotRunner;
 
 public sealed class HeadlessClient : IAsyncDisposable
 {
-    private readonly TcpClientEndpoint _endpoint = new();
+    private readonly TcpClientEndpoint? _tcpEndpoint;
+    private readonly IClientEndpoint? _inMemoryEndpoint;
 
-    public Task ConnectAsync(string host, int port, CancellationToken ct) => _endpoint.ConnectAsync(host, port, ct);
+    public HeadlessClient()
+    {
+        _tcpEndpoint = new TcpClientEndpoint();
+    }
+
+    public HeadlessClient(IClientEndpoint endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        _inMemoryEndpoint = endpoint;
+    }
+
+    public Task ConnectAsync(string host, int port, CancellationToken ct)
+    {
+        if (_tcpEndpoint is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return _tcpEndpoint.ConnectAsync(host, port, ct);
+    }
 
     public void Send(IClientMessage message)
     {
         ArgumentNullException.ThrowIfNull(message);
-        _endpoint.EnqueueToServer(ProtocolCodec.Encode(message));
+        byte[] payload = ProtocolCodec.Encode(message);
+
+        if (_tcpEndpoint is not null)
+        {
+            _tcpEndpoint.EnqueueToServer(payload);
+            return;
+        }
+
+        _inMemoryEndpoint!.EnqueueToServer(payload);
     }
 
     public bool TryRead(out IServerMessage? message)
     {
-        if (_endpoint.TryDequeueFromServer(out byte[] payload))
+        byte[] payload;
+        bool hasPayload = _tcpEndpoint is not null
+            ? _tcpEndpoint.TryDequeueFromServer(out payload)
+            : _inMemoryEndpoint!.TryDequeueFromServer(out payload);
+
+        if (hasPayload)
         {
             message = ProtocolCodec.DecodeServer(payload);
             return true;
@@ -30,5 +64,14 @@ public sealed class HeadlessClient : IAsyncDisposable
 
     public void SendInput(int tick, sbyte mx, sbyte my) => Send(new InputCommand(tick, mx, my));
 
-    public ValueTask DisposeAsync() => _endpoint.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        if (_tcpEndpoint is not null)
+        {
+            await _tcpEndpoint.DisposeAsync().ConfigureAwait(false);
+            return;
+        }
+
+        _inMemoryEndpoint?.Close();
+    }
 }

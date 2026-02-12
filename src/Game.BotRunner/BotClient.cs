@@ -1,12 +1,18 @@
 using Game.Protocol;
+using Game.Server;
 
 namespace Game.BotRunner;
 
 public sealed class BotClient : IAsyncDisposable
 {
-    private readonly HeadlessClient _client = new();
+    private readonly HeadlessClient _client;
 
     public BotClient(int botIndex, int zoneId)
+        : this(botIndex, zoneId, endpoint: null)
+    {
+    }
+
+    public BotClient(int botIndex, int zoneId, IClientEndpoint? endpoint)
     {
         if (botIndex < 0)
         {
@@ -15,6 +21,7 @@ public sealed class BotClient : IAsyncDisposable
 
         BotIndex = botIndex;
         ZoneId = zoneId;
+        _client = endpoint is null ? new HeadlessClient() : new HeadlessClient(endpoint);
     }
 
     public int BotIndex { get; }

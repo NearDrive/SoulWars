@@ -1,4 +1,3 @@
-using System.Net;
 using Game.Protocol;
 using Game.Server;
 
@@ -34,22 +33,23 @@ public static class ReplayRunner
         List<BotClient> clients = new(header.BotCount);
         Dictionary<(int BotIndex, int Tick), Snapshot> committedSnapshots = new();
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot = new();
-        ServerRuntime runtime = new();
+        ServerHost host = new(serverConfig);
 
         string? expectedChecksum = null;
 
         try
         {
-            runtime.StartAsync(serverConfig, IPAddress.Loopback, 0, cts.Token).GetAwaiter().GetResult();
-
             for (int i = 0; i < header.BotCount; i++)
             {
-                BotClient client = new(i, header.ZoneId);
+                InMemoryEndpoint endpoint = new();
+                host.Connect(endpoint);
+
+                BotClient client = new(i, header.ZoneId, endpoint);
                 clients.Add(client);
                 pendingSnapshotsByBot[i] = new SortedDictionary<int, Snapshot>();
             }
 
-            ScenarioRunner.ConnectBotsForTests(runtime, clients, cts.Token);
+            ScenarioRunner.ConnectBotsForTests(host, clients, cts.Token);
             ScenarioRunner.DrainAllMessagesForTests(clients);
 
             for (int tick = 1; tick <= header.TickCount; tick++)
@@ -80,7 +80,7 @@ public static class ReplayRunner
                     clients[botIndex].SendInput(tick, move.MoveX, move.MoveY);
                 }
 
-                runtime.StepOnce();
+                host.StepOnce();
                 ScenarioRunner.DrainSnapshotsForTests(clients, pendingSnapshotsByBot);
 
                 if (tick % header.SnapshotEveryTicks != 0)
@@ -88,14 +88,7 @@ public static class ReplayRunner
                     continue;
                 }
 
-                int commitSnapshotTick = ScenarioRunner.WaitForExpectedSnapshotTickForTests(
-                    runtime,
-                    clients,
-                    pendingSnapshotsByBot,
-                    header.TickCount,
-                    tick,
-                    tick,
-                    cts.Token);
+                int commitSnapshotTick = ScenarioRunner.WaitForExpectedSnapshotTickForTests(clients, pendingSnapshotsByBot, tick);
 
                 foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
@@ -146,8 +139,6 @@ public static class ReplayRunner
             {
                 client.DisposeAsync().AsTask().GetAwaiter().GetResult();
             }
-
-            runtime.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
     }
 }
