@@ -5,6 +5,9 @@ namespace Game.Server.Tests;
 
 public sealed class ReplayRunnerTests
 {
+    // Baseline updated after recent replay behavior changes.
+    private const string BaselineChecksumPrefix = "c827ff2ab6c75f333a5c37989b7e4f88f36d1cfc8";
+
     [Fact]
     public async Task Replay_Verify_BaselineFixture()
     {
@@ -16,8 +19,11 @@ public sealed class ReplayRunnerTests
             return ReplayRunner.RunReplayWithExpected(replayStream);
         }, cts.Token).WaitAsync(cts.Token);
 
+        Assert.StartsWith(BaselineChecksumPrefix, replayResult.Checksum, StringComparison.Ordinal);
+
         if (!string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum))
         {
+            Assert.StartsWith(BaselineChecksumPrefix, replayResult.ExpectedChecksum, StringComparison.Ordinal);
             Assert.Equal(replayResult.ExpectedChecksum, replayResult.Checksum);
             return;
         }
