@@ -40,6 +40,7 @@ public sealed class ScenarioRunner
                 BotClient client = new(i, botConfig.ZoneId);
                 clients.Add(client);
                 agents.Add(new BotAgent(botConfig));
+                pendingSnapshotsByBot[i] = new SortedDictionary<int, Snapshot>();
             }
 
             ConnectBots(runtime, clients, cts.Token);
@@ -61,13 +62,7 @@ public sealed class ScenarioRunner
                         return;
                     }
 
-                    if (!pendingSnapshotsByBot.TryGetValue(index, out SortedDictionary<int, Snapshot>? pendingByTick))
-                    {
-                        pendingByTick = new SortedDictionary<int, Snapshot>();
-                        pendingSnapshotsByBot[index] = pendingByTick;
-                    }
-
-                    pendingByTick[snapshot.Tick] = snapshot;
+                    pendingSnapshotsByBot[index][snapshot.Tick] = snapshot;
                 });
 
                 if (tick % cfg.SnapshotEveryTicks != 0)
@@ -82,26 +77,24 @@ public sealed class ScenarioRunner
                 {
                     cts.Token.ThrowIfCancellationRequested();
 
-                    if (clients.All(client => client.LastSnapshotTick > lastCommittedSnapshotTick))
+                    if (TryGetMaxCommonTick(clients, pendingSnapshotsByBot, out int maxCommonTick)
+                        && maxCommonTick > lastCommittedSnapshotTick
+                        && AllBotsHavePendingTick(clients, pendingSnapshotsByBot, maxCommonTick))
                     {
-                        int commonTick = clients.Min(client => client.LastSnapshotTick);
-                        if (commonTick > lastCommittedSnapshotTick && AllBotsHavePendingTick(clients, pendingSnapshotsByBot, commonTick))
+                        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                         {
-                            foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
+                            SortedDictionary<int, Snapshot> pendingByTick = pendingSnapshotsByBot[client.BotIndex];
+                            snapshots[(client.BotIndex, maxCommonTick)] = pendingByTick[maxCommonTick];
+
+                            List<int> consumedTicks = pendingByTick.Keys.Where(key => key <= maxCommonTick).ToList();
+                            foreach (int consumedTick in consumedTicks)
                             {
-                                SortedDictionary<int, Snapshot> pendingByTick = pendingSnapshotsByBot[client.BotIndex];
-                                snapshots[(client.BotIndex, commonTick)] = pendingByTick[commonTick];
-
-                                List<int> consumedTicks = pendingByTick.Keys.Where(key => key <= commonTick).ToList();
-                                foreach (int consumedTick in consumedTicks)
-                                {
-                                    pendingByTick.Remove(consumedTick);
-                                }
+                                pendingByTick.Remove(consumedTick);
                             }
-
-                            lastCommittedSnapshotTick = commonTick;
-                            break;
                         }
+
+                        lastCommittedSnapshotTick = maxCommonTick;
+                        break;
                     }
 
                     if (syncSteps++ >= maxSyncSteps)
@@ -118,13 +111,7 @@ public sealed class ScenarioRunner
                             return;
                         }
 
-                        if (!pendingSnapshotsByBot.TryGetValue(index, out SortedDictionary<int, Snapshot>? pendingByTick))
-                        {
-                            pendingByTick = new SortedDictionary<int, Snapshot>();
-                            pendingSnapshotsByBot[index] = pendingByTick;
-                        }
-
-                        pendingByTick[snapshot.Tick] = snapshot;
+                        pendingSnapshotsByBot[index][snapshot.Tick] = snapshot;
                     });
                 }
             }
@@ -245,5 +232,29 @@ public sealed class ScenarioRunner
         }
 
         return true;
+    }
+
+    private static bool TryGetMaxCommonTick(
+        IReadOnlyList<BotClient> clients,
+        Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
+        out int maxCommonTick)
+    {
+        maxCommonTick = 0;
+
+        bool any = false;
+        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
+        {
+            SortedDictionary<int, Snapshot> pendingByTick = pendingSnapshotsByBot[client.BotIndex];
+            if (pendingByTick.Count == 0)
+            {
+                return false;
+            }
+
+            int botMaxTick = pendingByTick.Keys.Max();
+            maxCommonTick = any ? Math.Min(maxCommonTick, botMaxTick) : botMaxTick;
+            any = true;
+        }
+
+        return any;
     }
 }
