@@ -199,7 +199,7 @@ public sealed class ScenarioRunner
             firstNewTickByBot[botIndex] = nextTick;
         }
 
-        roundTick = firstNewTickByBot.Values.Min();
+        roundTick = firstNewTickByBot.Values.Max();
 
         Dictionary<int, Snapshot> byBot = new();
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
