@@ -75,22 +75,39 @@ public sealed class ScenarioRunner
                     continue;
                 }
 
-                int maxDrainAttempts = Math.Max(32, cfg.BotCount * 8);
-                int attempts = 0;
-                int synchronizedTick;
+                int maxSyncSteps = Math.Max(256, cfg.BotCount * 32);
+                int syncSteps = 0;
 
-                while (!TryTakeSynchronizedSnapshotSetAfter(
-                           clients,
-                           pendingSnapshotsByBot,
-                           lastCommittedSnapshotTick,
-                           out synchronizedTick))
+                while (true)
                 {
-                    if (attempts++ >= maxDrainAttempts)
+                    cts.Token.ThrowIfCancellationRequested();
+
+                    if (clients.All(client => client.LastSnapshotTick > lastCommittedSnapshotTick))
+                    {
+                        int commonTick = clients.Min(client => client.LastSnapshotTick);
+                        if (commonTick > lastCommittedSnapshotTick && AllBotsHavePendingTick(clients, pendingSnapshotsByBot, commonTick))
+                        {
+                            foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
+                            {
+                                SortedDictionary<int, Snapshot> pendingByTick = pendingSnapshotsByBot[client.BotIndex];
+                                snapshots[(client.BotIndex, commonTick)] = pendingByTick[commonTick];
+
+                                List<int> consumedTicks = pendingByTick.Keys.Where(key => key <= commonTick).ToList();
+                                foreach (int consumedTick in consumedTicks)
+                                {
+                                    pendingByTick.Remove(consumedTick);
+                                }
+                            }
+
+                            lastCommittedSnapshotTick = commonTick;
+                            break;
+                        }
+                    }
+
+                    if (syncSteps++ >= maxSyncSteps)
                     {
                         throw new InvalidOperationException($"Unable to synchronize snapshots after tick {lastCommittedSnapshotTick} (loopTick={tick}).");
                     }
-
-                    cts.Token.ThrowIfCancellationRequested();
 
                     DrainAll(clients, (index, msg) =>
                     {
@@ -107,31 +124,6 @@ public sealed class ScenarioRunner
 
                         pendingByTick[snapshot.Tick] = snapshot;
                     });
-                }
-
-                foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
-                {
-                    SortedDictionary<int, Snapshot> pendingByTick = pendingSnapshotsByBot[client.BotIndex];
-                    snapshots[(client.BotIndex, synchronizedTick)] = pendingByTick[synchronizedTick];
-                    pendingByTick.Remove(synchronizedTick);
-                }
-
-                lastCommittedSnapshotTick = synchronizedTick;
-
-                while (TryTakeSynchronizedSnapshotSetAfter(
-                           clients,
-                           pendingSnapshotsByBot,
-                           lastCommittedSnapshotTick,
-                           out int additionalSynchronizedTick))
-                {
-                    foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
-                    {
-                        SortedDictionary<int, Snapshot> pendingByTick = pendingSnapshotsByBot[client.BotIndex];
-                        snapshots[(client.BotIndex, additionalSynchronizedTick)] = pendingByTick[additionalSynchronizedTick];
-                        pendingByTick.Remove(additionalSynchronizedTick);
-                    }
-
-                    lastCommittedSnapshotTick = additionalSynchronizedTick;
                 }
             }
 
@@ -232,48 +224,24 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static bool TryTakeSynchronizedSnapshotSetAfter(
+    private static bool AllBotsHavePendingTick(
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
-        int afterTick,
-        out int snapshotTick)
+        int tick)
     {
-        snapshotTick = 0;
-
-        if (clients.Count == 0)
+        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
-            return false;
-        }
-
-        List<int>[] tickLists = clients
-            .OrderBy(client => client.BotIndex)
-            .Select(client =>
+            if (!pendingSnapshotsByBot.TryGetValue(client.BotIndex, out SortedDictionary<int, Snapshot>? pendingByTick))
             {
-                if (!pendingSnapshotsByBot.TryGetValue(client.BotIndex, out SortedDictionary<int, Snapshot>? pending))
-                {
-                    return new List<int>();
-                }
+                return false;
+            }
 
-                return pending.Keys.Where(key => key > afterTick).ToList();
-            })
-            .ToArray();
-
-        if (tickLists.Any(list => list.Count == 0))
-        {
-            return false;
-        }
-
-        HashSet<int> common = new(tickLists[0]);
-        for (int i = 1; i < tickLists.Length; i++)
-        {
-            common.IntersectWith(tickLists[i]);
-            if (common.Count == 0)
+            if (!pendingByTick.ContainsKey(tick))
             {
                 return false;
             }
         }
 
-        snapshotTick = common.Min();
         return true;
     }
 }
