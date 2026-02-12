@@ -18,8 +18,13 @@ public sealed class ServerRuntime : IAsyncDisposable
 
     public void StepOnce()
     {
-        AttachAcceptedEndpoints();
+        PumpTransportOnce();
         Host.StepOnce();
+    }
+
+    public void PumpTransportOnce()
+    {
+        AttachAcceptedEndpoints();
     }
 
     public void AdvanceTicks(int n)

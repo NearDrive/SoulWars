@@ -44,7 +44,7 @@ public sealed class ScenarioRunner
                 lastCommittedSnapshotTickByBot[i] = 0;
             }
 
-            _ = ConnectBots(runtime, clients, cts.Token);
+            ConnectBots(runtime, clients, cts.Token);
 
             // Ignore snapshots that may have been received during handshake.
             DrainAllMessages(clients);
@@ -69,7 +69,8 @@ public sealed class ScenarioRunner
                     continue;
                 }
 
-                int commitSnapshotTick = WaitForNextRoundSnapshots(runtime, clients, pendingSnapshotsByBot, lastCommittedSnapshotTickByBot, cfg.TickCount, tick, cts.Token);
+                int expectedSnapshotTick = (tick / cfg.SnapshotEveryTicks) * cfg.SnapshotEveryTicks;
+                int commitSnapshotTick = WaitForExpectedSnapshotTick(runtime, clients, pendingSnapshotsByBot, cfg.TickCount, tick, expectedSnapshotTick, cts.Token);
 
                 foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
@@ -122,10 +123,8 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static int ConnectBots(ServerRuntime runtime, IReadOnlyList<BotClient> clients, CancellationToken ct)
+    private static void ConnectBots(ServerRuntime runtime, IReadOnlyList<BotClient> clients, CancellationToken ct)
     {
-        int serverSteps = 0;
-
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
             client.ConnectAsync("127.0.0.1", runtime.BoundPort, ct).GetAwaiter().GetResult();
@@ -142,8 +141,7 @@ public sealed class ScenarioRunner
                 }
 
                 ct.ThrowIfCancellationRequested();
-                runtime.StepOnce();
-                serverSteps++;
+                runtime.PumpTransportOnce();
                 DrainAllMessages(clients);
 
                 if (client.HasWelcome)
@@ -153,7 +151,6 @@ public sealed class ScenarioRunner
             }
         }
 
-        return serverSteps;
     }
 
     private static void DrainAllMessages(IReadOnlyList<BotClient> clients)
@@ -180,32 +177,30 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static int WaitForNextRoundSnapshots(
+    private static int WaitForExpectedSnapshotTick(
         ServerRuntime runtime,
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
-        IReadOnlyDictionary<int, int> lastCommittedSnapshotTickByBot,
         int tickCount,
         int loopTick,
+        int expectedSnapshotTick,
         CancellationToken ct)
     {
         int maxPolls = Math.Max(50_000, clients.Count * tickCount * 10);
 
-        // IMPORTANT: the simulation tick is already advanced by the main loop StepOnce().
-        // During synchronization we only poll/drain client buffers to avoid introducing
-        // timing-dependent extra simulation steps.
         for (int poll = 0; poll < maxPolls; poll++)
         {
             ct.ThrowIfCancellationRequested();
+            runtime.PumpTransportOnce();
             DrainSnapshots(clients, pendingSnapshotsByBot);
 
             bool ready = clients
                 .OrderBy(c => c.BotIndex)
-                .All(client => HasSnapshotAfterTick(pendingSnapshotsByBot[client.BotIndex], lastCommittedSnapshotTickByBot[client.BotIndex]));
+                .All(client => pendingSnapshotsByBot[client.BotIndex].ContainsKey(expectedSnapshotTick));
 
             if (ready)
             {
-                return FindCommonSnapshotTick(clients, pendingSnapshotsByBot, lastCommittedSnapshotTickByBot);
+                return expectedSnapshotTick;
             }
 
             Thread.Yield();
@@ -222,40 +217,7 @@ public sealed class ScenarioRunner
                 }));
 
         throw new InvalidOperationException(
-            $"Unable to synchronize snapshots (tickCount={tickCount}, loopTick={loopTick}, {perBot}).");
-    }
-
-    private static bool HasSnapshotAfterTick(SortedDictionary<int, Snapshot> pending, int tick)
-    {
-        return pending.Keys.Any(t => t > tick);
-    }
-
-    private static int FindCommonSnapshotTick(
-        IReadOnlyList<BotClient> clients,
-        IReadOnlyDictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
-        IReadOnlyDictionary<int, int> lastCommittedSnapshotTickByBot)
-    {
-        IEnumerable<int>? common = null;
-
-        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
-        {
-            int lastCommitted = lastCommittedSnapshotTickByBot[client.BotIndex];
-            IEnumerable<int> ticks = pendingSnapshotsByBot[client.BotIndex].Keys.Where(t => t > lastCommitted);
-            common = common is null ? ticks : common.Intersect(ticks);
-        }
-
-        if (common is null)
-        {
-            throw new InvalidOperationException("Cannot resolve common snapshot tick for zero clients.");
-        }
-
-        int commitTick = common.DefaultIfEmpty(0).Min();
-        if (commitTick <= 0)
-        {
-            throw new InvalidOperationException("Unable to find common synchronized snapshot tick.");
-        }
-
-        return commitTick;
+            $"Unable to synchronize snapshots (tickCount={tickCount}, loopTick={loopTick}, expectedSnapshotTick={expectedSnapshotTick}, {perBot}).");
     }
 
     private static void Validate(ScenarioConfig cfg)
