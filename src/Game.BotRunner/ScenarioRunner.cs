@@ -64,13 +64,15 @@ public sealed class ScenarioRunner
 
                 int maxSyncSteps = Math.Max(512, cfg.BotCount * 64);
                 int syncSteps = 0;
+                int roundTick = 0;
+                Dictionary<int, Snapshot>? roundSnapshots = null;
 
                 while (!TryBuildRound(
                            clients,
                            pendingSnapshotsByBot,
                            lastRoundSnapshotTickByBot,
-                           out int roundTick,
-                           out Dictionary<int, Snapshot>? roundSnapshots))
+                           out roundTick,
+                           out roundSnapshots))
                 {
                     if (syncSteps++ >= maxSyncSteps)
                     {
@@ -80,6 +82,11 @@ public sealed class ScenarioRunner
                     cts.Token.ThrowIfCancellationRequested();
                     runtime.StepOnce();
                     DrainSnapshots(clients, pendingSnapshotsByBot);
+                }
+
+                if (roundSnapshots is null)
+                {
+                    throw new InvalidOperationException("Round synchronization produced null snapshots.");
                 }
 
                 foreach ((int botIndex, Snapshot snapshot) in roundSnapshots.OrderBy(kvp => kvp.Key))
