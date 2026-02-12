@@ -5,11 +5,16 @@ namespace Game.Server.Tests;
 
 public sealed class ReplayRunnerTests
 {
-    [Fact(Timeout = 20_000)]
-    public void Replay_Verify_BaselineFixture()
+    [Fact]
+    public async Task Replay_Verify_BaselineFixture()
     {
-        using Stream replayStream = OpenFixtureStream();
-        ReplayExecutionResult replayResult = ReplayRunner.RunReplayWithExpected(replayStream);
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(20));
+
+        ReplayExecutionResult replayResult = await Task.Run(() =>
+        {
+            using Stream replayStream = OpenFixtureStream();
+            return ReplayRunner.RunReplayWithExpected(replayStream);
+        }, cts.Token).WaitAsync(cts.Token);
 
         if (!string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum))
         {
@@ -17,7 +22,7 @@ public sealed class ReplayRunnerTests
             return;
         }
 
-        string scenarioChecksum = ScenarioRunner.Run(BaselineScenario.Config);
+        string scenarioChecksum = await Task.Run(() => ScenarioRunner.Run(BaselineScenario.Config), cts.Token).WaitAsync(cts.Token);
         Assert.Equal(scenarioChecksum, replayResult.Checksum);
     }
 
