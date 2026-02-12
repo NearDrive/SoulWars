@@ -144,7 +144,13 @@ public sealed class ScenarioRunner
             {
                 if (message is Snapshot snapshot)
                 {
-                    pendingSnapshotsByBot[client.BotIndex][snapshot.Tick] = snapshot;
+                    if (!pendingSnapshotsByBot.TryGetValue(client.BotIndex, out SortedDictionary<int, Snapshot>? pending))
+                    {
+                        pending = new SortedDictionary<int, Snapshot>();
+                        pendingSnapshotsByBot[client.BotIndex] = pending;
+                    }
+
+                    pending[snapshot.Tick] = snapshot;
                 }
             });
         }
@@ -159,11 +165,14 @@ public sealed class ScenarioRunner
         int snapshotTick,
         CancellationToken ct)
     {
-        int maxPasses = Math.Max(512, clients.Count * 64);
-        int passes = 0;
+        int maxPasses = Math.Max(8_192, clients.Count * tickCount * 4);
 
-        while (true)
+        for (int passes = 0; passes < maxPasses; passes++)
         {
+            ct.ThrowIfCancellationRequested();
+            runtime.StepOnce();
+            DrainSnapshots(clients, pendingSnapshotsByBot);
+
             List<int> candidateMaxTicks = new();
             bool ready = true;
 
@@ -180,36 +189,33 @@ public sealed class ScenarioRunner
                 candidateMaxTicks.Add(botMax);
             }
 
-            if (ready)
+            if (!ready)
             {
-                int commitTick = candidateMaxTicks.Min();
-                if (clients.All(client => HasSnapshotAtOrBeforeTick(pendingSnapshotsByBot[client.BotIndex], commitTick)))
-                {
-                    return commitTick;
-                }
+                Thread.Yield();
+                continue;
             }
 
-            if (passes++ >= maxPasses)
+            int commitTick = candidateMaxTicks.Min();
+            if (clients.All(client => HasSnapshotAtOrBeforeTick(pendingSnapshotsByBot[client.BotIndex], commitTick)))
             {
-                string perBot = string.Join(", ",
-                    clients
-                        .OrderBy(c => c.BotIndex)
-                        .Select(c =>
-                        {
-                            SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[c.BotIndex];
-                            int max = pending.Count == 0 ? 0 : pending.Keys.Max();
-                            return $"bot{c.BotIndex}:maxPending={max}";
-                        }));
-
-                throw new InvalidOperationException(
-                    $"Unable to synchronize snapshots (tickCount={tickCount}, loopTick={loopTick}, expectedSnapshotTick={snapshotTick}, {perBot}).");
+                return commitTick;
             }
 
-            ct.ThrowIfCancellationRequested();
-            runtime.StepOnce();
-            DrainSnapshots(clients, pendingSnapshotsByBot);
             Thread.Yield();
         }
+
+        string perBot = string.Join(", ",
+            clients
+                .OrderBy(c => c.BotIndex)
+                .Select(c =>
+                {
+                    SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[c.BotIndex];
+                    int max = pending.Count == 0 ? 0 : pending.Keys.Max();
+                    return $"bot{c.BotIndex}:maxPending={max}";
+                }));
+
+        throw new InvalidOperationException(
+            $"Unable to synchronize snapshots (tickCount={tickCount}, loopTick={loopTick}, expectedSnapshotTick={snapshotTick}, {perBot}).");
     }
 
     private static Snapshot GetSnapshotForCommitTick(SortedDictionary<int, Snapshot> pending, int commitTick)
