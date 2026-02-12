@@ -42,7 +42,7 @@ public sealed class ScenarioRunner
                 pendingSnapshotsByBot[i] = new SortedDictionary<int, Snapshot>();
             }
 
-            ConnectBots(runtime, clients, cts.Token);
+            int serverStepCount = ConnectBots(runtime, clients, cts.Token);
 
             for (int tick = 1; tick <= cfg.TickCount; tick++)
             {
@@ -53,16 +53,25 @@ public sealed class ScenarioRunner
                 }
 
                 runtime.StepOnce();
+                serverStepCount++;
                 DrainSnapshots(clients, pendingSnapshotsByBot);
-            }
 
-            DrainSnapshotsUntilQuiet(clients, pendingSnapshotsByBot, cts.Token);
+                if (serverStepCount % cfg.SnapshotEveryTicks != 0)
+                {
+                    continue;
+                }
 
-            foreach (int commonTick in GetCommonSnapshotTicks(clients, pendingSnapshotsByBot))
-            {
+                WaitForSnapshotTick(clients, pendingSnapshotsByBot, serverStepCount, cts.Token);
+
                 foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
-                    committedSnapshots[(client.BotIndex, commonTick)] = pendingSnapshotsByBot[client.BotIndex][commonTick];
+                    SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
+                    committedSnapshots[(client.BotIndex, serverStepCount)] = pending[serverStepCount];
+
+                    foreach (int oldTick in pending.Keys.Where(t => t <= serverStepCount).ToList())
+                    {
+                        pending.Remove(oldTick);
+                    }
                 }
             }
 
@@ -97,8 +106,10 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static void ConnectBots(ServerRuntime runtime, IReadOnlyList<BotClient> clients, CancellationToken ct)
+    private static int ConnectBots(ServerRuntime runtime, IReadOnlyList<BotClient> clients, CancellationToken ct)
     {
+        int serverSteps = 0;
+
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
             Task connectTask = client.ConnectAndEnterAsync("127.0.0.1", runtime.BoundPort, ct);
@@ -115,10 +126,14 @@ public sealed class ScenarioRunner
 
                 ct.ThrowIfCancellationRequested();
                 runtime.StepOnce();
+                serverSteps++;
+                Thread.Yield();
             }
 
             connectTask.GetAwaiter().GetResult();
         }
+
+        return serverSteps;
     }
 
     private static void DrainSnapshots(
@@ -137,59 +152,26 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static void DrainSnapshotsUntilQuiet(
+    private static void WaitForSnapshotTick(
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
+        int snapshotTick,
         CancellationToken ct)
     {
-        int quietPasses = 0;
-        int maxPasses = 256;
+        int maxPasses = Math.Max(512, clients.Count * 64);
+        int passes = 0;
 
-        while (quietPasses < 3 && maxPasses-- > 0)
+        while (!clients.All(client => pendingSnapshotsByBot[client.BotIndex].ContainsKey(snapshotTick)))
         {
+            if (passes++ >= maxPasses)
+            {
+                throw new InvalidOperationException($"Unable to synchronize snapshots for tick {snapshotTick}.");
+            }
+
             ct.ThrowIfCancellationRequested();
-
-            int before = pendingSnapshotsByBot.Sum(kvp => kvp.Value.Count);
             DrainSnapshots(clients, pendingSnapshotsByBot);
-            int after = pendingSnapshotsByBot.Sum(kvp => kvp.Value.Count);
-
-            if (after == before)
-            {
-                quietPasses++;
-            }
-            else
-            {
-                quietPasses = 0;
-            }
+            Thread.Yield();
         }
-    }
-
-    private static IEnumerable<int> GetCommonSnapshotTicks(
-        IReadOnlyList<BotClient> clients,
-        Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot)
-    {
-        List<HashSet<int>> sets = new();
-        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
-        {
-            sets.Add(pendingSnapshotsByBot[client.BotIndex].Keys.ToHashSet());
-        }
-
-        if (sets.Count == 0)
-        {
-            return Enumerable.Empty<int>();
-        }
-
-        HashSet<int> common = new(sets[0]);
-        for (int i = 1; i < sets.Count; i++)
-        {
-            common.IntersectWith(sets[i]);
-            if (common.Count == 0)
-            {
-                break;
-            }
-        }
-
-        return common.OrderBy(t => t).ToArray();
     }
 
     private static void Validate(ScenarioConfig cfg)
