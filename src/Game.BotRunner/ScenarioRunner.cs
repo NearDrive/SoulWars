@@ -22,7 +22,6 @@ public sealed class ScenarioRunner
         List<BotClient> clients = new(cfg.BotCount);
         Dictionary<(int BotIndex, int SnapshotTick), Snapshot> committedSnapshots = new();
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot = new();
-        Dictionary<int, int> lastRoundSnapshotTickByBot = new();
         ServerRuntime runtime = new();
 
         try
@@ -41,7 +40,6 @@ public sealed class ScenarioRunner
                 clients.Add(client);
                 agents.Add(new BotAgent(botConfig));
                 pendingSnapshotsByBot[i] = new SortedDictionary<int, Snapshot>();
-                lastRoundSnapshotTickByBot[i] = 0;
             }
 
             ConnectBots(runtime, clients, cts.Token);
@@ -56,49 +54,15 @@ public sealed class ScenarioRunner
 
                 runtime.StepOnce();
                 DrainSnapshots(clients, pendingSnapshotsByBot);
+            }
 
-                if (tick % cfg.SnapshotEveryTicks != 0)
+            DrainSnapshotsUntilQuiet(clients, pendingSnapshotsByBot, cts.Token);
+
+            foreach (int commonTick in GetCommonSnapshotTicks(clients, pendingSnapshotsByBot))
+            {
+                foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
-                    continue;
-                }
-
-                int maxSyncSteps = Math.Max(512, cfg.BotCount * 64);
-                int syncSteps = 0;
-                int roundTick = 0;
-                Dictionary<int, Snapshot>? roundSnapshots = null;
-
-                while (!TryBuildRound(
-                           clients,
-                           pendingSnapshotsByBot,
-                           lastRoundSnapshotTickByBot,
-                           out roundTick,
-                           out roundSnapshots))
-                {
-                    if (syncSteps++ >= maxSyncSteps)
-                    {
-                        throw new InvalidOperationException($"Unable to synchronize snapshots after loopTick={tick}.");
-                    }
-
-                    cts.Token.ThrowIfCancellationRequested();
-                    runtime.StepOnce();
-                    DrainSnapshots(clients, pendingSnapshotsByBot);
-                }
-
-                if (roundSnapshots is null)
-                {
-                    throw new InvalidOperationException("Round synchronization produced null snapshots.");
-                }
-
-                foreach ((int botIndex, Snapshot snapshot) in roundSnapshots.OrderBy(kvp => kvp.Key))
-                {
-                    committedSnapshots[(botIndex, roundTick)] = snapshot;
-                    lastRoundSnapshotTickByBot[botIndex] = roundTick;
-
-                    SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[botIndex];
-                    foreach (int oldTick in pending.Keys.Where(t => t <= roundTick).ToList())
-                    {
-                        pending.Remove(oldTick);
-                    }
+                    committedSnapshots[(client.BotIndex, commonTick)] = pendingSnapshotsByBot[client.BotIndex][commonTick];
                 }
             }
 
@@ -173,49 +137,59 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static bool TryBuildRound(
+    private static void DrainSnapshotsUntilQuiet(
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
-        Dictionary<int, int> lastRoundSnapshotTickByBot,
-        out int roundTick,
-        out Dictionary<int, Snapshot>? roundSnapshots)
+        CancellationToken ct)
     {
-        roundTick = 0;
-        roundSnapshots = null;
+        int quietPasses = 0;
+        int maxPasses = 256;
 
-        Dictionary<int, int> firstNewTickByBot = new();
+        while (quietPasses < 3 && maxPasses-- > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            int before = pendingSnapshotsByBot.Sum(kvp => kvp.Value.Count);
+            DrainSnapshots(clients, pendingSnapshotsByBot);
+            int after = pendingSnapshotsByBot.Sum(kvp => kvp.Value.Count);
+
+            if (after == before)
+            {
+                quietPasses++;
+            }
+            else
+            {
+                quietPasses = 0;
+            }
+        }
+    }
+
+    private static IEnumerable<int> GetCommonSnapshotTicks(
+        IReadOnlyList<BotClient> clients,
+        Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot)
+    {
+        List<HashSet<int>> sets = new();
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
-            int botIndex = client.BotIndex;
-            SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[botIndex];
-            int lastRoundTick = lastRoundSnapshotTickByBot[botIndex];
-
-            int nextTick = pending.Keys.FirstOrDefault(t => t > lastRoundTick);
-            if (nextTick <= lastRoundTick)
-            {
-                return false;
-            }
-
-            firstNewTickByBot[botIndex] = nextTick;
+            sets.Add(pendingSnapshotsByBot[client.BotIndex].Keys.ToHashSet());
         }
 
-        roundTick = firstNewTickByBot.Values.Max();
-
-        Dictionary<int, Snapshot> byBot = new();
-        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
+        if (sets.Count == 0)
         {
-            int botIndex = client.BotIndex;
-            SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[botIndex];
-            if (!pending.TryGetValue(roundTick, out Snapshot? snapshot))
-            {
-                return false;
-            }
-
-            byBot[botIndex] = snapshot;
+            return Enumerable.Empty<int>();
         }
 
-        roundSnapshots = byBot;
-        return true;
+        HashSet<int> common = new(sets[0]);
+        for (int i = 1; i < sets.Count; i++)
+        {
+            common.IntersectWith(sets[i]);
+            if (common.Count == 0)
+            {
+                break;
+            }
+        }
+
+        return common.OrderBy(t => t).ToArray();
     }
 
     private static void Validate(ScenarioConfig cfg)
