@@ -42,7 +42,7 @@ public sealed class ScenarioRunner
                 pendingSnapshotsByBot[i] = new SortedDictionary<int, Snapshot>();
             }
 
-            int serverStepCount = ConnectBots(runtime, clients, cts.Token);
+            _ = ConnectBots(runtime, clients, cts.Token);
 
             for (int tick = 1; tick <= cfg.TickCount; tick++)
             {
@@ -53,22 +53,21 @@ public sealed class ScenarioRunner
                 }
 
                 runtime.StepOnce();
-                serverStepCount++;
                 DrainSnapshots(clients, pendingSnapshotsByBot);
 
-                if (serverStepCount % cfg.SnapshotEveryTicks != 0)
+                if (tick % cfg.SnapshotEveryTicks != 0)
                 {
                     continue;
                 }
 
-                WaitForSnapshotTick(clients, pendingSnapshotsByBot, serverStepCount, cts.Token);
+                WaitForSnapshotTick(runtime, clients, pendingSnapshotsByBot, cfg.TickCount, tick, tick, cts.Token);
 
                 foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
                     SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
-                    committedSnapshots[(client.BotIndex, serverStepCount)] = pending[serverStepCount];
+                    committedSnapshots[(client.BotIndex, tick)] = pending[tick];
 
-                    foreach (int oldTick in pending.Keys.Where(t => t <= serverStepCount).ToList())
+                    foreach (int oldTick in pending.Keys.Where(t => t <= tick).ToList())
                     {
                         pending.Remove(oldTick);
                     }
@@ -153,8 +152,11 @@ public sealed class ScenarioRunner
     }
 
     private static void WaitForSnapshotTick(
+        ServerRuntime runtime,
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
+        int tickCount,
+        int loopTick,
         int snapshotTick,
         CancellationToken ct)
     {
@@ -165,10 +167,22 @@ public sealed class ScenarioRunner
         {
             if (passes++ >= maxPasses)
             {
-                throw new InvalidOperationException($"Unable to synchronize snapshots for tick {snapshotTick}.");
+                string perBot = string.Join(", ",
+                    clients
+                        .OrderBy(c => c.BotIndex)
+                        .Select(c =>
+                        {
+                            SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[c.BotIndex];
+                            int max = pending.Count == 0 ? 0 : pending.Keys.Max();
+                            return $"bot{c.BotIndex}:maxPending={max}";
+                        }));
+
+                throw new InvalidOperationException(
+                    $"Unable to synchronize snapshots (tickCount={tickCount}, loopTick={loopTick}, expectedSnapshotTick={snapshotTick}, {perBot}).");
             }
 
             ct.ThrowIfCancellationRequested();
+            runtime.StepOnce();
             DrainSnapshots(clients, pendingSnapshotsByBot);
             Thread.Yield();
         }
