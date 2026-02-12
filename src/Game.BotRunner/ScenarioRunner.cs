@@ -189,9 +189,12 @@ public sealed class ScenarioRunner
         int loopTick,
         CancellationToken ct)
     {
-        int maxSteps = Math.Max(50_000, clients.Count * tickCount * 10);
+        int maxPolls = Math.Max(50_000, clients.Count * tickCount * 10);
 
-        for (int step = 0; step < maxSteps; step++)
+        // IMPORTANT: the simulation tick is already advanced by the main loop StepOnce().
+        // During synchronization we only poll/drain client buffers to avoid introducing
+        // timing-dependent extra simulation steps.
+        for (int poll = 0; poll < maxPolls; poll++)
         {
             ct.ThrowIfCancellationRequested();
             DrainSnapshots(clients, pendingSnapshotsByBot);
@@ -205,7 +208,6 @@ public sealed class ScenarioRunner
                 return FindCommonSnapshotTick(clients, pendingSnapshotsByBot, lastCommittedSnapshotTickByBot);
             }
 
-            runtime.StepOnce();
             Thread.Yield();
         }
 
