@@ -69,12 +69,18 @@ public sealed class ScenarioRunner
                     continue;
                 }
 
-                WaitForNextRoundSnapshots(runtime, clients, pendingSnapshotsByBot, lastCommittedSnapshotTickByBot, cfg.TickCount, tick, cts.Token);
+                int commitSnapshotTick = WaitForNextRoundSnapshots(runtime, clients, pendingSnapshotsByBot, lastCommittedSnapshotTickByBot, cfg.TickCount, tick, cts.Token);
 
                 foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
                     SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
-                    (int selectedTick, Snapshot snapshot) = GetNextSnapshotAfterTick(pending, lastCommittedSnapshotTickByBot[client.BotIndex]);
+                    if (!pending.TryGetValue(commitSnapshotTick, out Snapshot? snapshot))
+                    {
+                        throw new InvalidOperationException(
+                            $"Missing synchronized snapshot for bot={client.BotIndex} scenarioTick={tick} commitSnapshotTick={commitSnapshotTick}.");
+                    }
+
+                    int selectedTick = commitSnapshotTick;
                     committedSnapshots[(client.BotIndex, tick)] = snapshot;
                     lastCommittedSnapshotTickByBot[client.BotIndex] = selectedTick;
 
@@ -170,7 +176,7 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static void WaitForNextRoundSnapshots(
+    private static int WaitForNextRoundSnapshots(
         ServerRuntime runtime,
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
@@ -192,7 +198,7 @@ public sealed class ScenarioRunner
 
             if (ready)
             {
-                return;
+                return FindCommonSnapshotTick(clients, pendingSnapshotsByBot, lastCommittedSnapshotTickByBot);
             }
 
             runtime.StepOnce();
@@ -218,17 +224,32 @@ public sealed class ScenarioRunner
         return pending.Keys.Any(t => t > tick);
     }
 
-    private static (int Tick, Snapshot Snapshot) GetNextSnapshotAfterTick(SortedDictionary<int, Snapshot> pending, int tick)
+    private static int FindCommonSnapshotTick(
+        IReadOnlyList<BotClient> clients,
+        IReadOnlyDictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
+        IReadOnlyDictionary<int, int> lastCommittedSnapshotTickByBot)
     {
-        foreach ((int pendingTick, Snapshot snapshot) in pending)
+        IEnumerable<int>? common = null;
+
+        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
-            if (pendingTick > tick)
-            {
-                return (pendingTick, snapshot);
-            }
+            int lastCommitted = lastCommittedSnapshotTickByBot[client.BotIndex];
+            IEnumerable<int> ticks = pendingSnapshotsByBot[client.BotIndex].Keys.Where(t => t > lastCommitted);
+            common = common is null ? ticks : common.Intersect(ticks);
         }
 
-        throw new InvalidOperationException($"No snapshot after tick={tick}.");
+        if (common is null)
+        {
+            throw new InvalidOperationException("Cannot resolve common snapshot tick for zero clients.");
+        }
+
+        int commitTick = common.DefaultIfEmpty(0).Min();
+        if (commitTick <= 0)
+        {
+            throw new InvalidOperationException("Unable to find common synchronized snapshot tick.");
+        }
+
+        return commitTick;
     }
 
     private static void Validate(ScenarioConfig cfg)
