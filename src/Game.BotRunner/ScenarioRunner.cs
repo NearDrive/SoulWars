@@ -156,7 +156,7 @@ public sealed class ScenarioRunner
                     client.EnterZone();
                 }
 
-                host.StepOnce();
+                host.ProcessInboundOnce();
                 DrainAllMessagesForTests(clients);
             }
         }
@@ -191,6 +191,15 @@ public sealed class ScenarioRunner
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
         int expectedSnapshotTick)
     {
+        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
+        {
+            SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
+            foreach (int staleTick in pending.Keys.Where(t => t < expectedSnapshotTick).ToList())
+            {
+                pending.Remove(staleTick);
+            }
+        }
+
         bool ready = clients
             .OrderBy(c => c.BotIndex)
             .All(client => pendingSnapshotsByBot[client.BotIndex].ContainsKey(expectedSnapshotTick));
