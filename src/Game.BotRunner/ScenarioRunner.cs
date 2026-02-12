@@ -20,7 +20,7 @@ public sealed class ScenarioRunner
 
         using ScenarioChecksumBuilder checksum = new();
         List<BotClient> clients = new(cfg.BotCount);
-        Dictionary<(int BotIndex, int SnapshotTick), Snapshot> committedSnapshots = new();
+        List<(int RoundTick, int BotIndex, Snapshot Snapshot)> committedSnapshots = new();
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot = new();
         ServerRuntime runtime = new();
 
@@ -65,7 +65,7 @@ public sealed class ScenarioRunner
                 foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
                     SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
-                    committedSnapshots[(client.BotIndex, commitTick)] = GetSnapshotForCommitTick(pending, commitTick);
+                    committedSnapshots.Add((tick, client.BotIndex, GetSnapshotForCommitTick(pending, commitTick)));
 
                     foreach (int oldTick in pending.Keys.Where(t => t <= commitTick).ToList())
                     {
@@ -74,12 +74,11 @@ public sealed class ScenarioRunner
                 }
             }
 
-            foreach (((int botIndex, int snapshotTick), Snapshot snapshot) in committedSnapshots
-                         .OrderBy(kvp => kvp.Key.SnapshotTick)
-                         .ThenBy(kvp => kvp.Key.BotIndex)
-                         .Select(kvp => (kvp.Key, kvp.Value)))
+            foreach ((int roundTick, int botIndex, Snapshot snapshot) in committedSnapshots
+                         .OrderBy(entry => entry.RoundTick)
+                         .ThenBy(entry => entry.BotIndex))
             {
-                checksum.AppendSnapshot(snapshotTick, botIndex, snapshot);
+                checksum.AppendSnapshot(roundTick, botIndex, snapshot);
             }
 
             string finalChecksum = checksum.BuildHexLower();
