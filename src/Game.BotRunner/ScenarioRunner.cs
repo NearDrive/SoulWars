@@ -20,7 +20,7 @@ public sealed class ScenarioRunner
 
         using ScenarioChecksumBuilder checksum = new();
         List<BotClient> clients = new(cfg.BotCount);
-        List<(int RoundTick, int BotIndex, Snapshot Snapshot)> committedSnapshots = new();
+        Dictionary<(int BotIndex, int Tick), Snapshot> committedSnapshots = new();
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot = new();
         ServerRuntime runtime = new();
 
@@ -44,6 +44,13 @@ public sealed class ScenarioRunner
 
             _ = ConnectBots(runtime, clients, cts.Token);
 
+            // Ignore snapshots that may have been received during handshake.
+            DrainAllMessages(clients);
+            foreach (SortedDictionary<int, Snapshot> pending in pendingSnapshotsByBot.Values)
+            {
+                pending.Clear();
+            }
+
             for (int tick = 1; tick <= cfg.TickCount; tick++)
             {
                 for (int i = 0; i < agents.Count; i++)
@@ -53,33 +60,38 @@ public sealed class ScenarioRunner
                 }
 
                 runtime.StepOnce();
-                DrainSnapshots(clients, pendingSnapshotsByBot);
+                DrainSnapshots(clients, pendingSnapshotsByBot, cfg.TickCount, cfg.SnapshotEveryTicks);
 
                 if (tick % cfg.SnapshotEveryTicks != 0)
                 {
                     continue;
                 }
 
-                WaitForSnapshotTick(runtime, clients, pendingSnapshotsByBot, cfg.TickCount, tick, tick, cts.Token);
+                WaitForSnapshotTick(runtime, clients, pendingSnapshotsByBot, cfg.TickCount, tick, cfg.SnapshotEveryTicks, cts.Token);
 
                 foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
                     SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
-                    (int selectedTick, Snapshot selectedSnapshot) = GetSnapshotAtOrAfterTick(pending, tick);
-                    committedSnapshots.Add((tick, client.BotIndex, selectedSnapshot));
+                    if (!pending.TryGetValue(tick, out Snapshot? snapshot))
+                    {
+                        throw new InvalidOperationException($"Missing canonical snapshot for bot={client.BotIndex} tick={tick}.");
+                    }
 
-                    foreach (int oldTick in pending.Keys.Where(t => t <= selectedTick).ToList())
+                    committedSnapshots[(client.BotIndex, tick)] = snapshot;
+
+                    foreach (int oldTick in pending.Keys.Where(t => t <= tick).ToList())
                     {
                         pending.Remove(oldTick);
                     }
                 }
             }
 
-            foreach ((int roundTick, int botIndex, Snapshot snapshot) in committedSnapshots
-                         .OrderBy(entry => entry.RoundTick)
-                         .ThenBy(entry => entry.BotIndex))
+            foreach (((int botIndex, int tick), Snapshot snapshot) in committedSnapshots
+                         .OrderBy(entry => entry.Key.Tick)
+                         .ThenBy(entry => entry.Key.BotIndex)
+                         .Select(entry => (entry.Key, entry.Value)))
             {
-                checksum.AppendSnapshot(roundTick, botIndex, snapshot);
+                checksum.AppendSnapshot(tick, botIndex, snapshot);
             }
 
             string finalChecksum = checksum.BuildHexLower();
@@ -135,24 +147,40 @@ public sealed class ScenarioRunner
         return serverSteps;
     }
 
+    private static void DrainAllMessages(IReadOnlyList<BotClient> clients)
+    {
+        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
+        {
+            client.DrainMessages(_ => { });
+        }
+    }
+
     private static void DrainSnapshots(
         IReadOnlyList<BotClient> clients,
-        Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot)
+        Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
+        int tickCount,
+        int snapshotEveryTicks)
     {
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
             client.DrainMessages(message =>
             {
-                if (message is Snapshot snapshot)
+                if (message is not Snapshot snapshot)
                 {
-                    if (!pendingSnapshotsByBot.TryGetValue(client.BotIndex, out SortedDictionary<int, Snapshot>? pending))
-                    {
-                        pending = new SortedDictionary<int, Snapshot>();
-                        pendingSnapshotsByBot[client.BotIndex] = pending;
-                    }
-
-                    pending[snapshot.Tick] = snapshot;
+                    return;
                 }
+
+                if (snapshot.Tick < 1 || snapshot.Tick > tickCount)
+                {
+                    return;
+                }
+
+                if (snapshot.Tick % snapshotEveryTicks != 0)
+                {
+                    return;
+                }
+
+                pendingSnapshotsByBot[client.BotIndex][snapshot.Tick] = snapshot;
             });
         }
     }
@@ -162,26 +190,27 @@ public sealed class ScenarioRunner
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
         int tickCount,
-        int loopTick,
-        int snapshotTick,
+        int expectedSnapshotTick,
+        int snapshotEveryTicks,
         CancellationToken ct)
     {
-        int maxPasses = Math.Max(8_192, clients.Count * tickCount * 4);
+        int maxSteps = Math.Max(50_000, clients.Count * tickCount * 10);
 
-        for (int passes = 0; passes < maxPasses; passes++)
+        for (int step = 0; step < maxSteps; step++)
         {
             ct.ThrowIfCancellationRequested();
-            DrainSnapshots(clients, pendingSnapshotsByBot);
+            DrainSnapshots(clients, pendingSnapshotsByBot, tickCount, snapshotEveryTicks);
 
             bool ready = clients
                 .OrderBy(c => c.BotIndex)
-                .All(client => pendingSnapshotsByBot[client.BotIndex].Keys.Any(t => t >= snapshotTick));
+                .All(client => pendingSnapshotsByBot[client.BotIndex].ContainsKey(expectedSnapshotTick));
 
             if (ready)
             {
                 return;
             }
 
+            runtime.StepOnce();
             Thread.Yield();
         }
 
@@ -196,20 +225,7 @@ public sealed class ScenarioRunner
                 }));
 
         throw new InvalidOperationException(
-            $"Unable to synchronize snapshots (tickCount={tickCount}, loopTick={loopTick}, expectedSnapshotTick={snapshotTick}, {perBot}).");
-    }
-
-    private static (int Tick, Snapshot Snapshot) GetSnapshotAtOrAfterTick(SortedDictionary<int, Snapshot> pending, int expectedTick)
-    {
-        foreach ((int tick, Snapshot snapshot) in pending)
-        {
-            if (tick >= expectedTick)
-            {
-                return (tick, snapshot);
-            }
-        }
-
-        throw new InvalidOperationException($"No snapshot at or after expectedTick={expectedTick}.");
+            $"Unable to synchronize snapshots (tickCount={tickCount}, expectedSnapshotTick={expectedSnapshotTick}, {perBot}).");
     }
 
     private static void Validate(ScenarioConfig cfg)
