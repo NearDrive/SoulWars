@@ -60,14 +60,14 @@ public sealed class ScenarioRunner
                     continue;
                 }
 
-                WaitForSnapshotTick(runtime, clients, pendingSnapshotsByBot, cfg.TickCount, tick, tick, cts.Token);
+                int commitTick = WaitForSnapshotTick(runtime, clients, pendingSnapshotsByBot, cfg.TickCount, tick, tick, cts.Token);
 
                 foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
                     SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
-                    committedSnapshots[(client.BotIndex, tick)] = pending[tick];
+                    committedSnapshots[(client.BotIndex, commitTick)] = GetSnapshotForCommitTick(pending, commitTick);
 
-                    foreach (int oldTick in pending.Keys.Where(t => t <= tick).ToList())
+                    foreach (int oldTick in pending.Keys.Where(t => t <= commitTick).ToList())
                     {
                         pending.Remove(oldTick);
                     }
@@ -151,7 +151,7 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static void WaitForSnapshotTick(
+    private static int WaitForSnapshotTick(
         ServerRuntime runtime,
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
@@ -163,8 +163,33 @@ public sealed class ScenarioRunner
         int maxPasses = Math.Max(512, clients.Count * 64);
         int passes = 0;
 
-        while (!clients.All(client => pendingSnapshotsByBot[client.BotIndex].ContainsKey(snapshotTick)))
+        while (true)
         {
+            List<int> candidateMaxTicks = new();
+            bool ready = true;
+
+            foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
+            {
+                SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
+                int botMax = pending.Keys.Where(t => t >= snapshotTick).DefaultIfEmpty(-1).Max();
+                if (botMax < snapshotTick)
+                {
+                    ready = false;
+                    break;
+                }
+
+                candidateMaxTicks.Add(botMax);
+            }
+
+            if (ready)
+            {
+                int commitTick = candidateMaxTicks.Min();
+                if (clients.All(client => HasSnapshotAtOrBeforeTick(pendingSnapshotsByBot[client.BotIndex], commitTick)))
+                {
+                    return commitTick;
+                }
+            }
+
             if (passes++ >= maxPasses)
             {
                 string perBot = string.Join(", ",
@@ -186,6 +211,24 @@ public sealed class ScenarioRunner
             DrainSnapshots(clients, pendingSnapshotsByBot);
             Thread.Yield();
         }
+    }
+
+    private static Snapshot GetSnapshotForCommitTick(SortedDictionary<int, Snapshot> pending, int commitTick)
+    {
+        foreach ((int tick, Snapshot snapshot) in pending.Reverse())
+        {
+            if (tick <= commitTick)
+            {
+                return snapshot;
+            }
+        }
+
+        throw new InvalidOperationException($"No snapshot at or before commitTick={commitTick}.");
+    }
+
+    private static bool HasSnapshotAtOrBeforeTick(SortedDictionary<int, Snapshot> pending, int commitTick)
+    {
+        return pending.Keys.Any(tick => tick <= commitTick);
     }
 
     private static void Validate(ScenarioConfig cfg)
