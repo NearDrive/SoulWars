@@ -26,4 +26,18 @@ public sealed record Snapshot(int Tick, int ZoneId, SnapshotEntity[] Entities) :
 
 public sealed record Error(string Code, string Message) : IServerMessage;
 
-public sealed record SnapshotEntity(int EntityId, int PosXRaw, int PosYRaw, int VelXRaw = 0, int VelYRaw = 0, int Hp = 0);
+public enum SnapshotEntityKind : byte
+{
+    Unknown = 0,
+    Player = 1,
+    Npc = 2
+}
+
+public sealed record SnapshotEntity(
+    int EntityId,
+    int PosXRaw,
+    int PosYRaw,
+    int VelXRaw = 0,
+    int VelYRaw = 0,
+    int Hp = 0,
+    SnapshotEntityKind Kind = SnapshotEntityKind.Unknown);
