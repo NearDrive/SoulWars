@@ -12,6 +12,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Game.Persistence", "src/Gam
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Game.BotRunner", "src/Game.BotRunner/Game.BotRunner.csproj", "{A8C4F7E4-6354-4BDF-AD5D-8C33EC6BEDE0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Game.App.Headless", "src/Game.App.Headless/Game.App.Headless.csproj", "{B15A3588-A06C-46D3-9EC8-29EC9D3D5EE2}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Game.Core.Tests", "tests/Game.Core.Tests/Game.Core.Tests.csproj", "{A40461CA-7EA0-4B15-BBE8-63F7192A66E5}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Game.Server.Tests", "tests/Game.Server.Tests/Game.Server.Tests.csproj", "{757EDAA5-25A0-4BBD-9894-C6525A1916E2}"
@@ -42,6 +44,10 @@ Global
 		{A8C4F7E4-6354-4BDF-AD5D-8C33EC6BEDE0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A8C4F7E4-6354-4BDF-AD5D-8C33EC6BEDE0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A8C4F7E4-6354-4BDF-AD5D-8C33EC6BEDE0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B15A3588-A06C-46D3-9EC8-29EC9D3D5EE2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B15A3588-A06C-46D3-9EC8-29EC9D3D5EE2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B15A3588-A06C-46D3-9EC8-29EC9D3D5EE2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B15A3588-A06C-46D3-9EC8-29EC9D3D5EE2}.Release|Any CPU.Build.0 = Release|Any CPU
 		{A40461CA-7EA0-4B15-BBE8-63F7192A66E5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{A40461CA-7EA0-4B15-BBE8-63F7192A66E5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A40461CA-7EA0-4B15-BBE8-63F7192A66E5}.Release|Any CPU.ActiveCfg = Release|Any CPU

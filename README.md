@@ -23,3 +23,20 @@ CI is the source of truth.
 PR-01 keeps positions as integer coordinates to avoid floating-point drift. PR-02 is expected to introduce `Vec2` float movement and collision logic.
 
 State checksums are computed from a stable binary serialization and do not depend on JSON formatting.
+
+## MVP1 verification (headless)
+
+```bash
+dotnet test -c Release
+```
+Runs unit/integration coverage including deterministic replay assertions.
+
+```bash
+dotnet run -c Release --project src/Game.App.Headless -- --verify-mvp1
+```
+Runs the replay baseline fixture and prints expected vs actual checksum as an explicit MVP1 gate.
+
+```bash
+dotnet run -c Release --project src/Game.App.Headless -- --run-scenario
+```
+Runs a short deterministic bot scenario headless and prints a summary with invariant status.
