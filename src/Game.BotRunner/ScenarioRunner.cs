@@ -213,6 +213,8 @@ public sealed class ScenarioRunner
                 ct.ThrowIfCancellationRequested();
                 DrainAllMessagesForTests(clients);
 
+                client.SendHelloIfNeeded();
+
                 if (client.HasWelcome)
                 {
                     client.EnterZone();

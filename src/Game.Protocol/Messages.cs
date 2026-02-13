@@ -10,6 +10,8 @@ public interface IServerMessage;
 
 public sealed record Hello(string ClientVersion) : IClientMessage;
 
+public sealed record HelloV2(string ClientVersion, string AccountId) : IClientMessage;
+
 public sealed record EnterZoneRequest(int ZoneId) : IClientMessage;
 
 public sealed record InputCommand(int Tick, sbyte MoveX, sbyte MoveY) : IClientMessage;
@@ -20,7 +22,7 @@ public sealed record LeaveZoneRequest(int ZoneId) : IClientMessage;
 
 public sealed record TeleportRequest(int ToZoneId) : IClientMessage;
 
-public sealed record Welcome(SessionId SessionId) : IServerMessage;
+public sealed record Welcome(SessionId SessionId, PlayerId PlayerId) : IServerMessage;
 
 public sealed record EnterZoneAck(int ZoneId, int EntityId) : IServerMessage;
 

@@ -6,6 +6,7 @@ namespace Game.Protocol;
 public static class ProtocolCodec
 {
     private const byte ClientHello = 1;
+    private const byte ClientHelloV2 = 7;
     private const byte ClientEnterZoneRequest = 2;
     private const byte ClientInputCommand = 3;
     private const byte ClientLeaveZoneRequest = 4;
@@ -24,6 +25,7 @@ public static class ProtocolCodec
         return msg switch
         {
             Hello hello => EncodeHello(hello),
+            HelloV2 helloV2 => EncodeHelloV2(helloV2),
             EnterZoneRequest request => EncodeIntMessage(ClientEnterZoneRequest, request.ZoneId),
             InputCommand input => EncodeInputCommand(input),
             AttackIntent attack => EncodeAttackIntent(attack),
@@ -56,6 +58,8 @@ public static class ProtocolCodec
         {
             case ClientHello:
                 return TryDecodeHello(data, out msg, out error);
+            case ClientHelloV2:
+                return TryDecodeHelloV2(data, out msg, out error);
             case ClientEnterZoneRequest:
                 if (!TryReadInt32(data, 1, out int enterZoneId, out error))
                 {
@@ -117,7 +121,7 @@ public static class ProtocolCodec
 
         return msg switch
         {
-            Welcome welcome => EncodeIntMessage(ServerWelcome, welcome.SessionId.Value),
+            Welcome welcome => EncodeWelcome(welcome),
             EnterZoneAck ack => EncodeEnterZoneAck(ack),
             Snapshot snapshot => EncodeSnapshot(snapshot),
             Error error => EncodeError(error),
@@ -147,12 +151,19 @@ public static class ProtocolCodec
         switch (data[0])
         {
             case ServerWelcome:
-                if (!TryReadInt32(data, 1, out int sessionId, out error))
+                if (!TryReadInt32(data, 1, out int sessionId, out error) ||
+                    !TryReadInt32(data, 5, out int playerId, out error))
                 {
                     return false;
                 }
 
-                msg = new Welcome(new SessionId(sessionId));
+                if (sessionId <= 0 || playerId <= 0)
+                {
+                    error = ProtocolErrorCode.ValueOutOfRange;
+                    return false;
+                }
+
+                msg = new Welcome(new SessionId(sessionId), new PlayerId(playerId));
                 error = ProtocolErrorCode.None;
                 return true;
             case ServerEnterZoneAck:
@@ -213,6 +224,62 @@ public static class ProtocolCodec
 
         string version = Encoding.UTF8.GetString(data.Slice(5, length));
         msg = new Hello(version);
+        error = ProtocolErrorCode.None;
+        return true;
+    }
+
+
+    private static byte[] EncodeHelloV2(HelloV2 hello)
+    {
+        byte[] version = Encoding.UTF8.GetBytes(hello.ClientVersion ?? string.Empty);
+        byte[] accountId = Encoding.UTF8.GetBytes(hello.AccountId ?? string.Empty);
+        byte[] data = new byte[1 + 4 + version.Length + 4 + accountId.Length];
+        data[0] = ClientHelloV2;
+        WriteInt32(data, 1, version.Length);
+        version.CopyTo(data.AsSpan(5));
+
+        int accountLengthOffset = 5 + version.Length;
+        WriteInt32(data, accountLengthOffset, accountId.Length);
+        accountId.CopyTo(data.AsSpan(accountLengthOffset + 4));
+        return data;
+    }
+
+    private static bool TryDecodeHelloV2(ReadOnlySpan<byte> data, out IClientMessage? msg, out ProtocolErrorCode error)
+    {
+        msg = null;
+        if (!TryReadInt32(data, 1, out int versionLength, out error))
+        {
+            return false;
+        }
+
+        if (versionLength < 0)
+        {
+            error = ProtocolErrorCode.InvalidLength;
+            return false;
+        }
+
+        int accountLengthOffset = 5 + versionLength;
+        if (!TryReadInt32(data, accountLengthOffset, out int accountLength, out error))
+        {
+            return false;
+        }
+
+        if (accountLength < 0)
+        {
+            error = ProtocolErrorCode.InvalidLength;
+            return false;
+        }
+
+        long required = (long)accountLengthOffset + 4 + accountLength;
+        if (required > data.Length)
+        {
+            error = ProtocolErrorCode.Truncated;
+            return false;
+        }
+
+        string version = Encoding.UTF8.GetString(data.Slice(5, versionLength));
+        string accountId = Encoding.UTF8.GetString(data.Slice(accountLengthOffset + 4, accountLength));
+        msg = new HelloV2(version, accountId);
         error = ProtocolErrorCode.None;
         return true;
     }
@@ -310,6 +377,16 @@ public static class ProtocolCodec
         byte[] data = new byte[1 + 4];
         data[0] = type;
         WriteInt32(data, 1, value);
+        return data;
+    }
+
+
+    private static byte[] EncodeWelcome(Welcome welcome)
+    {
+        byte[] data = new byte[1 + 4 + 4];
+        data[0] = ServerWelcome;
+        WriteInt32(data, 1, welcome.SessionId.Value);
+        WriteInt32(data, 5, welcome.PlayerId.Value);
         return data;
     }
 

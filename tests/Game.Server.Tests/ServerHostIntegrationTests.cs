@@ -22,8 +22,8 @@ public sealed class ServerHostIntegrationTests
         await using HeadlessClient client = new();
         await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);
 
+        client.Send(new HelloV2("test-client", "alice"));
         _ = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
-        client.Send(new Hello("test-client"));
         client.EnterZone(1);
 
         EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
@@ -48,8 +48,8 @@ public sealed class ServerHostIntegrationTests
         await using HeadlessClient client = new();
         await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);
 
+        client.Send(new HelloV2("teleport-client", "teleporter"));
         _ = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
-        client.Send(new Hello("teleport-client"));
         client.EnterZone(1);
 
         EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
@@ -79,8 +79,8 @@ public sealed class ServerHostIntegrationTests
         await using HeadlessClient client = new();
         await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);
 
+        client.Send(new HelloV2("test-client", "alice"));
         _ = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
-        client.Send(new Hello("test-client"));
         client.EnterZone(1);
 
         EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
@@ -166,8 +166,8 @@ public sealed class ServerHostIntegrationTests
         await using HeadlessClient client = new();
         await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);
 
+        client.Send(new HelloV2("determinism-client", "determinism"));
         _ = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
-        client.Send(new Hello("determinism-client"));
         client.EnterZone(1);
 
         EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));

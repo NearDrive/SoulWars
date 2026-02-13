@@ -12,6 +12,7 @@ public sealed class ServerHost
     private readonly ServerConfig _serverConfig;
     private readonly Dictionary<int, SessionState> _sessions = new();
     private readonly ILogger<ServerHost> _logger;
+    private readonly PlayerRegistry _playerRegistry = new();
 
     private int _nextSessionId = 1;
     private int _nextEntityId = 1;
@@ -46,9 +47,6 @@ public sealed class ServerHost
         SessionId sessionId = new(_nextSessionId++);
         SessionState session = new(sessionId, endpoint);
         _sessions[sessionId.Value] = session;
-
-        endpoint.EnqueueToClient(ProtocolCodec.Encode(new Welcome(sessionId)));
-        Metrics.IncrementMessagesOut();
         Metrics.SetPlayersConnected(_sessions.Count);
 
         _logger.LogInformation(ServerLogEvents.SessionConnected, "SessionConnected sessionId={SessionId}", sessionId.Value);
@@ -188,7 +186,11 @@ public sealed class ServerHost
 
             switch (message)
             {
-                case Hello:
+                case Hello hello:
+                    HandleHello(session, hello.ClientVersion, $"legacy-session-{session.SessionId.Value}");
+                    break;
+                case HelloV2 helloV2:
+                    HandleHello(session, helloV2.ClientVersion, helloV2.AccountId);
                     break;
                 case EnterZoneRequest enterZoneRequest:
                     HandleEnterZone(session, enterZoneRequest, worldCommands);
@@ -209,29 +211,76 @@ public sealed class ServerHost
         }
     }
 
-    private void HandleEnterZone(SessionState session, EnterZoneRequest request, List<WorldCommand> worldCommands)
+    private void HandleHello(SessionState session, string clientVersion, string accountId)
     {
-        if (session.EntityId is null)
+        string normalizedAccountId = string.IsNullOrWhiteSpace(accountId)
+            ? $"anon-session-{session.SessionId.Value}"
+            : accountId.Trim();
+
+        PlayerId playerId = _playerRegistry.GetOrCreate(normalizedAccountId);
+        if (_playerRegistry.TryGetActiveSession(playerId, out SessionId existingSessionId) &&
+            existingSessionId.Value != session.SessionId.Value &&
+            _sessions.TryGetValue(existingSessionId.Value, out SessionState? existingSession))
         {
-            session.EntityId = _nextEntityId++;
+            DisconnectSession(existingSession, "replaced_by_new_login");
         }
 
+        _playerRegistry.AttachSession(playerId, session.SessionId);
+        session.AccountId = normalizedAccountId;
+        session.PlayerId = playerId;
+
+        if (_playerRegistry.TryGetState(playerId, out PlayerState? state))
+        {
+            session.EntityId = state.EntityId;
+            session.ActiveZoneId = state.ZoneId;
+        }
+
+        session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Welcome(session.SessionId, playerId)));
+        Metrics.IncrementMessagesOut();
+    }
+
+    private void HandleEnterZone(SessionState session, EnterZoneRequest request, List<WorldCommand> worldCommands)
+    {
+        if (session.PlayerId is null)
+        {
+            return;
+        }
+
+        if (!_playerRegistry.TryGetState(session.PlayerId.Value, out PlayerState? playerState))
+        {
+            return;
+        }
+
+        int entityId;
+        if (playerState.EntityId is int existingEntityId &&
+            _world.TryGetEntityZone(new EntityId(existingEntityId), out ZoneId existingZoneId) &&
+            existingZoneId.Value == request.ZoneId)
+        {
+            entityId = existingEntityId;
+        }
+        else
+        {
+            entityId = playerState.EntityId ?? _nextEntityId++;
+            worldCommands.Add(new WorldCommand(
+                Kind: WorldCommandKind.EnterZone,
+                EntityId: new EntityId(entityId),
+                ZoneId: new ZoneId(request.ZoneId)));
+        }
+
+        session.EntityId = entityId;
         session.ActiveZoneId = request.ZoneId;
+        _playerRegistry.UpdateWorldState(session.PlayerId.Value, entityId, request.ZoneId, isAlive: true);
 
-        worldCommands.Add(new WorldCommand(
-            Kind: WorldCommandKind.EnterZone,
-            EntityId: new EntityId(session.EntityId.Value),
-            ZoneId: new ZoneId(request.ZoneId)));
-
-        session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new EnterZoneAck(request.ZoneId, session.EntityId.Value)));
+        session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new EnterZoneAck(request.ZoneId, entityId)));
         Metrics.IncrementMessagesOut();
 
         _logger.LogInformation(
             ServerLogEvents.SessionEnteredZone,
-            "SessionEnteredZone sessionId={SessionId} zoneId={ZoneId} entityId={EntityId}",
+            "SessionEnteredZone sessionId={SessionId} playerId={PlayerId} zoneId={ZoneId} entityId={EntityId}",
             session.SessionId.Value,
+            session.PlayerId.Value.Value,
             request.ZoneId,
-            session.EntityId.Value);
+            entityId);
     }
 
 
@@ -332,6 +381,16 @@ public sealed class ServerHost
             if (_world.TryGetEntityZone(new EntityId(session.EntityId.Value), out ZoneId zoneId))
             {
                 session.ActiveZoneId = zoneId.Value;
+                if (session.PlayerId is PlayerId playerId)
+                {
+                    _playerRegistry.UpdateWorldState(playerId, session.EntityId.Value, zoneId.Value, isAlive: true);
+                }
+            }
+            else if (session.PlayerId is PlayerId playerId)
+            {
+                _playerRegistry.UpdateWorldState(playerId, null, null, isAlive: false);
+                session.EntityId = null;
+                session.ActiveZoneId = null;
             }
         }
     }
@@ -418,6 +477,15 @@ public sealed class ServerHost
     {
         if (_sessions.Remove(session.SessionId.Value))
         {
+            if (session.PlayerId is PlayerId playerId)
+            {
+                _playerRegistry.DetachSession(session.SessionId);
+                if (_playerRegistry.TryGetState(playerId, out PlayerState? state))
+                {
+                    _playerRegistry.UpdateWorldState(playerId, state.EntityId, state.ZoneId, state.IsAlive);
+                }
+            }
+
             session.Endpoint.Close();
             Metrics.SetPlayersConnected(_sessions.Count);
             _logger.LogInformation(ServerLogEvents.SessionDisconnected, "SessionDisconnected sessionId={SessionId} reason={Reason}", session.SessionId.Value, reason);
@@ -435,6 +503,10 @@ public sealed class ServerHost
         public SessionId SessionId { get; }
 
         public IServerEndpoint Endpoint { get; }
+
+        public string? AccountId { get; set; }
+
+        public PlayerId? PlayerId { get; set; }
 
         public int? EntityId { get; set; }
 

@@ -24,8 +24,8 @@ public sealed class VisibilitySnapshotTests
         host.Connect(endpointA);
         host.Connect(endpointB);
 
-        endpointA.EnqueueToServer(ProtocolCodec.Encode(new Hello("A")));
-        endpointB.EnqueueToServer(ProtocolCodec.Encode(new Hello("B")));
+        endpointA.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("A", "A")));
+        endpointB.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("B", "B")));
         endpointA.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
         endpointB.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
 
@@ -99,7 +99,7 @@ public sealed class VisibilitySnapshotTests
 
         InMemoryEndpoint endpoint = new();
         host.Connect(endpoint);
-        endpoint.EnqueueToServer(ProtocolCodec.Encode(new Hello("solo")));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("solo", "solo")));
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
 
         host.AdvanceTicks(2);

@@ -72,6 +72,12 @@ public sealed class HeadlessClient : IAsyncDisposable
         return false;
     }
 
+
+    public void SendHello(string accountId, string clientVersion = "headless-client")
+    {
+        Send(new HelloV2(clientVersion, accountId));
+    }
+
     public void EnterZone(int zoneId) => Send(new EnterZoneRequest(zoneId));
 
     public void SendInput(int tick, sbyte mx, sbyte my) => Send(new InputCommand(tick, mx, my));
