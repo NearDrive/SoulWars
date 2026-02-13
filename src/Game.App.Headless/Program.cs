@@ -45,15 +45,20 @@ public static class Program
         }
 
         string actual = NormalizeChecksum(replayResult.Checksum);
-        string expected = !string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum)
-            ? NormalizeChecksum(replayResult.ExpectedChecksum)
-            : actual;
-        bool pass = string.Equals(expected, actual, StringComparison.Ordinal);
+        bool hasExpectedChecksum = !string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum);
+        string expected = hasExpectedChecksum
+            ? NormalizeChecksum(replayResult.ExpectedChecksum!)
+            : "<missing>";
+        bool pass = hasExpectedChecksum && string.Equals(expected, actual, StringComparison.Ordinal);
 
         Console.WriteLine("MVP1 VERIFY");
         Console.WriteLine($"fixture={fixture.DisplayPath}");
         Console.WriteLine($"expected={expected}");
         Console.WriteLine($"actual={actual}");
+        if (!hasExpectedChecksum)
+        {
+            Console.WriteLine("error=fixture did not contain an expected checksum");
+        }
         Console.WriteLine($"result={(pass ? "PASS" : "FAIL")}");
 
         return pass ? ExitSuccess : ExitVerifyFail;
