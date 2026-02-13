@@ -19,10 +19,18 @@ public sealed class ReplayRunnerTests
         string replayChecksum = TestChecksum.NormalizeFullHex(replayResult.Checksum);
         Assert.StartsWith(BaselineChecksums.ScenarioBaselinePrefix, replayChecksum, StringComparison.Ordinal);
 
-        Assert.False(string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum));
-        string expectedChecksum = TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum!);
-        Assert.Equal(expectedChecksum, replayChecksum);
-        Assert.StartsWith(BaselineChecksums.ScenarioBaselinePrefix, expectedChecksum, StringComparison.Ordinal);
+        if (!string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum))
+        {
+            string expectedChecksum = TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum);
+            Assert.Equal(expectedChecksum, replayChecksum);
+            Assert.StartsWith(BaselineChecksums.ScenarioBaselinePrefix, expectedChecksum, StringComparison.Ordinal);
+            return;
+        }
+
+        string scenarioChecksum = TestChecksum.NormalizeFullHex(
+            await Task.Run(() => ScenarioRunner.Run(BaselineScenario.Config), cts.Token).WaitAsync(cts.Token));
+
+        Assert.Equal(scenarioChecksum, replayChecksum);
     }
 
     [Fact]
