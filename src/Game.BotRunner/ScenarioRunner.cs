@@ -1,3 +1,4 @@
+using Game.Core;
 using Game.Protocol;
 using Game.Server;
 using Microsoft.Extensions.Logging;
@@ -38,10 +39,13 @@ public sealed class ScenarioRunner
         Validate(cfg);
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(20));
+        Fix32 visionRadius = Fix32.FromInt(cfg.VisionRadiusTiles);
         ServerConfig serverConfig = ServerConfig.Default(cfg.ServerSeed) with
         {
             SnapshotEveryTicks = cfg.SnapshotEveryTicks,
-            NpcCountPerZone = cfg.NpcCount
+            NpcCountPerZone = cfg.NpcCount,
+            VisionRadius = visionRadius,
+            VisionRadiusSq = visionRadius * visionRadius
         };
 
         _logger.LogInformation(BotRunnerLogEvents.ScenarioStart, "ScenarioStart bots={Bots} ticks={Ticks} seed={Seed}", cfg.BotCount, cfg.TickCount, cfg.ServerSeed);
@@ -344,6 +348,11 @@ public sealed class ScenarioRunner
         if (cfg.BotCount <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(cfg), "BotCount must be > 0.");
+        }
+
+        if (cfg.VisionRadiusTiles < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cfg), "VisionRadiusTiles must be >= 0.");
         }
     }
 }
