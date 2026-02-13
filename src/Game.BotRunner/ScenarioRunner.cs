@@ -1,4 +1,3 @@
-using System.Net;
 using Game.Protocol;
 using Game.Server;
 
@@ -8,7 +7,17 @@ public sealed class ScenarioRunner
 {
     public static string Run(ScenarioConfig cfg) => RunDetailed(cfg).Checksum;
 
-    public static ScenarioResult RunDetailed(ScenarioConfig cfg)
+    public static ScenarioResult RunDetailed(ScenarioConfig cfg) => RunDetailedInternal(cfg, replayWriter: null);
+
+    public static ScenarioResult RunAndRecord(ScenarioConfig cfg, Stream replayOut)
+    {
+        ArgumentNullException.ThrowIfNull(replayOut);
+        ReplayHeader header = ReplayHeader.FromScenarioConfig(cfg);
+        using ReplayWriter writer = new(replayOut, header);
+        return RunDetailedInternal(cfg, writer);
+    }
+
+    private static ScenarioResult RunDetailedInternal(ScenarioConfig cfg, ReplayWriter? replayWriter)
     {
         Validate(cfg);
 
@@ -22,13 +31,10 @@ public sealed class ScenarioRunner
         List<BotClient> clients = new(cfg.BotCount);
         Dictionary<(int BotIndex, int Tick), Snapshot> committedSnapshots = new();
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot = new();
-        Dictionary<int, int> lastCommittedSnapshotTickByBot = new();
-        ServerRuntime runtime = new();
+        ServerHost host = new(serverConfig);
 
         try
         {
-            runtime.StartAsync(serverConfig, IPAddress.Loopback, 0, cts.Token).GetAwaiter().GetResult();
-
             List<BotAgent> agents = new(cfg.BotCount);
             for (int i = 0; i < cfg.BotCount; i++)
             {
@@ -37,40 +43,46 @@ public sealed class ScenarioRunner
                     InputSeed: cfg.BaseBotSeed + (i * 101),
                     ZoneId: cfg.ZoneId);
 
-                BotClient client = new(i, botConfig.ZoneId);
+                InMemoryEndpoint endpoint = new();
+                host.Connect(endpoint);
+
+                BotClient client = new(i, botConfig.ZoneId, endpoint);
                 clients.Add(client);
                 agents.Add(new BotAgent(botConfig));
                 pendingSnapshotsByBot[i] = new SortedDictionary<int, Snapshot>();
-                lastCommittedSnapshotTickByBot[i] = 0;
             }
 
-            ConnectBots(runtime, clients, cts.Token);
+            ConnectBotsForTests(host, clients, cts.Token);
 
             // Ignore snapshots that may have been received during handshake.
-            DrainAllMessages(clients);
+            DrainAllMessagesForTests(clients);
             foreach (SortedDictionary<int, Snapshot> pending in pendingSnapshotsByBot.Values)
             {
                 pending.Clear();
             }
+
+            ReplayMove[] tickMoves = new ReplayMove[cfg.BotCount];
 
             for (int tick = 1; tick <= cfg.TickCount; tick++)
             {
                 for (int i = 0; i < agents.Count; i++)
                 {
                     (sbyte mx, sbyte my) = agents[i].GetMoveForTick(tick);
+                    tickMoves[i] = new ReplayMove(mx, my);
                     clients[i].SendInput(tick, mx, my);
                 }
 
-                runtime.StepOnce();
-                DrainSnapshots(clients, pendingSnapshotsByBot);
+                replayWriter?.WriteTickInputs(tick, tickMoves);
+
+                host.StepOnce();
+                DrainSnapshotsForTests(clients, pendingSnapshotsByBot);
 
                 if (tick % cfg.SnapshotEveryTicks != 0)
                 {
                     continue;
                 }
 
-                int expectedSnapshotTick = (tick / cfg.SnapshotEveryTicks) * cfg.SnapshotEveryTicks;
-                int commitSnapshotTick = WaitForExpectedSnapshotTick(runtime, clients, pendingSnapshotsByBot, cfg.TickCount, tick, expectedSnapshotTick, cts.Token);
+                int commitSnapshotTick = WaitForExpectedSnapshotTickForTests(clients, pendingSnapshotsByBot, tick);
 
                 foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
@@ -81,11 +93,9 @@ public sealed class ScenarioRunner
                             $"Missing synchronized snapshot for bot={client.BotIndex} scenarioTick={tick} commitSnapshotTick={commitSnapshotTick}.");
                     }
 
-                    int selectedTick = commitSnapshotTick;
                     committedSnapshots[(client.BotIndex, tick)] = snapshot;
-                    lastCommittedSnapshotTickByBot[client.BotIndex] = selectedTick;
 
-                    foreach (int oldTick in pending.Keys.Where(t => t <= selectedTick).ToList())
+                    foreach (int oldTick in pending.Keys.Where(t => t <= commitSnapshotTick).ToList())
                     {
                         pending.Remove(oldTick);
                     }
@@ -101,6 +111,8 @@ public sealed class ScenarioRunner
             }
 
             string finalChecksum = checksum.BuildHexLower();
+            replayWriter?.WriteFinalChecksum(finalChecksum);
+
             BotScenarioStats[] stats = clients
                 .OrderBy(client => client.BotIndex)
                 .Select(client => new BotScenarioStats(
@@ -118,18 +130,14 @@ public sealed class ScenarioRunner
             {
                 client.DisposeAsync().AsTask().GetAwaiter().GetResult();
             }
-
-            runtime.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
     }
 
-    private static void ConnectBots(ServerRuntime runtime, IReadOnlyList<BotClient> clients, CancellationToken ct)
+    internal static void ConnectBotsForTests(ServerHost host, IReadOnlyList<BotClient> clients, CancellationToken ct)
     {
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
-            client.ConnectAsync("127.0.0.1", runtime.BoundPort, ct).GetAwaiter().GetResult();
-
-            int maxConnectSteps = Math.Max(50_000, clients.Count * 10_000);
+            int maxConnectSteps = Math.Max(10_000, clients.Count * 1_000);
             int connectSteps = 0;
 
             while (!client.HandshakeDone)
@@ -137,24 +145,24 @@ public sealed class ScenarioRunner
                 if (connectSteps++ >= maxConnectSteps)
                 {
                     throw new InvalidOperationException(
-                        $"Bot {client.BotIndex} handshake failed (boundPort={runtime.BoundPort}, steps={connectSteps}, hasWelcome={client.HasWelcome}, hasEntered={client.HasEntered}, sessionId={client.SessionId?.Value.ToString() ?? "null"}, entityId={client.EntityId?.ToString() ?? "null"}, lastSnapshotTick={client.LastSnapshotTick}, snapshotsReceived={client.SnapshotsReceived}).");
+                        $"Bot {client.BotIndex} handshake failed (steps={connectSteps}, hasWelcome={client.HasWelcome}, hasEntered={client.HasEntered}, sessionId={client.SessionId?.Value.ToString() ?? "null"}, entityId={client.EntityId?.ToString() ?? "null"}, lastSnapshotTick={client.LastSnapshotTick}, snapshotsReceived={client.SnapshotsReceived}).");
                 }
 
                 ct.ThrowIfCancellationRequested();
-                runtime.PumpTransportOnce();
-                runtime.ProcessInboundOnce();
-                DrainAllMessages(clients);
+                DrainAllMessagesForTests(clients);
 
                 if (client.HasWelcome)
                 {
                     client.EnterZone();
                 }
+
+                host.ProcessInboundOnce();
+                DrainAllMessagesForTests(clients);
             }
         }
-
     }
 
-    private static void DrainAllMessages(IReadOnlyList<BotClient> clients)
+    internal static void DrainAllMessagesForTests(IReadOnlyList<BotClient> clients)
     {
         foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
@@ -162,7 +170,7 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static void DrainSnapshots(
+    internal static void DrainSnapshotsForTests(
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot)
     {
@@ -178,33 +186,27 @@ public sealed class ScenarioRunner
         }
     }
 
-    private static int WaitForExpectedSnapshotTick(
-        ServerRuntime runtime,
+    internal static int WaitForExpectedSnapshotTickForTests(
         IReadOnlyList<BotClient> clients,
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
-        int tickCount,
-        int loopTick,
-        int expectedSnapshotTick,
-        CancellationToken ct)
+        int expectedSnapshotTick)
     {
-        int maxPolls = Math.Max(50_000, clients.Count * tickCount * 10);
-
-        for (int poll = 0; poll < maxPolls; poll++)
+        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
         {
-            ct.ThrowIfCancellationRequested();
-            runtime.PumpTransportOnce();
-            DrainSnapshots(clients, pendingSnapshotsByBot);
-
-            bool ready = clients
-                .OrderBy(c => c.BotIndex)
-                .All(client => pendingSnapshotsByBot[client.BotIndex].ContainsKey(expectedSnapshotTick));
-
-            if (ready)
+            SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
+            foreach (int staleTick in pending.Keys.Where(t => t < expectedSnapshotTick).ToList())
             {
-                return expectedSnapshotTick;
+                pending.Remove(staleTick);
             }
+        }
 
-            Thread.Yield();
+        bool ready = clients
+            .OrderBy(c => c.BotIndex)
+            .All(client => pendingSnapshotsByBot[client.BotIndex].ContainsKey(expectedSnapshotTick));
+
+        if (ready)
+        {
+            return expectedSnapshotTick;
         }
 
         string perBot = string.Join(", ",
@@ -218,7 +220,7 @@ public sealed class ScenarioRunner
                 }));
 
         throw new InvalidOperationException(
-            $"Unable to synchronize snapshots (tickCount={tickCount}, loopTick={loopTick}, expectedSnapshotTick={expectedSnapshotTick}, {perBot}).");
+            $"Unable to synchronize snapshots (expectedSnapshotTick={expectedSnapshotTick}, {perBot}).");
     }
 
     private static void Validate(ScenarioConfig cfg)

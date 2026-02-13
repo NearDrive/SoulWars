@@ -8,18 +8,13 @@ public sealed class ScenarioRunnerTests
     [Fact]
     public void ScenarioRunner_Baseline_IsDeterministic()
     {
-        ScenarioConfig cfg = new(
-            ServerSeed: 123,
-            TickCount: 500,
-            SnapshotEveryTicks: 5,
-            BotCount: 3,
-            ZoneId: 1,
-            BaseBotSeed: 999);
+        ScenarioConfig cfg = BaselineScenario.Config;
 
-        string checksum1 = ScenarioRunner.Run(cfg);
-        string checksum2 = ScenarioRunner.Run(cfg);
+        string checksum1 = TestChecksum.NormalizeFullHex(ScenarioRunner.Run(cfg));
+        string checksum2 = TestChecksum.NormalizeFullHex(ScenarioRunner.Run(cfg));
 
         Assert.Equal(checksum1, checksum2);
+        Assert.StartsWith(BaselineChecksums.ScenarioBaselinePrefix, checksum1, StringComparison.Ordinal);
     }
 
     [Fact]
