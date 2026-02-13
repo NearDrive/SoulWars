@@ -198,7 +198,6 @@ public sealed class ScenarioRunner
                 }
 
                 host.ProcessInboundOnce();
-                host.AdvanceSimulationOnce();
                 DrainAllMessagesForTests(clients);
             }
         }
@@ -233,22 +232,70 @@ public sealed class ScenarioRunner
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot,
         int expectedSnapshotTick)
     {
-        foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
+        const int maxBufferPerBot = 64;
+
+        for (int spin = 0; spin < maxBufferPerBot; spin++)
         {
-            SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
-            foreach (int staleTick in pending.Keys.Where(t => t < expectedSnapshotTick).ToList())
+            bool hadAnyMessage = false;
+
+            foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
             {
-                pending.Remove(staleTick);
+                SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
+                client.PumpMessages(message =>
+                {
+                    if (message is Snapshot snapshot)
+                    {
+                        pending[snapshot.Tick] = snapshot;
+                        hadAnyMessage = true;
+                    }
+                });
+
+                foreach (int staleTick in pending.Keys.Where(t => t < expectedSnapshotTick).ToList())
+                {
+                    pending.Remove(staleTick);
+                }
+
+                while (pending.Count > maxBufferPerBot)
+                {
+                    int oldest = pending.Keys.Min();
+                    pending.Remove(oldest);
+                }
             }
-        }
 
-        bool ready = clients
-            .OrderBy(c => c.BotIndex)
-            .All(client => pendingSnapshotsByBot[client.BotIndex].ContainsKey(expectedSnapshotTick));
+            bool allHaveAtLeastExpectedOrAhead = clients
+                .OrderBy(c => c.BotIndex)
+                .All(client =>
+                {
+                    SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
+                    return pending.Count > 0 && pending.Keys.Min() >= expectedSnapshotTick;
+                });
 
-        if (ready)
-        {
-            return expectedSnapshotTick;
+            if (allHaveAtLeastExpectedOrAhead)
+            {
+                foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
+                {
+                    SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[client.BotIndex];
+                    int minTick = pending.Keys.Min();
+                    if (minTick > expectedSnapshotTick)
+                    {
+                        throw new InvalidOperationException(
+                            $"Unable to synchronize snapshots (expectedSnapshotTick={expectedSnapshotTick}, bot={client.BotIndex} missed expected tick, have minTick={minTick}).");
+                    }
+
+                    if (!pending.ContainsKey(expectedSnapshotTick))
+                    {
+                        throw new InvalidOperationException(
+                            $"Unable to synchronize snapshots (expectedSnapshotTick={expectedSnapshotTick}, bot={client.BotIndex} missing exact expected tick).");
+                    }
+                }
+
+                return expectedSnapshotTick;
+            }
+
+            if (!hadAnyMessage)
+            {
+                break;
+            }
         }
 
         string perBot = string.Join(", ",
@@ -257,8 +304,9 @@ public sealed class ScenarioRunner
                 .Select(c =>
                 {
                     SortedDictionary<int, Snapshot> pending = pendingSnapshotsByBot[c.BotIndex];
+                    int min = pending.Count == 0 ? 0 : pending.Keys.Min();
                     int max = pending.Count == 0 ? 0 : pending.Keys.Max();
-                    return $"bot{c.BotIndex}:maxPending={max}";
+                    return $"bot{c.BotIndex}:count={pending.Count},min={min},max={max}";
                 }));
 
         throw new InvalidOperationException(
