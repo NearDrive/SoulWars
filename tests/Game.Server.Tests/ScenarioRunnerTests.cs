@@ -85,7 +85,7 @@ public sealed class ScenarioRunnerTests
             NpcCount = 3
         };
 
-        using ServerHost host = new(serverConfig);
+        ServerHost host = new(serverConfig);
         List<BotClient> clients = new();
         List<BotAgent> agents = new();
 
