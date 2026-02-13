@@ -64,7 +64,11 @@ public static class Simulation
 
         foreach (WorldCommand command in commands.Where(c => c.Kind == WorldCommandKind.TeleportIntent))
         {
-            ValidateCommand(command);
+            if (!IsValidCommand(command))
+            {
+                continue;
+            }
+
             updated = ApplyTeleportIntent(config, updated, command);
         }
 
@@ -91,6 +95,12 @@ public static class Simulation
         }
 
         updated = RebuildEntityLocations(updated);
+
+        if (config.Invariants.EnableCoreInvariants)
+        {
+            CoreInvariants.Validate(updated, updated.Tick);
+        }
+
         _ = config.MaxSpeed;
         return updated;
     }
@@ -375,50 +385,68 @@ public static class Simulation
 
         foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.EnterZone))
         {
-            ValidateCommand(command);
+            if (!IsValidCommand(command))
+            {
+                continue;
+            }
+
             current = ApplyEnterZone(config, current, command);
         }
 
         foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.MoveIntent))
         {
-            ValidateCommand(command);
+            if (!IsValidCommand(command))
+            {
+                continue;
+            }
+
             current = ApplyMoveIntent(config, current, command);
         }
 
         foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.AttackIntent))
         {
-            ValidateCommand(command);
+            if (!IsValidCommand(command))
+            {
+                continue;
+            }
+
             current = ApplyAttackIntent(tick, current, command);
         }
 
         foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.LeaveZone))
         {
-            ValidateCommand(command);
+            if (!IsValidCommand(command))
+            {
+                continue;
+            }
+
             current = ApplyLeaveZone(current, command);
         }
 
         return current;
     }
 
-    private static void ValidateCommand(WorldCommand command)
+    private static bool IsValidCommand(WorldCommand command)
     {
         if (command.Kind is WorldCommandKind.MoveIntent)
         {
             if (command.MoveX is < -1 or > 1)
             {
-                throw new ArgumentOutOfRangeException(nameof(command), "MoveX must be in range [-1..1].");
+                return false;
             }
 
             if (command.MoveY is < -1 or > 1)
             {
-                throw new ArgumentOutOfRangeException(nameof(command), "MoveY must be in range [-1..1].");
+                return false;
             }
         }
 
         if (command.Kind is WorldCommandKind.TeleportIntent && command.ToZoneId is null)
         {
-            throw new ArgumentOutOfRangeException(nameof(command), "TeleportIntent requires ToZoneId.");
+            return false;
         }
+
+        return true;
     }
 
     private static ZoneState ApplyEnterZone(SimulationConfig config, ZoneState zone, WorldCommand command)

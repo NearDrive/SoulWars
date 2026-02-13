@@ -105,5 +105,6 @@ public sealed class NpcSimulationTests
         MapHeight: 32,
         NpcCountPerZone: 5,
         NpcWanderPeriodTicks: 30,
-        NpcAggroRange: Fix32.FromInt(6));
+        NpcAggroRange: Fix32.FromInt(6),
+        Invariants: InvariantOptions.Enabled);
 }

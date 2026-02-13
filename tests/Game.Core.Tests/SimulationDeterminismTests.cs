@@ -167,5 +167,6 @@ public sealed class SimulationDeterminismTests
         MapHeight: 64,
         NpcCountPerZone: 0,
         NpcWanderPeriodTicks: 30,
-        NpcAggroRange: Fix32.FromInt(6));
+        NpcAggroRange: Fix32.FromInt(6),
+        Invariants: InvariantOptions.Enabled);
 }

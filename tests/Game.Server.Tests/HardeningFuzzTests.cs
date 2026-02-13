@@ -189,6 +189,51 @@ public sealed class HardeningFuzzTests
         Assert.Equal(SnapshotEntityKind.Npc, entity.Kind);
         Assert.Equal(88, entity.Hp);
     }
+
+    [Fact]
+    public void Server_Fuzz_InvalidCommands_AreIgnored_NoCrash()
+    {
+        ServerHost host = new(ServerConfig.Default(seed: 321) with { SnapshotEveryTicks = 1, ZoneCount = 2, NpcCountPerZone = 3 });
+        InMemoryEndpoint endpoint = new();
+        host.Connect(endpoint);
+
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new Hello("fuzz")));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
+        host.AdvanceTicks(2);
+
+        SimRng rng = new(1337);
+        for (int i = 0; i < 1000; i++)
+        {
+            int kind = rng.NextInt(0, 4);
+            switch (kind)
+            {
+                case 0:
+                    endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(i + 1, (sbyte)rng.NextInt(-10, 11), (sbyte)rng.NextInt(-10, 11))));
+                    break;
+                case 1:
+                    endpoint.EnqueueToServer(ProtocolCodec.Encode(new AttackIntent(i + 1, rng.NextInt(-20, 200), rng.NextInt(-20, 200), rng.NextInt(-4, 8))));
+                    break;
+                case 2:
+                    endpoint.EnqueueToServer(ProtocolCodec.Encode(new TeleportRequest(rng.NextInt(-4, 8))));
+                    break;
+                default:
+                    byte[] junk = new byte[rng.NextInt(0, 32)];
+                    for (int b = 0; b < junk.Length; b++)
+                    {
+                        junk[b] = (byte)rng.NextInt(0, 256);
+                    }
+
+                    endpoint.EnqueueToServer(junk);
+                    break;
+            }
+
+            host.StepOnce();
+        }
+
+        host.AdvanceTicks(20);
+        Assert.True(host.Metrics.ProtocolDecodeErrors > 0);
+    }
+
     private static Snapshot ReadLastSnapshot(InMemoryEndpoint endpoint)
     {
         Snapshot? last = null;
