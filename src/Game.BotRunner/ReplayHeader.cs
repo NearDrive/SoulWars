@@ -30,8 +30,11 @@ public readonly record struct ReplayHeader(
             BotCount: cfg.BotCount,
             ZoneId: cfg.ZoneId,
             BaseBotSeed: cfg.BaseBotSeed,
-            Reserved: 0);
+            Reserved: cfg.NpcCount);
     }
+
+
+    public int NpcCount => Version >= CurrentVersion ? Reserved : 0;
 
     public ScenarioConfig ToScenarioConfig()
     {
@@ -41,7 +44,8 @@ public readonly record struct ReplayHeader(
             SnapshotEveryTicks,
             BotCount,
             ZoneId,
-            BaseBotSeed);
+            BaseBotSeed,
+            NpcCount: Version >= CurrentVersion ? Reserved : 0);
     }
 
     public void WriteTo(Stream output)

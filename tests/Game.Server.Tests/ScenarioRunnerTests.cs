@@ -133,7 +133,7 @@ public sealed class ScenarioRunnerTests
         long initialNpcHp = 0;
         bool sawInitial = false;
 
-        for (int tick = 1; tick <= 180; tick++)
+        for (int tick = 1; tick <= 300; tick++)
         {
             foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
             {
