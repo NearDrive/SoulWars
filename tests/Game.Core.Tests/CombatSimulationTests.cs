@@ -78,12 +78,10 @@ public sealed class CombatSimulationTests
     {
         Assert.True(state.TryGetZone(new ZoneId(zoneId), out ZoneState zone));
 
-        ZoneState updatedZone = zone with
-        {
-            Entities = zone.Entities
+        ZoneState updatedZone = zone.WithEntities(
+            zone.Entities
                 .Select(entity => entity.Id.Value == entityId ? entity with { AttackDamage = attackDamage } : entity)
-                .ToImmutableArray()
-        };
+                .ToImmutableArray());
 
         return state.WithZoneUpdated(updatedZone);
     }
