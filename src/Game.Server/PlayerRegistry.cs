@@ -56,7 +56,7 @@ public sealed class PlayerRegistry
 
     public bool TryGetByAccount(string accountId, out PlayerId pid) => _byAccount.TryGetValue(accountId, out pid);
 
-    public bool TryGetState(PlayerId pid, out PlayerState? state) => _byPlayerId.TryGetValue(pid.Value, out state);
+    public bool TryGetState(PlayerId pid, out PlayerState state) => _byPlayerId.TryGetValue(pid.Value, out state!);
 
     public void AttachSession(PlayerId pid, SessionId sid)
     {
@@ -78,7 +78,7 @@ public sealed class PlayerRegistry
 
     public void UpdateWorldState(PlayerId pid, int? entityId, int? zoneId, bool isAlive)
     {
-        if (_byPlayerId.TryGetValue(pid.Value, out PlayerState? state))
+        if (_byPlayerId.TryGetValue(pid.Value, out PlayerState state))
         {
             _byPlayerId[pid.Value] = state with { EntityId = entityId, ZoneId = zoneId, IsAlive = isAlive };
         }

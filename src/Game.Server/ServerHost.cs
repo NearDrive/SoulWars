@@ -229,7 +229,7 @@ public sealed class ServerHost
         session.AccountId = normalizedAccountId;
         session.PlayerId = playerId;
 
-        if (_playerRegistry.TryGetState(playerId, out PlayerState? state))
+        if (_playerRegistry.TryGetState(playerId, out PlayerState state))
         {
             session.EntityId = state.EntityId;
             session.ActiveZoneId = state.ZoneId;
@@ -246,7 +246,7 @@ public sealed class ServerHost
             return;
         }
 
-        if (!_playerRegistry.TryGetState(session.PlayerId.Value, out PlayerState? playerState))
+        if (!_playerRegistry.TryGetState(session.PlayerId.Value, out PlayerState playerState))
         {
             return;
         }
@@ -480,7 +480,7 @@ public sealed class ServerHost
             if (session.PlayerId is PlayerId playerId)
             {
                 _playerRegistry.DetachSession(session.SessionId);
-                if (_playerRegistry.TryGetState(playerId, out PlayerState? state))
+                if (_playerRegistry.TryGetState(playerId, out PlayerState state))
                 {
                     _playerRegistry.UpdateWorldState(playerId, state.EntityId, state.ZoneId, state.IsAlive);
                 }
