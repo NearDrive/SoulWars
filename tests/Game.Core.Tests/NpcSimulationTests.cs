@@ -100,7 +100,7 @@ public sealed class NpcSimulationTests
         MoveSpeed: Fix32.FromInt(4),
         MaxSpeed: Fix32.FromInt(4),
         Radius: new(16384),
-        ZoneCount: 2,
+        ZoneCount: 1,
         MapWidth: 32,
         MapHeight: 32,
         NpcCountPerZone: 5,

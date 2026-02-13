@@ -46,16 +46,6 @@ public static class StateChecksum
             }
         }
 
-        ImmutableArray<EntityLocation> orderedLocations = state.EntityLocations
-            .OrderBy(location => location.Id.Value)
-            .ToImmutableArray();
-        writer.Write(orderedLocations.Length);
-        foreach (EntityLocation location in orderedLocations)
-        {
-            writer.Write(location.Id.Value);
-            writer.Write(location.ZoneId.Value);
-        }
-
         writer.Flush();
         byte[] hash = SHA256.HashData(stream.ToArray());
 

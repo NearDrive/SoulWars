@@ -134,6 +134,7 @@ public sealed class ServerHost
 
         _world = Simulation.Step(_simulationConfig, _world, new Inputs(worldCommands.ToImmutableArray()));
         CoreInvariants.Validate(_world);
+        SynchronizeSessionZonesWithWorld();
 
         if (_world.Tick % _serverConfig.SnapshotEveryTicks == 0)
         {
@@ -246,8 +247,6 @@ public sealed class ServerHost
             EntityId: new EntityId(session.EntityId.Value),
             ZoneId: new ZoneId(fromZoneId),
             ToZoneId: new ZoneId(request.ToZoneId)));
-
-        session.ActiveZoneId = request.ToZoneId;
     }
 
     private void HandleLeaveZone(SessionState session, LeaveZoneRequest request, List<WorldCommand> worldCommands)
@@ -312,6 +311,27 @@ public sealed class ServerHost
 
         _pendingAttackIntents.RemoveAll(p => p.Tick <= targetTick);
         return due;
+    }
+
+
+    private void SynchronizeSessionZonesWithWorld()
+    {
+        foreach (SessionState session in OrderedSessions())
+        {
+            if (session.EntityId is null)
+            {
+                continue;
+            }
+
+            if (_world.TryGetEntityZone(new EntityId(session.EntityId.Value), out ZoneId zoneId))
+            {
+                session.ActiveZoneId = zoneId.Value;
+            }
+            else if (session.ActiveZoneId is not null)
+            {
+                session.ActiveZoneId = null;
+            }
+        }
     }
 
     private void EmitSnapshots()

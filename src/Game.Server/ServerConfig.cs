@@ -30,7 +30,7 @@ public readonly record struct ServerConfig(
         Seed: seed,
         TickHz: 20,
         SnapshotEveryTicks: 1,
-        ZoneCount: 2,
+        ZoneCount: 1,
         MapWidth: 32,
         MapHeight: 32,
         NpcCountPerZone: 0);

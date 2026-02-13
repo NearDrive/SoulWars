@@ -21,7 +21,9 @@ public static class Simulation
         for (int zoneValue = 1; zoneValue <= config.ZoneCount; zoneValue++)
         {
             ZoneId zoneId = new(zoneValue);
-            int zoneSeed = unchecked((int)Hash32(unchecked((uint)config.Seed), unchecked((uint)zoneId.Value), 0x20E1u, 0xC0DEu));
+            int zoneSeed = config.ZoneCount == 1
+                ? config.Seed
+                : unchecked((int)Hash32(unchecked((uint)config.Seed), unchecked((uint)zoneId.Value), 0x20E1u, 0xC0DEu));
             SimulationConfig zoneConfig = config with { Seed = zoneSeed };
             TileMap map = WorldGen.Generate(zoneConfig, config.MapWidth, config.MapHeight);
 
@@ -31,12 +33,14 @@ public static class Simulation
                 Entities: SpawnNpcs(config, zoneId, map)));
         }
 
+        ImmutableArray<ZoneState> initialZones = zones
+            .OrderBy(z => z.Id.Value)
+            .ToImmutableArray();
+
         return new WorldState(
             Tick: 0,
-            Zones: zones
-                .OrderBy(z => z.Id.Value)
-                .ToImmutableArray(),
-            EntityLocations: ImmutableArray<EntityLocation>.Empty);
+            Zones: initialZones,
+            EntityLocations: BuildEntityLocations(initialZones));
     }
 
     public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs)
@@ -58,7 +62,7 @@ public static class Simulation
             .ThenBy(x => x.Index)
             .ToImmutableArray();
 
-        foreach ((WorldCommand command, int _) in orderedCommands.Where(x => x.Command.Kind == WorldCommandKind.TeleportIntent))
+        foreach (WorldCommand command in commands.Where(c => c.Kind == WorldCommandKind.TeleportIntent))
         {
             ValidateCommand(command);
             updated = ApplyTeleportIntent(config, updated, command);
@@ -348,9 +352,17 @@ public static class Simulation
 
     private static WorldState RebuildEntityLocations(WorldState state)
     {
+        return state with
+        {
+            EntityLocations = BuildEntityLocations(state.Zones)
+        };
+    }
+
+    private static ImmutableArray<EntityLocation> BuildEntityLocations(ImmutableArray<ZoneState> zones)
+    {
         ImmutableArray<EntityLocation>.Builder locations = ImmutableArray.CreateBuilder<EntityLocation>();
 
-        foreach (ZoneState zone in state.Zones.OrderBy(z => z.Id.Value))
+        foreach (ZoneState zone in zones.OrderBy(z => z.Id.Value))
         {
             foreach (EntityState entity in zone.Entities.OrderBy(e => e.Id.Value))
             {
@@ -358,12 +370,9 @@ public static class Simulation
             }
         }
 
-        return state with
-        {
-            EntityLocations = locations
-                .OrderBy(location => location.Id.Value)
-                .ToImmutableArray()
-        };
+        return locations
+            .OrderBy(location => location.Id.Value)
+            .ToImmutableArray();
     }
 
     private static ZoneState ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<WorldCommand> zoneCommands)

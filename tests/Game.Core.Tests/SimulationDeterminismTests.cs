@@ -62,6 +62,24 @@ public sealed class SimulationDeterminismTests
         Assert.Equal(2, located.Value);
     }
 
+
+    [Fact]
+    public void Teleport_ChainedInSameTick_AppliesInSubmissionOrder()
+    {
+        SimulationConfig config = CreateConfig(seed: 2024) with { ZoneCount = 3 };
+        WorldState state = Simulation.CreateInitialState(config);
+
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.EnterZone, new EntityId(1), new ZoneId(2)))));
+
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.TeleportIntent, new EntityId(1), new ZoneId(2), ToZoneId: new ZoneId(1)),
+            new WorldCommand(WorldCommandKind.TeleportIntent, new EntityId(1), new ZoneId(1), ToZoneId: new ZoneId(3)))));
+
+        Assert.True(state.TryGetEntityZone(new EntityId(1), out ZoneId zoneId));
+        Assert.Equal(3, zoneId.Value);
+    }
+
     [Fact]
     public void Determinism_TeleportSequence_SameChecksum()
     {
