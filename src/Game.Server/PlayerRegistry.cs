@@ -78,7 +78,7 @@ public sealed class PlayerRegistry
 
     public void UpdateWorldState(PlayerId pid, int? entityId, int? zoneId, bool isAlive)
     {
-        if (_byPlayerId.TryGetValue(pid.Value, out PlayerState state))
+        if (_byPlayerId.TryGetValue(pid.Value, out PlayerState? state) && state is not null)
         {
             _byPlayerId[pid.Value] = state with { EntityId = entityId, ZoneId = zoneId, IsAlive = isAlive };
         }
