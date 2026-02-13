@@ -5,9 +5,6 @@ namespace Game.Server.Tests;
 
 public sealed class ReplayRunnerTests
 {
-    // Baseline updated after deterministic harness stabilization.
-    private const string BaselineChecksumPrefix = "2f21";
-
     [Fact]
     public async Task Replay_Verify_BaselineFixture()
     {
@@ -20,13 +17,13 @@ public sealed class ReplayRunnerTests
         }, cts.Token).WaitAsync(cts.Token);
 
         string replayChecksum = TestChecksum.NormalizeFullHex(replayResult.Checksum);
-        Assert.StartsWith(BaselineChecksumPrefix, replayChecksum, StringComparison.Ordinal);
+        Assert.StartsWith(BaselineChecksums.ScenarioBaselinePrefix, replayChecksum, StringComparison.Ordinal);
 
         if (!string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum))
         {
             string expectedChecksum = TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum);
             Assert.Equal(expectedChecksum, replayChecksum);
-            Assert.StartsWith(BaselineChecksumPrefix, expectedChecksum, StringComparison.Ordinal);
+            Assert.StartsWith(BaselineChecksums.ScenarioBaselinePrefix, expectedChecksum, StringComparison.Ordinal);
             return;
         }
 

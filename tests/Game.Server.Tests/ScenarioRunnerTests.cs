@@ -5,9 +5,6 @@ namespace Game.Server.Tests;
 
 public sealed class ScenarioRunnerTests
 {
-    // Baseline updated after deterministic harness stabilization.
-    private const string BaselineChecksumPrefix = "2f21";
-
     [Fact]
     public void ScenarioRunner_Baseline_IsDeterministic()
     {
@@ -17,7 +14,7 @@ public sealed class ScenarioRunnerTests
         string checksum2 = TestChecksum.NormalizeFullHex(ScenarioRunner.Run(cfg));
 
         Assert.Equal(checksum1, checksum2);
-        Assert.StartsWith(BaselineChecksumPrefix, checksum1, StringComparison.Ordinal);
+        Assert.StartsWith(BaselineChecksums.ScenarioBaselinePrefix, checksum1, StringComparison.Ordinal);
     }
 
     [Fact]
