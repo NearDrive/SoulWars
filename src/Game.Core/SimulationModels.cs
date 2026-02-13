@@ -6,7 +6,17 @@ public readonly record struct EntityId(int Value);
 
 public readonly record struct ZoneId(int Value);
 
-public sealed record EntityState(EntityId Id, Vec2Fix Pos, Vec2Fix Vel);
+public sealed record EntityState(
+    EntityId Id,
+    Vec2Fix Pos,
+    Vec2Fix Vel,
+    int MaxHp,
+    int Hp,
+    bool IsAlive,
+    Fix32 AttackRange,
+    int AttackDamage,
+    int AttackCooldownTicks,
+    int LastAttackTick);
 
 public sealed record ZoneState(ZoneId Id, TileMap Map, ImmutableArray<EntityState> Entities)
 {
@@ -71,7 +81,8 @@ public enum WorldCommandKind : byte
 {
     EnterZone = 1,
     LeaveZone = 2,
-    MoveIntent = 3
+    MoveIntent = 3,
+    AttackIntent = 4
 }
 
 public sealed record WorldCommand(
@@ -80,7 +91,8 @@ public sealed record WorldCommand(
     ZoneId ZoneId,
     sbyte MoveX = 0,
     sbyte MoveY = 0,
-    Vec2Fix? SpawnPos = null);
+    Vec2Fix? SpawnPos = null,
+    EntityId? TargetEntityId = null);
 
 public sealed record Inputs(ImmutableArray<WorldCommand> Commands);
 public sealed record PlayerInput(EntityId EntityId, sbyte MoveX, sbyte MoveY);

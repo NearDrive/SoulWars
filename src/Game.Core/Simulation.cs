@@ -4,6 +4,10 @@ namespace Game.Core;
 
 public static class Simulation
 {
+    private const int DefaultMaxHp = 100;
+    private const int DefaultAttackDamage = 10;
+    private const int DefaultAttackCooldownTicks = 10;
+
     public static WorldState CreateInitialState(SimulationConfig config)
     {
         TileMap map = WorldGen.Generate(config, config.MapWidth, config.MapHeight);
@@ -27,39 +31,67 @@ public static class Simulation
             ? ImmutableArray<WorldCommand>.Empty
             : inputs.Commands;
 
-        ImmutableArray<(WorldCommand Command, int OriginalIndex)> ordered = commands
-            .Select((command, index) => (Command: command, OriginalIndex: index))
-            .OrderBy(item => item.Command.ZoneId.Value)
-            .ThenBy(item => item.Command.EntityId.Value)
-            .ThenBy(item => CommandPriority(item.Command.Kind))
-            .ThenBy(item => item.OriginalIndex)
-            .ToImmutableArray();
-
         WorldState updated = state with { Tick = state.Tick + 1 };
 
-        foreach ((WorldCommand command, _) in ordered)
-        {
-            ValidateCommand(command);
+        ImmutableArray<(ZoneId ZoneId, ImmutableArray<WorldCommand> Commands)> commandsByZone = commands
+            .GroupBy(c => c.ZoneId.Value)
+            .OrderBy(g => g.Key)
+            .Select(g => (new ZoneId(g.Key), g.ToImmutableArray()))
+            .ToImmutableArray();
 
-            if (!updated.TryGetZone(command.ZoneId, out ZoneState zone))
+        foreach ((ZoneId zoneId, ImmutableArray<WorldCommand> zoneCommands) in commandsByZone)
+        {
+            if (!updated.TryGetZone(zoneId, out ZoneState zone))
             {
                 continue;
             }
 
-            ZoneState nextZone = command.Kind switch
-            {
-                WorldCommandKind.EnterZone => ApplyEnterZone(config, zone, command),
-                WorldCommandKind.LeaveZone => ApplyLeaveZone(zone, command),
-                WorldCommandKind.MoveIntent => ApplyMoveIntent(config, zone, command),
-                _ => zone
-            };
-
+            ZoneState nextZone = ProcessZoneCommands(config, updated.Tick, zone, zoneCommands);
             updated = updated.WithZoneUpdated(nextZone);
         }
 
         _ = config.MaxSpeed;
 
         return updated;
+    }
+
+    private static ZoneState ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<WorldCommand> zoneCommands)
+    {
+        ZoneState current = zone;
+
+        foreach (WorldCommand command in zoneCommands
+                     .Where(c => c.Kind is WorldCommandKind.EnterZone)
+                     .OrderBy(c => c.EntityId.Value))
+        {
+            ValidateCommand(command);
+            current = ApplyEnterZone(config, current, command);
+        }
+
+        foreach (WorldCommand command in zoneCommands
+                     .Where(c => c.Kind is WorldCommandKind.MoveIntent)
+                     .OrderBy(c => c.EntityId.Value))
+        {
+            ValidateCommand(command);
+            current = ApplyMoveIntent(config, current, command);
+        }
+
+        foreach (WorldCommand command in zoneCommands
+                     .Where(c => c.Kind is WorldCommandKind.AttackIntent)
+                     .OrderBy(c => c.EntityId.Value))
+        {
+            ValidateCommand(command);
+            current = ApplyAttackIntent(tick, current, command);
+        }
+
+        foreach (WorldCommand command in zoneCommands
+                     .Where(c => c.Kind is WorldCommandKind.LeaveZone)
+                     .OrderBy(c => c.EntityId.Value))
+        {
+            ValidateCommand(command);
+            current = ApplyLeaveZone(current, command);
+        }
+
+        return current;
     }
 
     private static void ValidateCommand(WorldCommand command)
@@ -78,14 +110,6 @@ public static class Simulation
         }
     }
 
-    private static int CommandPriority(WorldCommandKind kind) => kind switch
-    {
-        WorldCommandKind.EnterZone => 0,
-        WorldCommandKind.MoveIntent => 1,
-        WorldCommandKind.LeaveZone => 2,
-        _ => 3
-    };
-
     private static ZoneState ApplyEnterZone(SimulationConfig config, ZoneState zone, WorldCommand command)
     {
         bool exists = zone.Entities.Any(entity => entity.Id.Value == command.EntityId.Value);
@@ -99,7 +123,14 @@ public static class Simulation
         EntityState entity = new(
             Id: command.EntityId,
             Pos: spawn,
-            Vel: Vec2Fix.Zero);
+            Vel: Vec2Fix.Zero,
+            MaxHp: DefaultMaxHp,
+            Hp: DefaultMaxHp,
+            IsAlive: true,
+            AttackRange: Fix32.FromInt(1),
+            AttackDamage: DefaultAttackDamage,
+            AttackCooldownTicks: DefaultAttackCooldownTicks,
+            LastAttackTick: -DefaultAttackCooldownTicks);
 
         return zone with
         {
@@ -139,6 +170,11 @@ public static class Simulation
         }
 
         EntityState entity = zone.Entities[entityIndex];
+        if (!entity.IsAlive)
+        {
+            return zone;
+        }
+
         PlayerInput playerInput = new(entity.Id, command.MoveX, command.MoveY);
 
         EntityState updated = Physics2D.Integrate(
@@ -154,6 +190,99 @@ public static class Simulation
         for (int i = 0; i < zone.Entities.Length; i++)
         {
             builder.Add(i == entityIndex ? updated : zone.Entities[i]);
+        }
+
+        return zone with
+        {
+            Entities = builder
+                .ToImmutable()
+                .OrderBy(e => e.Id.Value)
+                .ToImmutableArray()
+        };
+    }
+
+    private static ZoneState ApplyAttackIntent(int tick, ZoneState zone, WorldCommand command)
+    {
+        if (command.TargetEntityId is null)
+        {
+            return zone;
+        }
+
+        int attackerIndex = -1;
+        int targetIndex = -1;
+
+        for (int i = 0; i < zone.Entities.Length; i++)
+        {
+            EntityState entity = zone.Entities[i];
+            if (entity.Id.Value == command.EntityId.Value)
+            {
+                attackerIndex = i;
+            }
+
+            if (entity.Id.Value == command.TargetEntityId.Value.Value)
+            {
+                targetIndex = i;
+            }
+        }
+
+        if (attackerIndex < 0 || targetIndex < 0)
+        {
+            return zone;
+        }
+
+        EntityState attacker = zone.Entities[attackerIndex];
+        EntityState target = zone.Entities[targetIndex];
+
+        if (!attacker.IsAlive || !target.IsAlive)
+        {
+            return zone;
+        }
+
+        if (tick - attacker.LastAttackTick < attacker.AttackCooldownTicks)
+        {
+            return zone;
+        }
+
+        Fix32 dx = attacker.Pos.X - target.Pos.X;
+        Fix32 dy = attacker.Pos.Y - target.Pos.Y;
+        Fix32 distSq = (dx * dx) + (dy * dy);
+        Fix32 rangeSq = attacker.AttackRange * attacker.AttackRange;
+
+        if (distSq > rangeSq)
+        {
+            return zone;
+        }
+
+        EntityState updatedAttacker = attacker with { LastAttackTick = tick };
+
+        int nextHp = Math.Max(0, target.Hp - attacker.AttackDamage);
+        EntityState updatedTarget = target with
+        {
+            Hp = nextHp,
+            IsAlive = nextHp > 0
+        };
+
+        ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(zone.Entities.Length);
+
+        for (int i = 0; i < zone.Entities.Length; i++)
+        {
+            if (i == attackerIndex)
+            {
+                builder.Add(updatedAttacker);
+                continue;
+            }
+
+            if (i == targetIndex)
+            {
+                if (updatedTarget.IsAlive)
+                {
+                    builder.Add(updatedTarget);
+                }
+
+                continue;
+            }
+
+            builder.Add(zone.Entities[i]);
         }
 
         return zone with

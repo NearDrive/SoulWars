@@ -24,6 +24,26 @@ public static class CoreInvariants
 
                 lastEntityId = entity.Id.Value;
 
+                if (entity.Hp > entity.MaxHp)
+                {
+                    throw new InvariantViolationException($"Entity {entity.Id.Value} has Hp above MaxHp in zone {zone.Id.Value}.");
+                }
+
+                if (entity.Hp < 0)
+                {
+                    throw new InvariantViolationException($"Entity {entity.Id.Value} has negative Hp in zone {zone.Id.Value}.");
+                }
+
+                if (entity.IsAlive != (entity.Hp > 0))
+                {
+                    throw new InvariantViolationException($"Entity {entity.Id.Value} has inconsistent IsAlive/Hp in zone {zone.Id.Value}.");
+                }
+
+                if (entity.Hp <= 0)
+                {
+                    throw new InvariantViolationException($"Entity {entity.Id.Value} with Hp <= 0 present in zone {zone.Id.Value}.");
+                }
+
                 int tileX = Fix32.FloorToInt(entity.Pos.X);
                 int tileY = Fix32.FloorToInt(entity.Pos.Y);
                 if (zone.Map.Get(tileX, tileY) == TileKind.Solid)
