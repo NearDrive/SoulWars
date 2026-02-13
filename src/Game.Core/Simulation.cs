@@ -182,13 +182,10 @@ public static class Simulation
                 MoveY: moveY));
         }
 
-        ZoneState updatedZone = zone with
-        {
-            Entities = postAiEntities
-                .ToImmutable()
-                .OrderBy(e => e.Id.Value)
-                .ToImmutableArray()
-        };
+        ZoneState updatedZone = zone.WithEntities(postAiEntities
+            .ToImmutable()
+            .OrderBy(e => e.Id.Value)
+            .ToImmutableArray());
 
         foreach (WorldCommand move in npcCommands.Where(c => c.Kind == WorldCommandKind.MoveIntent).OrderBy(c => c.EntityId.Value))
         {
@@ -315,19 +312,19 @@ public static class Simulation
             return state;
         }
 
-        EntityState? entity = fromZone.Entities.FirstOrDefault(e => e.Id.Value == command.EntityId.Value);
-        if (entity is null)
+        ImmutableArray<EntityState> fromEntities = fromZone.Entities;
+        int fromIndex = ZoneEntities.FindIndex(fromZone.EntitiesData.AliveIds, command.EntityId);
+        if (fromIndex < 0)
         {
             return state;
         }
 
-        ZoneState nextFrom = fromZone with
-        {
-            Entities = fromZone.Entities
-                .Where(e => e.Id.Value != command.EntityId.Value)
-                .OrderBy(e => e.Id.Value)
-                .ToImmutableArray()
-        };
+        EntityState entity = fromEntities[fromIndex];
+
+        ZoneState nextFrom = fromZone.WithEntities(fromEntities
+            .Where(e => e.Id.Value != command.EntityId.Value)
+            .OrderBy(e => e.Id.Value)
+            .ToImmutableArray());
 
         Vec2Fix spawn = FindSpawn(toZone.Map, config.Radius);
         EntityState teleported = entity with
@@ -336,15 +333,12 @@ public static class Simulation
             Vel = Vec2Fix.Zero
         };
 
-        ZoneState nextTo = toZone with
-        {
-            Entities = toZone.Entities
-                .Add(teleported)
-                .GroupBy(e => e.Id.Value)
-                .Select(g => g.Last())
-                .OrderBy(e => e.Id.Value)
-                .ToImmutableArray()
-        };
+        ZoneState nextTo = toZone.WithEntities(toZone.Entities
+            .Add(teleported)
+            .GroupBy(e => e.Id.Value)
+            .Select(g => g.Last())
+            .OrderBy(e => e.Id.Value)
+            .ToImmutableArray());
 
         WorldState updated = state.WithZoneUpdated(nextFrom).WithZoneUpdated(nextTo);
         return updated.WithEntityLocation(command.EntityId, toZoneId);
@@ -453,44 +447,31 @@ public static class Simulation
             WanderX: 0,
             WanderY: 0);
 
-        return zone with
-        {
-            Entities = zone.Entities
-                .Add(entity)
-                .OrderBy(e => e.Id.Value)
-                .ToImmutableArray()
-        };
+        return zone.WithEntities(zone.Entities
+            .Add(entity)
+            .OrderBy(e => e.Id.Value)
+            .ToImmutableArray());
     }
 
     private static ZoneState ApplyLeaveZone(ZoneState zone, WorldCommand command)
     {
-        return zone with
-        {
-            Entities = zone.Entities
-                .Where(entity => entity.Id.Value != command.EntityId.Value)
-                .OrderBy(entity => entity.Id.Value)
-                .ToImmutableArray()
-        };
+        return zone.WithEntities(zone.Entities
+            .Where(entity => entity.Id.Value != command.EntityId.Value)
+            .OrderBy(entity => entity.Id.Value)
+            .ToImmutableArray());
     }
 
     private static ZoneState ApplyMoveIntent(SimulationConfig config, ZoneState zone, WorldCommand command)
     {
-        int entityIndex = -1;
-        for (int i = 0; i < zone.Entities.Length; i++)
-        {
-            if (zone.Entities[i].Id.Value == command.EntityId.Value)
-            {
-                entityIndex = i;
-                break;
-            }
-        }
+        ImmutableArray<EntityState> entities = zone.Entities;
+        int entityIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.EntityId);
 
         if (entityIndex < 0)
         {
             return zone;
         }
 
-        EntityState entity = zone.Entities[entityIndex];
+        EntityState entity = entities[entityIndex];
         if (!entity.IsAlive)
         {
             return zone;
@@ -506,20 +487,17 @@ public static class Simulation
             config.MoveSpeed,
             config.Radius);
 
-        ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(zone.Entities.Length);
+        ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
 
-        for (int i = 0; i < zone.Entities.Length; i++)
+        for (int i = 0; i < entities.Length; i++)
         {
-            builder.Add(i == entityIndex ? updated : zone.Entities[i]);
+            builder.Add(i == entityIndex ? updated : entities[i]);
         }
 
-        return zone with
-        {
-            Entities = builder
-                .ToImmutable()
-                .OrderBy(e => e.Id.Value)
-                .ToImmutableArray()
-        };
+        return zone.WithEntities(builder
+            .ToImmutable()
+            .OrderBy(e => e.Id.Value)
+            .ToImmutableArray());
     }
 
     private static ZoneState ApplyAttackIntent(int tick, ZoneState zone, WorldCommand command)
@@ -529,30 +507,17 @@ public static class Simulation
             return zone;
         }
 
-        int attackerIndex = -1;
-        int targetIndex = -1;
-
-        for (int i = 0; i < zone.Entities.Length; i++)
-        {
-            EntityState entity = zone.Entities[i];
-            if (entity.Id.Value == command.EntityId.Value)
-            {
-                attackerIndex = i;
-            }
-
-            if (entity.Id.Value == command.TargetEntityId.Value.Value)
-            {
-                targetIndex = i;
-            }
-        }
+        ImmutableArray<EntityState> entities = zone.Entities;
+        int attackerIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.EntityId);
+        int targetIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.TargetEntityId.Value);
 
         if (attackerIndex < 0 || targetIndex < 0)
         {
             return zone;
         }
 
-        EntityState attacker = zone.Entities[attackerIndex];
-        EntityState target = zone.Entities[targetIndex];
+        EntityState attacker = entities[attackerIndex];
+        EntityState target = entities[targetIndex];
 
         if (!attacker.IsAlive || !target.IsAlive)
         {
@@ -583,9 +548,9 @@ public static class Simulation
             IsAlive = nextHp > 0
         };
 
-        ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(zone.Entities.Length);
+        ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
 
-        for (int i = 0; i < zone.Entities.Length; i++)
+        for (int i = 0; i < entities.Length; i++)
         {
             if (i == attackerIndex)
             {
@@ -603,16 +568,13 @@ public static class Simulation
                 continue;
             }
 
-            builder.Add(zone.Entities[i]);
+            builder.Add(entities[i]);
         }
 
-        return zone with
-        {
-            Entities = builder
-                .ToImmutable()
-                .OrderBy(e => e.Id.Value)
-                .ToImmutableArray()
-        };
+        return zone.WithEntities(builder
+            .ToImmutable()
+            .OrderBy(e => e.Id.Value)
+            .ToImmutableArray());
     }
 
     private static Vec2Fix FindSpawn(TileMap map, Fix32 radius)

@@ -12,6 +12,21 @@ public enum EntityKind : byte
     Npc = 2
 }
 
+public readonly record struct ComponentMask(uint Bits)
+{
+    public const uint PositionBit = 1u << 0;
+    public const uint HealthBit = 1u << 1;
+    public const uint CombatBit = 1u << 2;
+    public const uint AiBit = 1u << 3;
+
+    public bool Has(uint bit) => (Bits & bit) != 0;
+}
+
+public readonly record struct PositionComponent(Vec2Fix Pos, Vec2Fix Vel);
+public readonly record struct HealthComponent(int MaxHp, int Hp, bool IsAlive);
+public readonly record struct CombatComponent(Fix32 Range, int Damage, int CooldownTicks, int LastAttackTick);
+public readonly record struct AiComponent(int NextWanderChangeTick, sbyte WanderX, sbyte WanderY);
+
 public sealed record EntityState(
     EntityId Id,
     Vec2Fix Pos,
@@ -28,13 +43,145 @@ public sealed record EntityState(
     sbyte WanderX = 0,
     sbyte WanderY = 0);
 
-public sealed record ZoneState(ZoneId Id, TileMap Map, ImmutableArray<EntityState> Entities)
+public sealed record ZoneEntities(
+    ImmutableArray<EntityId> AliveIds,
+    ImmutableArray<ComponentMask> Masks,
+    ImmutableArray<EntityKind> Kinds,
+    ImmutableArray<PositionComponent> Positions,
+    ImmutableArray<HealthComponent> Health,
+    ImmutableArray<CombatComponent> Combat,
+    ImmutableArray<AiComponent> Ai)
 {
+    public static ZoneEntities Empty => new(
+        ImmutableArray<EntityId>.Empty,
+        ImmutableArray<ComponentMask>.Empty,
+        ImmutableArray<EntityKind>.Empty,
+        ImmutableArray<PositionComponent>.Empty,
+        ImmutableArray<HealthComponent>.Empty,
+        ImmutableArray<CombatComponent>.Empty,
+        ImmutableArray<AiComponent>.Empty);
+
+    public static int FindIndex(ImmutableArray<EntityId> ids, EntityId id)
+    {
+        int lo = 0;
+        int hi = ids.Length - 1;
+
+        while (lo <= hi)
+        {
+            int mid = lo + ((hi - lo) / 2);
+            int cmp = ids[mid].Value.CompareTo(id.Value);
+            if (cmp == 0)
+            {
+                return mid;
+            }
+
+            if (cmp < 0)
+            {
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid - 1;
+            }
+        }
+
+        return ~lo;
+    }
+
+    public bool HasComponent(int index, uint bit) => Masks[index].Has(bit);
+
+    public ImmutableArray<EntityState> ToEntityStates()
+    {
+        ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(AliveIds.Length);
+        for (int i = 0; i < AliveIds.Length; i++)
+        {
+            PositionComponent position = Positions[i];
+            HealthComponent health = Health[i];
+            CombatComponent combat = Combat[i];
+            AiComponent ai = Ai[i];
+            builder.Add(new EntityState(
+                Id: AliveIds[i],
+                Pos: position.Pos,
+                Vel: position.Vel,
+                MaxHp: health.MaxHp,
+                Hp: health.Hp,
+                IsAlive: health.IsAlive,
+                AttackRange: combat.Range,
+                AttackDamage: combat.Damage,
+                AttackCooldownTicks: combat.CooldownTicks,
+                LastAttackTick: combat.LastAttackTick,
+                Kind: Kinds[i],
+                NextWanderChangeTick: ai.NextWanderChangeTick,
+                WanderX: ai.WanderX,
+                WanderY: ai.WanderY));
+        }
+
+        return builder.MoveToImmutable();
+    }
+
+    public static ZoneEntities FromEntityStates(ImmutableArray<EntityState> entities)
+    {
+        ImmutableArray<EntityState> ordered = entities
+            .OrderBy(e => e.Id.Value)
+            .ToImmutableArray();
+
+        ImmutableArray<EntityId>.Builder ids = ImmutableArray.CreateBuilder<EntityId>(ordered.Length);
+        ImmutableArray<ComponentMask>.Builder masks = ImmutableArray.CreateBuilder<ComponentMask>(ordered.Length);
+        ImmutableArray<EntityKind>.Builder kinds = ImmutableArray.CreateBuilder<EntityKind>(ordered.Length);
+        ImmutableArray<PositionComponent>.Builder positions = ImmutableArray.CreateBuilder<PositionComponent>(ordered.Length);
+        ImmutableArray<HealthComponent>.Builder health = ImmutableArray.CreateBuilder<HealthComponent>(ordered.Length);
+        ImmutableArray<CombatComponent>.Builder combat = ImmutableArray.CreateBuilder<CombatComponent>(ordered.Length);
+        ImmutableArray<AiComponent>.Builder ai = ImmutableArray.CreateBuilder<AiComponent>(ordered.Length);
+
+        foreach (EntityState entity in ordered)
+        {
+            uint bits = ComponentMask.PositionBit;
+            bits |= ComponentMask.HealthBit;
+            bits |= ComponentMask.CombatBit;
+            if (entity.Kind == EntityKind.Npc)
+            {
+                bits |= ComponentMask.AiBit;
+            }
+
+            ids.Add(entity.Id);
+            masks.Add(new ComponentMask(bits));
+            kinds.Add(entity.Kind);
+            positions.Add(new PositionComponent(entity.Pos, entity.Vel));
+            health.Add(new HealthComponent(entity.MaxHp, entity.Hp, entity.IsAlive));
+            combat.Add(new CombatComponent(entity.AttackRange, entity.AttackDamage, entity.AttackCooldownTicks, entity.LastAttackTick));
+            ai.Add(entity.Kind == EntityKind.Npc
+                ? new AiComponent(entity.NextWanderChangeTick, entity.WanderX, entity.WanderY)
+                : default);
+        }
+
+        return new ZoneEntities(
+            ids.MoveToImmutable(),
+            masks.MoveToImmutable(),
+            kinds.MoveToImmutable(),
+            positions.MoveToImmutable(),
+            health.MoveToImmutable(),
+            combat.MoveToImmutable(),
+            ai.MoveToImmutable());
+    }
+}
+
+public sealed record ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData)
+{
+    public ZoneState(ZoneId Id, TileMap Map, ImmutableArray<EntityState> Entities)
+        : this(Id, Map, ZoneEntities.FromEntityStates(Entities))
+    {
+    }
+
+    public ImmutableArray<EntityState> Entities => EntitiesData.ToEntityStates();
+
+    public ZoneState WithEntities(ImmutableArray<EntityState> entities) => this with
+    {
+        EntitiesData = ZoneEntities.FromEntityStates(entities)
+    };
+
     public ZoneState WithSortedEntities() => this with
     {
-        Entities = Entities
-            .OrderBy(entity => entity.Id.Value)
-            .ToImmutableArray()
+        EntitiesData = ZoneEntities.FromEntityStates(Entities)
     };
 }
 
