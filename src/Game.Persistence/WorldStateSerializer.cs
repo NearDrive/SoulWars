@@ -1,0 +1,375 @@
+using System.Collections.Immutable;
+using System.Text;
+using Game.Core;
+
+namespace Game.Persistence;
+
+public static class WorldStateSerializer
+{
+    private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
+    private const int CurrentVersion = 1;
+    private const int MaxZoneCount = 10_000;
+    private const int MaxMapDimension = 16_384;
+    private const int MaxEntityCountPerZone = 2_000_000;
+
+    public static void Save(Stream stream, WorldState world)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(world);
+
+        using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
+
+        writer.Write(Magic);
+        writer.Write(CurrentVersion);
+        writer.Write(world.Tick);
+
+        ImmutableArray<ZoneState> zones = world.Zones;
+        EnsureSortedZones(zones);
+
+        writer.Write(zones.Length);
+
+        foreach (ZoneState zone in zones)
+        {
+            writer.Write(zone.Id.Value);
+            WriteMap(writer, zone.Map);
+            WriteEntities(writer, zone.EntitiesData);
+        }
+    }
+
+    public static WorldState Load(Stream stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+
+        try
+        {
+            using BinaryReader reader = new(stream, Encoding.UTF8, leaveOpen: true);
+
+            byte[] magic = reader.ReadBytes(Magic.Length);
+            if (magic.Length != Magic.Length || !magic.AsSpan().SequenceEqual(Magic))
+            {
+                throw new InvalidDataException("Invalid world-state magic header.");
+            }
+
+            int version = reader.ReadInt32();
+            if (version != CurrentVersion)
+            {
+                throw new InvalidDataException($"Unsupported world-state version '{version}'.");
+            }
+
+            int tick = reader.ReadInt32();
+            int zoneCount = reader.ReadInt32();
+            ValidateCount(zoneCount, MaxZoneCount, nameof(zoneCount));
+
+            ImmutableArray<ZoneState>.Builder zones = ImmutableArray.CreateBuilder<ZoneState>(zoneCount);
+
+            int previousZoneId = int.MinValue;
+            for (int i = 0; i < zoneCount; i++)
+            {
+                int zoneIdValue = reader.ReadInt32();
+                if (zoneIdValue <= previousZoneId)
+                {
+                    throw new InvalidDataException("Zones are not in strictly ascending ZoneId order.");
+                }
+
+                previousZoneId = zoneIdValue;
+
+                TileMap map = ReadMap(reader);
+                ZoneEntities entities = ReadEntities(reader);
+
+                zones.Add(new ZoneState(new ZoneId(zoneIdValue), map, entities));
+            }
+
+            ImmutableArray<ZoneState> immutableZones = zones.MoveToImmutable();
+            ImmutableArray<EntityLocation> locations = BuildEntityLocations(immutableZones);
+
+            return new WorldState(tick, immutableZones, locations);
+        }
+        catch (EndOfStreamException ex)
+        {
+            throw new InvalidDataException("Unexpected end of stream while reading world state.", ex);
+        }
+    }
+
+    public static byte[] SaveToBytes(WorldState world)
+    {
+        using MemoryStream stream = new();
+        Save(stream, world);
+        return stream.ToArray();
+    }
+
+    public static WorldState LoadFromBytes(ReadOnlySpan<byte> data)
+    {
+        using MemoryStream stream = new(data.ToArray(), writable: false);
+        return Load(stream);
+    }
+
+    private static void WriteMap(BinaryWriter writer, TileMap map)
+    {
+        if (map.Width < 0 || map.Height < 0)
+        {
+            throw new InvalidDataException("Map dimensions cannot be negative.");
+        }
+
+        int expectedTileCount = checked(map.Width * map.Height);
+        if (map.Tiles.Length != expectedTileCount)
+        {
+            throw new InvalidDataException("Map tile count does not match Width*Height.");
+        }
+
+        writer.Write(map.Width);
+        writer.Write(map.Height);
+        writer.Write(map.Tiles.Length);
+
+        for (int i = 0; i < map.Tiles.Length; i++)
+        {
+            writer.Write((byte)map.Tiles[i]);
+        }
+    }
+
+    private static TileMap ReadMap(BinaryReader reader)
+    {
+        int width = reader.ReadInt32();
+        int height = reader.ReadInt32();
+
+        ValidateCount(width, MaxMapDimension, nameof(width));
+        ValidateCount(height, MaxMapDimension, nameof(height));
+
+        int expectedTileCount = checked(width * height);
+        int tileCount = reader.ReadInt32();
+        if (tileCount != expectedTileCount)
+        {
+            throw new InvalidDataException("TileCount does not match Width*Height.");
+        }
+
+        ImmutableArray<TileKind>.Builder tiles = ImmutableArray.CreateBuilder<TileKind>(tileCount);
+        for (int i = 0; i < tileCount; i++)
+        {
+            byte raw = reader.ReadByte();
+            if (!Enum.IsDefined(typeof(TileKind), raw))
+            {
+                throw new InvalidDataException($"Unknown TileKind value '{raw}' at index {i}.");
+            }
+
+            tiles.Add((TileKind)raw);
+        }
+
+        return new TileMap(width, height, tiles.MoveToImmutable());
+    }
+
+    private static void WriteEntities(BinaryWriter writer, ZoneEntities entities)
+    {
+        int count = entities.AliveIds.Length;
+
+        EnsureEqualLength(count, entities.Masks.Length, nameof(entities.Masks));
+        EnsureEqualLength(count, entities.Kinds.Length, nameof(entities.Kinds));
+        EnsureEqualLength(count, entities.Positions.Length, nameof(entities.Positions));
+        EnsureEqualLength(count, entities.Health.Length, nameof(entities.Health));
+        EnsureEqualLength(count, entities.Combat.Length, nameof(entities.Combat));
+        EnsureEqualLength(count, entities.Ai.Length, nameof(entities.Ai));
+
+        EnsureSortedEntityIds(entities.AliveIds);
+
+        writer.Write(count);
+
+        for (int i = 0; i < count; i++)
+        {
+            writer.Write(entities.AliveIds[i].Value);
+
+            ComponentMask mask = entities.Masks[i];
+            writer.Write(mask.Bits);
+
+            EntityKind kind = entities.Kinds[i];
+            writer.Write((byte)kind);
+
+            if (mask.Has(ComponentMask.PositionBit))
+            {
+                PositionComponent position = entities.Positions[i];
+                writer.Write(position.Pos.X.Raw);
+                writer.Write(position.Pos.Y.Raw);
+                writer.Write(position.Vel.X.Raw);
+                writer.Write(position.Vel.Y.Raw);
+            }
+
+            if (mask.Has(ComponentMask.HealthBit))
+            {
+                HealthComponent health = entities.Health[i];
+                writer.Write(health.MaxHp);
+                writer.Write(health.Hp);
+                writer.Write(health.IsAlive);
+            }
+
+            if (mask.Has(ComponentMask.CombatBit))
+            {
+                CombatComponent combat = entities.Combat[i];
+                writer.Write(combat.Range.Raw);
+                writer.Write(combat.Damage);
+                writer.Write(combat.CooldownTicks);
+                writer.Write(combat.LastAttackTick);
+            }
+
+            if (mask.Has(ComponentMask.AiBit))
+            {
+                AiComponent ai = entities.Ai[i];
+                writer.Write(ai.NextWanderChangeTick);
+                writer.Write(ai.WanderX);
+                writer.Write(ai.WanderY);
+            }
+        }
+    }
+
+    private static ZoneEntities ReadEntities(BinaryReader reader)
+    {
+        int entityCount = reader.ReadInt32();
+        ValidateCount(entityCount, MaxEntityCountPerZone, nameof(entityCount));
+
+        ImmutableArray<EntityId>.Builder ids = ImmutableArray.CreateBuilder<EntityId>(entityCount);
+        ImmutableArray<ComponentMask>.Builder masks = ImmutableArray.CreateBuilder<ComponentMask>(entityCount);
+        ImmutableArray<EntityKind>.Builder kinds = ImmutableArray.CreateBuilder<EntityKind>(entityCount);
+        ImmutableArray<PositionComponent>.Builder positions = ImmutableArray.CreateBuilder<PositionComponent>(entityCount);
+        ImmutableArray<HealthComponent>.Builder health = ImmutableArray.CreateBuilder<HealthComponent>(entityCount);
+        ImmutableArray<CombatComponent>.Builder combat = ImmutableArray.CreateBuilder<CombatComponent>(entityCount);
+        ImmutableArray<AiComponent>.Builder ai = ImmutableArray.CreateBuilder<AiComponent>(entityCount);
+
+        int previousEntityId = int.MinValue;
+
+        for (int i = 0; i < entityCount; i++)
+        {
+            int entityIdValue = reader.ReadInt32();
+            if (entityIdValue <= previousEntityId)
+            {
+                throw new InvalidDataException("Entities are not in strictly ascending EntityId order.");
+            }
+
+            previousEntityId = entityIdValue;
+
+            uint bits = reader.ReadUInt32();
+            ComponentMask mask = new(bits);
+
+            byte kindRaw = reader.ReadByte();
+            if (!Enum.IsDefined(typeof(EntityKind), kindRaw))
+            {
+                throw new InvalidDataException($"Unknown EntityKind value '{kindRaw}'.");
+            }
+
+            PositionComponent position = default;
+            HealthComponent entityHealth = default;
+            CombatComponent entityCombat = default;
+            AiComponent entityAi = default;
+
+            if (mask.Has(ComponentMask.PositionBit))
+            {
+                position = new PositionComponent(
+                    Pos: new Vec2Fix(new Fix32(reader.ReadInt32()), new Fix32(reader.ReadInt32())),
+                    Vel: new Vec2Fix(new Fix32(reader.ReadInt32()), new Fix32(reader.ReadInt32())));
+            }
+
+            if (mask.Has(ComponentMask.HealthBit))
+            {
+                entityHealth = new HealthComponent(
+                    MaxHp: reader.ReadInt32(),
+                    Hp: reader.ReadInt32(),
+                    IsAlive: reader.ReadBoolean());
+            }
+
+            if (mask.Has(ComponentMask.CombatBit))
+            {
+                entityCombat = new CombatComponent(
+                    Range: new Fix32(reader.ReadInt32()),
+                    Damage: reader.ReadInt32(),
+                    CooldownTicks: reader.ReadInt32(),
+                    LastAttackTick: reader.ReadInt32());
+            }
+
+            if (mask.Has(ComponentMask.AiBit))
+            {
+                entityAi = new AiComponent(
+                    NextWanderChangeTick: reader.ReadInt32(),
+                    WanderX: reader.ReadSByte(),
+                    WanderY: reader.ReadSByte());
+            }
+
+            ids.Add(new EntityId(entityIdValue));
+            masks.Add(mask);
+            kinds.Add((EntityKind)kindRaw);
+            positions.Add(position);
+            health.Add(entityHealth);
+            combat.Add(entityCombat);
+            ai.Add(entityAi);
+        }
+
+        return new ZoneEntities(
+            ids.MoveToImmutable(),
+            masks.MoveToImmutable(),
+            kinds.MoveToImmutable(),
+            positions.MoveToImmutable(),
+            health.MoveToImmutable(),
+            combat.MoveToImmutable(),
+            ai.MoveToImmutable());
+    }
+
+    private static ImmutableArray<EntityLocation> BuildEntityLocations(ImmutableArray<ZoneState> zones)
+    {
+        ImmutableArray<EntityLocation>.Builder builder = ImmutableArray.CreateBuilder<EntityLocation>();
+
+        foreach (ZoneState zone in zones)
+        {
+            foreach (EntityId entityId in zone.EntitiesData.AliveIds)
+            {
+                builder.Add(new EntityLocation(entityId, zone.Id));
+            }
+        }
+
+        return builder
+            .ToImmutable()
+            .OrderBy(location => location.Id.Value)
+            .ToImmutableArray();
+    }
+
+    private static void ValidateCount(int value, int maxValue, string name)
+    {
+        if (value < 0 || value > maxValue)
+        {
+            throw new InvalidDataException($"Invalid {name}: {value}.");
+        }
+    }
+
+    private static void EnsureEqualLength(int expected, int actual, string name)
+    {
+        if (actual != expected)
+        {
+            throw new InvalidDataException($"Mismatched component array length for {name}. Expected {expected}, got {actual}.");
+        }
+    }
+
+    private static void EnsureSortedZones(ImmutableArray<ZoneState> zones)
+    {
+        int previousZoneId = int.MinValue;
+
+        for (int i = 0; i < zones.Length; i++)
+        {
+            int current = zones[i].Id.Value;
+            if (current <= previousZoneId)
+            {
+                throw new InvalidDataException("WorldState zones must be sorted by ascending ZoneId before save.");
+            }
+
+            previousZoneId = current;
+        }
+    }
+
+    private static void EnsureSortedEntityIds(ImmutableArray<EntityId> ids)
+    {
+        int previousEntityId = int.MinValue;
+
+        for (int i = 0; i < ids.Length; i++)
+        {
+            int current = ids[i].Value;
+            if (current <= previousEntityId)
+            {
+                throw new InvalidDataException("Zone entities must be sorted by ascending EntityId before save.");
+            }
+
+            previousEntityId = current;
+        }
+    }
+}
