@@ -347,22 +347,36 @@ public sealed class ServerHost
                 continue;
             }
 
-            SnapshotEntity[] entities = zone.Entities
-                .OrderBy(entity => entity.Id.Value)
-                .Select(entity => new SnapshotEntity(
-                    EntityId: entity.Id.Value,
-                    PosXRaw: entity.Pos.X.Raw,
-                    PosYRaw: entity.Pos.Y.Raw,
-                    VelXRaw: entity.Vel.X.Raw,
-                    VelYRaw: entity.Vel.Y.Raw,
-                    Hp: entity.Hp,
-                    Kind: entity.Kind switch
-                    {
-                        Game.Core.EntityKind.Player => SnapshotEntityKind.Player,
-                        Game.Core.EntityKind.Npc => SnapshotEntityKind.Npc,
-                        _ => SnapshotEntityKind.Unknown
-                    }))
-                .ToArray();
+            EntityState? self = session.EntityId is int selfEntityId
+                ? zone.Entities.FirstOrDefault(entity => entity.Id.Value == selfEntityId)
+                : null;
+
+            SnapshotEntity[] entities;
+            if (self is null)
+            {
+                entities = Array.Empty<SnapshotEntity>();
+            }
+            else
+            {
+                Vec2Fix selfPos = self.Pos;
+                entities = zone.Entities
+                    .OrderBy(entity => entity.Id.Value)
+                    .Where(entity => entity.Id == self.Id || IsVisible(selfPos, entity.Pos))
+                    .Select(entity => new SnapshotEntity(
+                        EntityId: entity.Id.Value,
+                        PosXRaw: entity.Pos.X.Raw,
+                        PosYRaw: entity.Pos.Y.Raw,
+                        VelXRaw: entity.Vel.X.Raw,
+                        VelYRaw: entity.Vel.Y.Raw,
+                        Hp: entity.Hp,
+                        Kind: entity.Kind switch
+                        {
+                            Game.Core.EntityKind.Player => SnapshotEntityKind.Player,
+                            Game.Core.EntityKind.Npc => SnapshotEntityKind.Npc,
+                            _ => SnapshotEntityKind.Unknown
+                        }))
+                    .ToArray();
+            }
 
             Snapshot snapshot = new(
                 Tick: _world.Tick,
@@ -379,6 +393,13 @@ public sealed class ServerHost
         {
             _logger.LogInformation(ServerLogEvents.SnapshotEmitted, "SnapshotEmitted tick={Tick} sessions={Sessions}", _world.Tick, emittedCount);
         }
+    }
+
+    private bool IsVisible(Vec2Fix observerPos, Vec2Fix targetPos)
+    {
+        Vec2Fix delta = targetPos - observerPos;
+        Fix32 distSq = delta.LengthSq();
+        return distSq <= _serverConfig.VisionRadiusSq;
     }
 
     private void DisconnectSession(SessionState session, string reason)
