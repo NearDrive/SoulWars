@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Game.BotRunner;
 using Microsoft.Extensions.Logging;
 
@@ -20,6 +21,7 @@ public static class Program
         return args[0] switch
         {
             "--verify-mvp1" => VerifyMvp1(),
+            "--update-mvp1-baseline" => UpdateMvp1Baseline(),
             "--run-scenario" => RunScenario(),
             _ => UnknownMode(args[0])
         };
@@ -58,10 +60,87 @@ public static class Program
         if (!hasExpectedChecksum)
         {
             Console.WriteLine("error=fixture did not contain an expected checksum");
+            Console.WriteLine("hint=run Game.App.Headless --update-mvp1-baseline to stamp the current deterministic baseline");
         }
+
         Console.WriteLine($"result={(pass ? "PASS" : "FAIL")}");
 
         return pass ? ExitSuccess : ExitVerifyFail;
+    }
+
+    private static int UpdateMvp1Baseline()
+    {
+        FixtureInput fixture;
+        try
+        {
+            fixture = LoadReplayFixture();
+        }
+        catch (DirectoryNotFoundException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return ExitFixtureNotFound;
+        }
+
+        byte[] replayBytes;
+        using (fixture.Stream)
+        {
+            using MemoryStream memory = new();
+            fixture.Stream.CopyTo(memory);
+            replayBytes = memory.ToArray();
+        }
+
+        string checksum;
+        using (MemoryStream replayStream = new(replayBytes, writable: false))
+        {
+            checksum = NormalizeChecksum(ReplayRunner.RunReplay(replayStream));
+        }
+
+        if (fixture.Format == FixtureFormat.Binary)
+        {
+            Console.Error.WriteLine("Cannot update replay_baseline.bin in-place. Convert fixture to replay_baseline.hex and retry.");
+            return 1;
+        }
+
+        byte[] updatedBytes = RewriteReplayFinalChecksum(replayBytes, checksum);
+        string hexPayload = Convert.ToHexString(updatedBytes).ToLowerInvariant();
+        File.WriteAllText(fixture.FullPath, hexPayload + Environment.NewLine);
+
+        Console.WriteLine("MVP1 UPDATE");
+        Console.WriteLine($"fixture={fixture.DisplayPath}");
+        Console.WriteLine($"expected={checksum}");
+        Console.WriteLine("result=UPDATED");
+        return ExitSuccess;
+    }
+
+    private static byte[] RewriteReplayFinalChecksum(byte[] replayBytes, string expectedChecksum)
+    {
+        using MemoryStream input = new(replayBytes, writable: false);
+        using ReplayReader reader = new(input);
+
+        List<(int Tick, ImmutableArray<ReplayMove> Moves)> ticks = new();
+        while (reader.TryReadNext(out ReplayEvent evt))
+        {
+            if (evt.RecordType == ReplayRecordType.TickInputs)
+            {
+                ticks.Add((evt.Tick, evt.Moves));
+                continue;
+            }
+
+            if (evt.RecordType != ReplayRecordType.FinalChecksum)
+            {
+                throw new InvalidDataException($"Unsupported replay record type while rewriting baseline: {evt.RecordType}");
+            }
+        }
+
+        using MemoryStream output = new();
+        using ReplayWriter writer = new(output, reader.Header);
+        foreach ((int tick, ImmutableArray<ReplayMove> moves) in ticks)
+        {
+            writer.WriteTickInputs(tick, moves.AsSpan());
+        }
+
+        writer.WriteFinalChecksum(expectedChecksum);
+        return output.ToArray();
     }
 
     private static int RunScenario()
@@ -106,7 +185,7 @@ public static class Program
 
     private static void PrintUsage()
     {
-        Console.WriteLine("Usage: Game.App.Headless --verify-mvp1 | --run-scenario");
+        Console.WriteLine("Usage: Game.App.Headless --verify-mvp1 | --update-mvp1-baseline | --run-scenario");
     }
 
     private static FixtureInput LoadReplayFixture()
@@ -122,6 +201,8 @@ public static class Program
                 {
                     return new FixtureInput(
                         DisplayPath: NormalizeDisplayPath(binaryCandidate),
+                        FullPath: binaryCandidate,
+                        Format: FixtureFormat.Binary,
                         Stream: File.OpenRead(binaryCandidate));
                 }
 
@@ -131,6 +212,8 @@ public static class Program
                     byte[] bytes = Convert.FromHexString(File.ReadAllText(hexCandidate).Trim());
                     return new FixtureInput(
                         DisplayPath: NormalizeDisplayPath(hexCandidate),
+                        FullPath: hexCandidate,
+                        Format: FixtureFormat.Hex,
                         Stream: new MemoryStream(bytes, writable: false));
                 }
 
@@ -160,4 +243,10 @@ public static class Program
     }
 }
 
-internal sealed record FixtureInput(string DisplayPath, Stream Stream);
+internal enum FixtureFormat
+{
+    Binary,
+    Hex
+}
+
+internal sealed record FixtureInput(string DisplayPath, string FullPath, FixtureFormat Format, Stream Stream);

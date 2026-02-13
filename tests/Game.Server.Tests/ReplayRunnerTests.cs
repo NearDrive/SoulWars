@@ -19,18 +19,58 @@ public sealed class ReplayRunnerTests
         string replayChecksum = TestChecksum.NormalizeFullHex(replayResult.Checksum);
         Assert.StartsWith(BaselineChecksums.ScenarioBaselinePrefix, replayChecksum, StringComparison.Ordinal);
 
-        if (!string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum))
+        Assert.False(string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum));
+        string expectedChecksum = TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum!);
+        Assert.Equal(expectedChecksum, replayChecksum);
+        Assert.StartsWith(BaselineChecksums.ScenarioBaselinePrefix, expectedChecksum, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Replay_WithMissingFinalChecksum_LeavesExpectedChecksumEmpty()
+    {
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(20));
+
+        ReplayExecutionResult replayResult = await Task.Run(() =>
         {
-            string expectedChecksum = TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum);
-            Assert.Equal(expectedChecksum, replayChecksum);
-            Assert.StartsWith(BaselineChecksums.ScenarioBaselinePrefix, expectedChecksum, StringComparison.Ordinal);
-            return;
+            using Stream replayStream = OpenFixtureStream();
+            byte[] bytes = ReadAllBytes(replayStream);
+            byte[] trimmed = TrimFinalChecksumRecord(bytes);
+            using MemoryStream trimmedStream = new(trimmed, writable: false);
+            return ReplayRunner.RunReplayWithExpected(trimmedStream);
+        }, cts.Token).WaitAsync(cts.Token);
+
+        Assert.True(string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum));
+        string replayChecksum = TestChecksum.NormalizeFullHex(replayResult.Checksum);
+        Assert.StartsWith(BaselineChecksums.ScenarioBaselinePrefix, replayChecksum, StringComparison.Ordinal);
+    }
+
+    private static byte[] TrimFinalChecksumRecord(byte[] replayBytes)
+    {
+        using MemoryStream stream = new(replayBytes, writable: false);
+        using ReplayReader reader = new(stream);
+
+        int expectedTicks = reader.Header.TickCount;
+        for (int i = 0; i < expectedTicks; i++)
+        {
+            Assert.True(reader.TryReadNext(out ReplayEvent evt));
+            Assert.Equal(ReplayRecordType.TickInputs, evt.RecordType);
         }
 
-        string scenarioChecksum = TestChecksum.NormalizeFullHex(
-            await Task.Run(() => ScenarioRunner.Run(BaselineScenario.Config), cts.Token).WaitAsync(cts.Token));
+        long offsetAfterTicks = stream.Position;
+        if (!reader.TryReadNext(out ReplayEvent tail))
+        {
+            return replayBytes;
+        }
 
-        Assert.Equal(scenarioChecksum, replayChecksum);
+        Assert.Equal(ReplayRecordType.FinalChecksum, tail.RecordType);
+        return replayBytes.AsSpan(0, (int)offsetAfterTicks).ToArray();
+    }
+
+    private static byte[] ReadAllBytes(Stream stream)
+    {
+        using MemoryStream memory = new();
+        stream.CopyTo(memory);
+        return memory.ToArray();
     }
 
     private static Stream OpenFixtureStream()
