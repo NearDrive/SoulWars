@@ -327,10 +327,6 @@ public sealed class ServerHost
             {
                 session.ActiveZoneId = zoneId.Value;
             }
-            else if (session.ActiveZoneId is not null)
-            {
-                session.ActiveZoneId = null;
-            }
         }
     }
 
