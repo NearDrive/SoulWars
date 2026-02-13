@@ -101,8 +101,14 @@ public sealed class HardeningFuzzTests
         await stream.WriteAsync(len, cts.Token);
         await stream.FlushAsync(cts.Token);
 
-        runtime.AdvanceTicks(5);
-        await Task.Delay(50, cts.Token);
+        const int maxSteps = 50;
+        for (int i = 0; i < maxSteps && runtime.Host.Metrics.PlayersConnected > 0; i++)
+        {
+            runtime.StepOnce();
+            await Task.Yield();
+        }
+
+        Assert.Equal(0, runtime.Host.Metrics.PlayersConnected);
 
         int read = await stream.ReadAsync(new byte[1], cts.Token);
         Assert.Equal(0, read);
