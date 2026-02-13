@@ -43,6 +43,7 @@ public sealed class ScenarioRunner
         ServerConfig serverConfig = ServerConfig.Default(cfg.ServerSeed) with
         {
             SnapshotEveryTicks = cfg.SnapshotEveryTicks,
+            ZoneCount = cfg.ZoneCount,
             NpcCountPerZone = cfg.NpcCount,
             VisionRadius = visionRadius,
             VisionRadiusSq = visionRadius * visionRadius
@@ -348,6 +349,11 @@ public sealed class ScenarioRunner
         if (cfg.BotCount <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(cfg), "BotCount must be > 0.");
+        }
+
+        if (cfg.ZoneCount <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cfg), "ZoneCount must be > 0.");
         }
 
         if (cfg.VisionRadiusTiles < 0)

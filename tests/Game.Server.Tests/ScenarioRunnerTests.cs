@@ -180,4 +180,22 @@ public sealed class ScenarioRunnerTests
         Assert.True(sawInitial);
         Assert.True(finalNpcHp < initialNpcHp || finalNpcHp == 0);
     }
+    [Fact]
+    public void Stress_10Bots_StableChecksum_AndNoInvariantFailures()
+    {
+        ScenarioConfig cfg = BaselineScenario.CreateStressPreset() with
+        {
+            TickCount = 1200
+        };
+
+        ScenarioResult r1 = ScenarioRunner.RunDetailed(cfg);
+        ScenarioResult r2 = ScenarioRunner.RunDetailed(cfg);
+
+        Assert.Equal(0, r1.InvariantFailures);
+        Assert.Equal(0, r2.InvariantFailures);
+        Assert.Equal(TestChecksum.NormalizeFullHex(r1.Checksum), TestChecksum.NormalizeFullHex(r2.Checksum));
+        Assert.All(r1.BotStats, s => Assert.True(s.SnapshotsReceived > 0));
+        Assert.True(r1.MessagesOut > 0);
+    }
+
 }
