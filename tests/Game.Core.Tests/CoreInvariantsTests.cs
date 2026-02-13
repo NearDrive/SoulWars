@@ -33,10 +33,15 @@ public sealed class CoreInvariantsTests
             new WorldCommand(WorldCommandKind.EnterZone, targetId, new ZoneId(1))));
         state = Simulation.Step(config, state, setup);
 
-        for (int i = 0; i < 30; i++)
+        for (int i = 0; i < 10; i++)
         {
             state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
                 new WorldCommand(WorldCommandKind.AttackIntent, attackerId, new ZoneId(1), TargetEntityId: targetId))));
+
+            for (int cooldownTick = 0; cooldownTick < 10; cooldownTick++)
+            {
+                state = Simulation.Step(config, state, new Inputs(ImmutableArray<WorldCommand>.Empty));
+            }
         }
 
         Assert.True(state.TryGetZone(new ZoneId(1), out ZoneState zone));
