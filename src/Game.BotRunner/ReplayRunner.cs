@@ -1,24 +1,28 @@
 using Game.Protocol;
 using Game.Server;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Game.BotRunner;
 
 public static class ReplayRunner
 {
-    public static string RunReplay(Stream replayStream)
+    public static string RunReplay(Stream replayStream, ILoggerFactory? loggerFactory = null)
     {
-        ReplayExecutionResult result = RunReplayInternal(replayStream);
+        ReplayExecutionResult result = RunReplayInternal(replayStream, loggerFactory);
         return result.Checksum;
     }
 
-    public static ReplayExecutionResult RunReplayWithExpected(Stream replayStream)
+    public static ReplayExecutionResult RunReplayWithExpected(Stream replayStream, ILoggerFactory? loggerFactory = null)
     {
-        return RunReplayInternal(replayStream);
+        return RunReplayInternal(replayStream, loggerFactory);
     }
 
-    private static ReplayExecutionResult RunReplayInternal(Stream replayStream)
+    private static ReplayExecutionResult RunReplayInternal(Stream replayStream, ILoggerFactory? loggerFactory)
     {
         ArgumentNullException.ThrowIfNull(replayStream);
+        ILoggerFactory lf = loggerFactory ?? NullLoggerFactory.Instance;
+        ILogger logger = lf.CreateLogger("ReplayRunner");
 
         using ReplayReader reader = new(replayStream);
         ReplayHeader header = reader.Header;
@@ -33,7 +37,7 @@ public static class ReplayRunner
         List<BotClient> clients = new(header.BotCount);
         Dictionary<(int BotIndex, int Tick), Snapshot> committedSnapshots = new();
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot = new();
-        ServerHost host = new(serverConfig);
+        ServerHost host = new(serverConfig, lf);
 
         string? expectedChecksum = null;
 
@@ -131,6 +135,7 @@ public static class ReplayRunner
             }
 
             string finalChecksum = checksum.BuildHexLower();
+            logger.LogInformation(BotRunnerLogEvents.ScenarioEnd, "ScenarioEnd checksum={Checksum} ticks={Ticks}", finalChecksum, header.TickCount);
             return new ReplayExecutionResult(finalChecksum, expectedChecksum);
         }
         finally

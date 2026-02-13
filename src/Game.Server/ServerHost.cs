@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
 using Game.Core;
 using Game.Protocol;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Game.Server;
 
@@ -9,13 +11,14 @@ public sealed class ServerHost
     private readonly SimulationConfig _simulationConfig;
     private readonly ServerConfig _serverConfig;
     private readonly Dictionary<int, SessionState> _sessions = new();
+    private readonly ILogger<ServerHost> _logger;
 
     private int _nextSessionId = 1;
     private int _nextEntityId = 1;
     private readonly List<WorldCommand> _pendingWorldCommands = new();
     private WorldState _world;
 
-    public ServerHost(ServerConfig config)
+    public ServerHost(ServerConfig config, ILoggerFactory? loggerFactory = null, ServerMetrics? metrics = null)
     {
         if (config.SnapshotEveryTicks <= 0)
         {
@@ -25,7 +28,12 @@ public sealed class ServerHost
         _serverConfig = config;
         _simulationConfig = config.ToSimulationConfig();
         _world = Simulation.CreateInitialState(_simulationConfig);
+        ILoggerFactory factory = loggerFactory ?? NullLoggerFactory.Instance;
+        _logger = factory.CreateLogger<ServerHost>();
+        Metrics = metrics ?? new ServerMetrics();
     }
+
+    public ServerMetrics Metrics { get; }
 
     public SessionId Connect(IServerEndpoint endpoint)
     {
@@ -36,14 +44,19 @@ public sealed class ServerHost
         _sessions[sessionId.Value] = session;
 
         endpoint.EnqueueToClient(ProtocolCodec.Encode(new Welcome(sessionId)));
+        Metrics.IncrementMessagesOut();
+        Metrics.SetPlayersConnected(_sessions.Count);
 
+        _logger.LogInformation(ServerLogEvents.SessionConnected, "SessionConnected sessionId={SessionId}", sessionId.Value);
         return sessionId;
     }
 
     public void StepOnce()
     {
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
         ProcessInboundOnce();
         AdvanceSimulationOnce();
+        Metrics.RecordTick(System.Diagnostics.Stopwatch.GetTimestamp() - start);
     }
 
     public void ProcessInboundOnce()
@@ -99,11 +112,24 @@ public sealed class ServerHost
         }
     }
 
+    public ServerMetricsSnapshot SnapshotMetrics() => Metrics.Snapshot(_world.Tick, _serverConfig.TickHz);
+
     private void DrainSessionMessages(SessionState session, int targetTick, List<WorldCommand> worldCommands)
     {
         while (session.Endpoint.TryDequeueToServer(out byte[] payload))
         {
-            IClientMessage message = ProtocolCodec.DecodeClient(payload);
+            IClientMessage message;
+            try
+            {
+                message = ProtocolCodec.DecodeClient(payload);
+                Metrics.IncrementMessagesIn();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ServerLogEvents.ProtocolDecodeFailed, ex, "ProtocolDecodeFailed sessionId={SessionId}", session.SessionId.Value);
+                DisconnectSession(session, "protocol_decode_failed");
+                return;
+            }
 
             switch (message)
             {
@@ -137,6 +163,14 @@ public sealed class ServerHost
             ZoneId: new ZoneId(request.ZoneId)));
 
         session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new EnterZoneAck(request.ZoneId, session.EntityId.Value)));
+        Metrics.IncrementMessagesOut();
+
+        _logger.LogInformation(
+            ServerLogEvents.SessionEnteredZone,
+            "SessionEnteredZone sessionId={SessionId} zoneId={ZoneId} entityId={EntityId}",
+            session.SessionId.Value,
+            request.ZoneId,
+            session.EntityId.Value);
     }
 
     private void HandleLeaveZone(SessionState session, LeaveZoneRequest request, List<WorldCommand> worldCommands)
@@ -191,6 +225,8 @@ public sealed class ServerHost
 
     private void EmitSnapshots()
     {
+        int emittedCount = 0;
+
         foreach (SessionState session in OrderedSessions())
         {
             if (session.ActiveZoneId is null)
@@ -220,6 +256,23 @@ public sealed class ServerHost
                 Entities: entities);
 
             session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(snapshot));
+            Metrics.IncrementMessagesOut();
+            emittedCount++;
+        }
+
+        if (emittedCount > 0)
+        {
+            _logger.LogInformation(ServerLogEvents.SnapshotEmitted, "SnapshotEmitted tick={Tick} sessions={Sessions}", _world.Tick, emittedCount);
+        }
+    }
+
+    private void DisconnectSession(SessionState session, string reason)
+    {
+        if (_sessions.Remove(session.SessionId.Value))
+        {
+            session.Endpoint.Close();
+            Metrics.SetPlayersConnected(_sessions.Count);
+            _logger.LogInformation(ServerLogEvents.SessionDisconnected, "SessionDisconnected sessionId={SessionId} reason={Reason}", session.SessionId.Value, reason);
         }
     }
 

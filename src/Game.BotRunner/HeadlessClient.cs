@@ -1,5 +1,7 @@
 using Game.Protocol;
 using Game.Server;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Game.BotRunner;
 
@@ -7,16 +9,19 @@ public sealed class HeadlessClient : IAsyncDisposable
 {
     private readonly TcpClientEndpoint? _tcpEndpoint;
     private readonly IClientEndpoint? _inMemoryEndpoint;
+    private readonly ILogger<HeadlessClient> _logger;
 
-    public HeadlessClient()
+    public HeadlessClient(ILoggerFactory? loggerFactory = null)
     {
         _tcpEndpoint = new TcpClientEndpoint();
+        _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<HeadlessClient>();
     }
 
-    public HeadlessClient(IClientEndpoint endpoint)
+    public HeadlessClient(IClientEndpoint endpoint, ILoggerFactory? loggerFactory = null)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         _inMemoryEndpoint = endpoint;
+        _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<HeadlessClient>();
     }
 
     public Task ConnectAsync(string host, int port, CancellationToken ct)
@@ -52,8 +57,15 @@ public sealed class HeadlessClient : IAsyncDisposable
 
         if (hasPayload)
         {
-            message = ProtocolCodec.DecodeServer(payload);
-            return true;
+            try
+            {
+                message = ProtocolCodec.DecodeServer(payload);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(BotRunnerLogEvents.InvariantFailed, ex, "InvariantFailed reason=server_decode_failed");
+            }
         }
 
         message = null;

@@ -18,7 +18,7 @@ public sealed class ScenarioRunnerTests
     }
 
     [Fact]
-    public void ScenarioRunner_BotsReceiveSnapshots_AndHaveEntityIds()
+    public void ScenarioRunner_ResultContainsSummaryAndMetrics()
     {
         ScenarioConfig cfg = new(
             ServerSeed: 123,
@@ -28,12 +28,31 @@ public sealed class ScenarioRunnerTests
             ZoneId: 1,
             BaseBotSeed: 999);
 
-        ScenarioResult result = ScenarioRunner.RunDetailed(cfg);
+        ScenarioResult result = new ScenarioRunner().RunDetailed(cfg);
 
-        Assert.All(result.BotStats, stats =>
-        {
-            Assert.NotNull(stats.EntityId);
-            Assert.True(stats.SnapshotsReceived > 0);
-        });
+        Assert.True(result.MessagesOut > 0);
+        Assert.True(result.MessagesIn > 0);
+        Assert.All(result.BotStats, stats => Assert.True(stats.SnapshotsReceived > 0));
+        Assert.True(result.TickAvgMs > 0);
+        Assert.True(result.TickP95Ms >= result.TickAvgMs);
+        Assert.Equal(0, result.InvariantFailures);
+    }
+
+    [Fact]
+    public void ScenarioRunner_MetricsSnapshotStable_Smoke()
+    {
+        ScenarioConfig cfg = new(
+            ServerSeed: 124,
+            TickCount: 20,
+            SnapshotEveryTicks: 1,
+            BotCount: 1,
+            ZoneId: 1,
+            BaseBotSeed: 99);
+
+        ScenarioResult result = new ScenarioRunner().RunDetailed(cfg);
+
+        Assert.True(result.PlayersConnectedMax >= 1);
+        Assert.True(result.TickAvgMs > 0);
+        Assert.True(result.MessagesIn > 0);
     }
 }

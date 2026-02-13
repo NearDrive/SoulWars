@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Game.Server;
 
@@ -16,11 +18,13 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _readerTask;
     private readonly Task _writerTask;
+    private readonly ILogger<TcpEndpoint> _logger;
 
-    public TcpEndpoint(TcpClient client)
+    public TcpEndpoint(TcpClient client, ILogger<TcpEndpoint>? logger = null)
     {
         _client = client;
         _stream = client.GetStream();
+        _logger = logger ?? NullLogger<TcpEndpoint>.Instance;
         _readerTask = Task.Run(ReadLoopAsync);
         _writerTask = Task.Run(WriteLoopAsync);
     }
@@ -83,6 +87,7 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
                 int length = BinaryPrimitives.ReadInt32LittleEndian(lengthBuffer);
                 if (length <= 0 || length > MaxFrameLength)
                 {
+                    _logger.LogWarning(ServerLogEvents.OversizedMessage, "OversizedMessage len={Length}", length);
                     throw new InvalidOperationException($"Invalid frame length {length}.");
                 }
 
@@ -99,6 +104,10 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
         }
         catch (ObjectDisposedException)
         {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ServerLogEvents.UnhandledException, ex, "UnhandledException");
         }
         finally
         {
@@ -132,6 +141,10 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
         }
         catch (ObjectDisposedException)
         {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ServerLogEvents.UnhandledException, ex, "UnhandledException");
         }
         finally
         {

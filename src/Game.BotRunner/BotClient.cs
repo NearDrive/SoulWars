@@ -7,12 +7,12 @@ public sealed class BotClient : IAsyncDisposable
 {
     private readonly HeadlessClient _client;
 
-    public BotClient(int botIndex, int zoneId)
-        : this(botIndex, zoneId, endpoint: null)
+    public BotClient(int botIndex, int zoneId, Microsoft.Extensions.Logging.ILoggerFactory? loggerFactory = null)
+        : this(botIndex, zoneId, endpoint: null, loggerFactory)
     {
     }
 
-    public BotClient(int botIndex, int zoneId, IClientEndpoint? endpoint)
+    public BotClient(int botIndex, int zoneId, IClientEndpoint? endpoint, Microsoft.Extensions.Logging.ILoggerFactory? loggerFactory = null)
     {
         if (botIndex < 0)
         {
@@ -21,7 +21,7 @@ public sealed class BotClient : IAsyncDisposable
 
         BotIndex = botIndex;
         ZoneId = zoneId;
-        _client = endpoint is null ? new HeadlessClient() : new HeadlessClient(endpoint);
+        _client = endpoint is null ? new HeadlessClient(loggerFactory) : new HeadlessClient(endpoint, loggerFactory);
     }
 
     public int BotIndex { get; }
