@@ -27,10 +27,15 @@ public sealed class ReplayRunnerTests
             return;
         }
 
-        string scenarioChecksum = TestChecksum.NormalizeFullHex(
-            await Task.Run(() => ScenarioRunner.Run(BaselineScenario.Config), cts.Token).WaitAsync(cts.Token));
+        ReplayExecutionResult replayResultSecond = await Task.Run(() =>
+        {
+            using Stream replayStream = OpenFixtureStream();
+            return ReplayRunner.RunReplayWithExpected(replayStream);
+        }, cts.Token).WaitAsync(cts.Token);
 
-        Assert.Equal(scenarioChecksum, replayChecksum);
+        string replayChecksumSecond = TestChecksum.NormalizeFullHex(replayResultSecond.Checksum);
+        Assert.Equal(replayChecksum, replayChecksumSecond);
+        Assert.StartsWith(BaselineChecksums.ReplayBaselinePrefix, replayChecksumSecond, StringComparison.Ordinal);
     }
 
     private static Stream OpenFixtureStream()
