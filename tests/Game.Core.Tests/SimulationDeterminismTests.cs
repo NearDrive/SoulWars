@@ -87,5 +87,8 @@ public sealed class SimulationDeterminismTests
         MaxSpeed: Fix32.FromInt(4),
         Radius: new(16384), // 0.25
         MapWidth: 64,
-        MapHeight: 64);
+        MapHeight: 64,
+        NpcCount: 0,
+        NpcWanderPeriodTicks: 30,
+        NpcAggroRange: Fix32.FromInt(6));
 }

@@ -55,4 +55,23 @@ public sealed class ScenarioRunnerTests
         Assert.True(result.TickAvgMs > 0);
         Assert.True(result.MessagesIn > 0);
     }
+
+    [Fact]
+    public void ScenarioRunner_WithNpcs_IsDeterministic()
+    {
+        ScenarioConfig cfg = new(
+            ServerSeed: 451,
+            TickCount: 120,
+            SnapshotEveryTicks: 2,
+            BotCount: 1,
+            ZoneId: 1,
+            BaseBotSeed: 777,
+            NpcCount: 5);
+
+        string checksum1 = TestChecksum.NormalizeFullHex(ScenarioRunner.Run(cfg));
+        string checksum2 = TestChecksum.NormalizeFullHex(ScenarioRunner.Run(cfg));
+
+        Assert.Equal(checksum1, checksum2);
+    }
+
 }

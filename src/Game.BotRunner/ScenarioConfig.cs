@@ -6,4 +6,5 @@ public sealed record ScenarioConfig(
     int SnapshotEveryTicks,
     int BotCount,
     int ZoneId,
-    int BaseBotSeed);
+    int BaseBotSeed,
+    int NpcCount = 0);

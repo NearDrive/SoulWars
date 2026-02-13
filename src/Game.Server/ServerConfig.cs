@@ -7,7 +7,8 @@ public readonly record struct ServerConfig(
     int TickHz,
     int SnapshotEveryTicks,
     int MapWidth,
-    int MapHeight)
+    int MapHeight,
+    int NpcCount)
 {
     public SimulationConfig ToSimulationConfig()
     {
@@ -18,7 +19,8 @@ public readonly record struct ServerConfig(
             Seed = Seed,
             TickHz = TickHz,
             MapWidth = MapWidth,
-            MapHeight = MapHeight
+            MapHeight = MapHeight,
+            NpcCount = NpcCount
         };
     }
 
@@ -27,5 +29,6 @@ public readonly record struct ServerConfig(
         TickHz: 20,
         SnapshotEveryTicks: 1,
         MapWidth: 32,
-        MapHeight: 32);
+        MapHeight: 32,
+        NpcCount: 0);
 }

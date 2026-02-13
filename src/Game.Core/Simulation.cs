@@ -7,6 +7,7 @@ public static class Simulation
     private const int DefaultMaxHp = 100;
     private const int DefaultAttackDamage = 10;
     private const int DefaultAttackCooldownTicks = 10;
+    private const int NpcSpawnMaxAttempts = 64;
 
     public static WorldState CreateInitialState(SimulationConfig config)
     {
@@ -15,7 +16,7 @@ public static class Simulation
         ZoneState localZone = new(
             Id: new ZoneId(1),
             Map: map,
-            Entities: ImmutableArray<EntityState>.Empty);
+            Entities: SpawnNpcs(config, new ZoneId(1), map));
 
         return new WorldState(
             Tick: 0,
@@ -50,9 +51,214 @@ public static class Simulation
             updated = updated.WithZoneUpdated(nextZone);
         }
 
+        foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
+        {
+            ZoneState nextZone = RunNpcAiAndApply(config, updated.Tick, zone);
+            updated = updated.WithZoneUpdated(nextZone);
+        }
+
         _ = config.MaxSpeed;
 
         return updated;
+    }
+
+    private static ZoneState RunNpcAiAndApply(SimulationConfig config, int tick, ZoneState zone)
+    {
+        List<WorldCommand> npcCommands = new();
+        ImmutableArray<EntityState> ordered = zone.Entities
+            .OrderBy(e => e.Id.Value)
+            .ToImmutableArray();
+
+        ImmutableArray<EntityState>.Builder postAiEntities = ImmutableArray.CreateBuilder<EntityState>(ordered.Length);
+        Fix32 aggroRangeSq = config.NpcAggroRange * config.NpcAggroRange;
+
+        foreach (EntityState entity in ordered)
+        {
+            if (entity.Kind != EntityKind.Npc || !entity.IsAlive)
+            {
+                postAiEntities.Add(entity);
+                continue;
+            }
+
+            EntityState npc = entity;
+            sbyte moveX = npc.WanderX;
+            sbyte moveY = npc.WanderY;
+
+            if (tick >= npc.NextWanderChangeTick)
+            {
+                SimRng wanderRng = CreateNpcTickRng(config.Seed, zone.Id, npc.Id, tick);
+                moveX = (sbyte)wanderRng.NextInt(-1, 2);
+                moveY = (sbyte)wanderRng.NextInt(-1, 2);
+                npc = npc with
+                {
+                    WanderX = moveX,
+                    WanderY = moveY,
+                    NextWanderChangeTick = tick + config.NpcWanderPeriodTicks
+                };
+            }
+
+            EntityState? closestPlayer = null;
+            Fix32 closestDistSq = new(int.MaxValue);
+
+            foreach (EntityState candidate in ordered)
+            {
+                if (candidate.Kind != EntityKind.Player || !candidate.IsAlive)
+                {
+                    continue;
+                }
+
+                Fix32 dx = candidate.Pos.X - npc.Pos.X;
+                Fix32 dy = candidate.Pos.Y - npc.Pos.Y;
+                Fix32 distSq = (dx * dx) + (dy * dy);
+                if (distSq > aggroRangeSq || distSq >= closestDistSq)
+                {
+                    continue;
+                }
+
+                closestDistSq = distSq;
+                closestPlayer = candidate;
+            }
+
+            if (closestPlayer is not null)
+            {
+                Fix32 dx = closestPlayer.Pos.X - npc.Pos.X;
+                Fix32 dy = closestPlayer.Pos.Y - npc.Pos.Y;
+                moveX = SignToSByte(dx);
+                moveY = SignToSByte(dy);
+
+                Fix32 attackRangeSq = npc.AttackRange * npc.AttackRange;
+                bool canAttack = tick - npc.LastAttackTick >= npc.AttackCooldownTicks;
+                if (canAttack && closestDistSq <= attackRangeSq)
+                {
+                    npcCommands.Add(new WorldCommand(
+                        Kind: WorldCommandKind.AttackIntent,
+                        EntityId: npc.Id,
+                        ZoneId: zone.Id,
+                        TargetEntityId: closestPlayer.Id));
+                }
+            }
+
+            npc = npc with { WanderX = moveX, WanderY = moveY };
+            postAiEntities.Add(npc);
+
+            npcCommands.Add(new WorldCommand(
+                Kind: WorldCommandKind.MoveIntent,
+                EntityId: npc.Id,
+                ZoneId: zone.Id,
+                MoveX: moveX,
+                MoveY: moveY));
+        }
+
+        ZoneState updatedZone = zone with
+        {
+            Entities = postAiEntities
+                .ToImmutable()
+                .OrderBy(e => e.Id.Value)
+                .ToImmutableArray()
+        };
+
+        foreach (WorldCommand move in npcCommands.Where(c => c.Kind == WorldCommandKind.MoveIntent).OrderBy(c => c.EntityId.Value))
+        {
+            updatedZone = ApplyMoveIntent(config, updatedZone, move);
+        }
+
+        foreach (WorldCommand attack in npcCommands.Where(c => c.Kind == WorldCommandKind.AttackIntent).OrderBy(c => c.EntityId.Value))
+        {
+            updatedZone = ApplyAttackIntent(tick, updatedZone, attack);
+        }
+
+        return updatedZone;
+    }
+
+    private static sbyte SignToSByte(Fix32 value)
+    {
+        if (value.Raw > 0)
+        {
+            return 1;
+        }
+
+        if (value.Raw < 0)
+        {
+            return -1;
+        }
+
+        return 0;
+    }
+
+    private static ImmutableArray<EntityState> SpawnNpcs(SimulationConfig config, ZoneId zoneId, TileMap map)
+    {
+        SimRng rng = new(unchecked((int)Hash32(unchecked((uint)config.Seed), unchecked((uint)zoneId.Value), 0xA11CEu, 0xB07u)));
+        ImmutableArray<EntityState>.Builder npcs = ImmutableArray.CreateBuilder<EntityState>(config.NpcCount);
+
+        for (int i = 0; i < config.NpcCount; i++)
+        {
+            EntityId entityId = new(1000 + i + 1);
+            Vec2Fix spawn = FindDeterministicNpcSpawn(map, config.Radius, rng);
+            npcs.Add(new EntityState(
+                Id: entityId,
+                Pos: spawn,
+                Vel: Vec2Fix.Zero,
+                MaxHp: DefaultMaxHp,
+                Hp: DefaultMaxHp,
+                IsAlive: true,
+                AttackRange: Fix32.FromInt(1),
+                AttackDamage: DefaultAttackDamage,
+                AttackCooldownTicks: DefaultAttackCooldownTicks,
+                LastAttackTick: -DefaultAttackCooldownTicks,
+                Kind: EntityKind.Npc,
+                NextWanderChangeTick: 0,
+                WanderX: 0,
+                WanderY: 0));
+        }
+
+        return npcs
+            .ToImmutable()
+            .OrderBy(e => e.Id.Value)
+            .ToImmutableArray();
+    }
+
+    private static Vec2Fix FindDeterministicNpcSpawn(TileMap map, Fix32 radius, SimRng rng)
+    {
+        Fix32 half = new(Fix32.OneRaw / 2);
+
+        for (int attempt = 0; attempt < NpcSpawnMaxAttempts; attempt++)
+        {
+            int x = rng.NextInt(1, map.Width - 1);
+            int y = rng.NextInt(1, map.Height - 1);
+            if (map.Get(x, y) == TileKind.Solid)
+            {
+                continue;
+            }
+
+            Vec2Fix candidate = new(Fix32.FromInt(x) + half, Fix32.FromInt(y) + half);
+            if (!Physics2D.OverlapsSolidTile(candidate, radius, map))
+            {
+                return candidate;
+            }
+        }
+
+        throw new InvalidOperationException("Unable to find deterministic NPC spawn after max attempts.");
+    }
+
+    public static uint Hash32(uint a, uint b, uint c, uint d)
+    {
+        uint h = 0x9E3779B9u;
+        h ^= a + 0x85EBCA6Bu + (h << 6) + (h >> 2);
+        h ^= b + 0xC2B2AE35u + (h << 6) + (h >> 2);
+        h ^= c + 0x27D4EB2Fu + (h << 6) + (h >> 2);
+        h ^= d + 0x165667B1u + (h << 6) + (h >> 2);
+        h ^= h >> 16;
+        h *= 0x7FEB352Du;
+        h ^= h >> 15;
+        h *= 0x846CA68Bu;
+        h ^= h >> 16;
+        return h;
+    }
+
+    public static SimRng CreateNpcTickRng(int serverSeed, ZoneId zid, EntityId eid, int tick)
+    {
+        uint seed = Hash32(unchecked((uint)serverSeed), unchecked((uint)zid.Value), unchecked((uint)eid.Value), unchecked((uint)tick));
+        return new SimRng(unchecked((int)seed));
     }
 
     private static ZoneState ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<WorldCommand> zoneCommands)
@@ -130,7 +336,11 @@ public static class Simulation
             AttackRange: Fix32.FromInt(1),
             AttackDamage: DefaultAttackDamage,
             AttackCooldownTicks: DefaultAttackCooldownTicks,
-            LastAttackTick: -DefaultAttackCooldownTicks);
+            LastAttackTick: -DefaultAttackCooldownTicks,
+            Kind: EntityKind.Player,
+            NextWanderChangeTick: 0,
+            WanderX: 0,
+            WanderY: 0);
 
         return zone with
         {
