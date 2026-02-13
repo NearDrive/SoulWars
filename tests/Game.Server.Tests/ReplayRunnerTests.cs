@@ -80,8 +80,9 @@ public sealed class ReplayRunnerTests
         Assert.Equal(
             TestChecksum.NormalizeFullHex(scenarioResult.Checksum),
             TestChecksum.NormalizeFullHex(replayResult.Checksum));
+        Assert.NotNull(replayResult.ExpectedChecksum);
         Assert.Equal(
             TestChecksum.NormalizeFullHex(scenarioResult.Checksum),
-            TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum));
+            TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum!));
     }
 }
