@@ -10,6 +10,7 @@ public static class ProtocolCodec
     private const byte ClientInputCommand = 3;
     private const byte ClientLeaveZoneRequest = 4;
     private const byte ClientAttackIntent = 5;
+    private const byte ClientTeleportRequest = 6;
 
     private const byte ServerWelcome = 101;
     private const byte ServerEnterZoneAck = 102;
@@ -27,6 +28,7 @@ public static class ProtocolCodec
             InputCommand input => EncodeInputCommand(input),
             AttackIntent attack => EncodeAttackIntent(attack),
             LeaveZoneRequest request => EncodeIntMessage(ClientLeaveZoneRequest, request.ZoneId),
+            TeleportRequest request => EncodeIntMessage(ClientTeleportRequest, request.ToZoneId),
             _ => throw new InvalidOperationException($"Unsupported client message type: {msg.GetType().Name}")
         };
     }
@@ -86,6 +88,21 @@ public static class ProtocolCodec
                 }
 
                 msg = new LeaveZoneRequest(leaveZoneId);
+                error = ProtocolErrorCode.None;
+                return true;
+            case ClientTeleportRequest:
+                if (!TryReadInt32(data, 1, out int toZoneId, out error))
+                {
+                    return false;
+                }
+
+                if (toZoneId <= 0)
+                {
+                    error = ProtocolErrorCode.ValueOutOfRange;
+                    return false;
+                }
+
+                msg = new TeleportRequest(toZoneId);
                 error = ProtocolErrorCode.None;
                 return true;
             default:

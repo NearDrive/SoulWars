@@ -10,9 +10,12 @@ public sealed class CoreInvariantsTests
     public void Validate_Throws_WhenZonesUnsorted()
     {
         TileMap map = new(2, 2, ImmutableArray.Create(TileKind.Empty, TileKind.Empty, TileKind.Empty, TileKind.Empty));
-        WorldState world = new(0, ImmutableArray.Create(
-            new ZoneState(new ZoneId(2), map, ImmutableArray<EntityState>.Empty),
-            new ZoneState(new ZoneId(1), map, ImmutableArray<EntityState>.Empty)));
+        WorldState world = new(
+            0,
+            ImmutableArray.Create(
+                new ZoneState(new ZoneId(2), map, ImmutableArray<EntityState>.Empty),
+                new ZoneState(new ZoneId(1), map, ImmutableArray<EntityState>.Empty)),
+            ImmutableArray<EntityLocation>.Empty);
 
         Assert.Throws<InvariantViolationException>(() => CoreInvariants.Validate(world));
     }
@@ -33,8 +36,11 @@ public sealed class CoreInvariantsTests
             AttackCooldownTicks: 10,
             LastAttackTick: -10);
 
-        WorldState world = new(0, ImmutableArray.Create(
-            new ZoneState(new ZoneId(1), map, ImmutableArray.Create(dead))));
+        WorldState world = new(
+            0,
+            ImmutableArray.Create(
+                new ZoneState(new ZoneId(1), map, ImmutableArray.Create(dead))),
+            ImmutableArray<EntityLocation>.Empty);
 
         Assert.Throws<InvariantViolationException>(() => CoreInvariants.Validate(world));
     }

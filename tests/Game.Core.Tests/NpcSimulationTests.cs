@@ -20,7 +20,7 @@ public sealed class NpcSimulationTests
         EntityState[] npcsA = za.Entities.Where(e => e.Kind == EntityKind.Npc).OrderBy(e => e.Id.Value).ToArray();
         EntityState[] npcsB = zb.Entities.Where(e => e.Kind == EntityKind.Npc).OrderBy(e => e.Id.Value).ToArray();
 
-        Assert.Equal(config.NpcCount, npcsA.Length);
+        Assert.Equal(config.NpcCountPerZone, npcsA.Length);
         Assert.Equal(npcsA.Length, npcsB.Length);
 
         for (int i = 0; i < npcsA.Length; i++)
@@ -45,7 +45,7 @@ public sealed class NpcSimulationTests
     [Fact]
     public void NpcCanKillPlayer_Deterministic()
     {
-        SimulationConfig config = CreateConfig(777) with { NpcCount = 1 };
+        SimulationConfig config = CreateConfig(777) with { NpcCountPerZone = 1 };
 
         int deathTickA = RunKillScenario(config);
         int deathTickB = RunKillScenario(config);
@@ -100,9 +100,10 @@ public sealed class NpcSimulationTests
         MoveSpeed: Fix32.FromInt(4),
         MaxSpeed: Fix32.FromInt(4),
         Radius: new(16384),
+        ZoneCount: 1,
         MapWidth: 32,
         MapHeight: 32,
-        NpcCount: 5,
+        NpcCountPerZone: 5,
         NpcWanderPeriodTicks: 30,
         NpcAggroRange: Fix32.FromInt(6));
 }

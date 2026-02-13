@@ -11,16 +11,36 @@ public static class Simulation
 
     public static WorldState CreateInitialState(SimulationConfig config)
     {
-        TileMap map = WorldGen.Generate(config, config.MapWidth, config.MapHeight);
+        if (config.ZoneCount <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(config), "ZoneCount must be > 0.");
+        }
 
-        ZoneState localZone = new(
-            Id: new ZoneId(1),
-            Map: map,
-            Entities: SpawnNpcs(config, new ZoneId(1), map));
+        ImmutableArray<ZoneState>.Builder zones = ImmutableArray.CreateBuilder<ZoneState>(config.ZoneCount);
+
+        for (int zoneValue = 1; zoneValue <= config.ZoneCount; zoneValue++)
+        {
+            ZoneId zoneId = new(zoneValue);
+            int zoneSeed = config.ZoneCount == 1
+                ? config.Seed
+                : unchecked((int)Hash32(unchecked((uint)config.Seed), unchecked((uint)zoneId.Value), 0x20E1u, 0xC0DEu));
+            SimulationConfig zoneConfig = config with { Seed = zoneSeed };
+            TileMap map = WorldGen.Generate(zoneConfig, config.MapWidth, config.MapHeight);
+
+            zones.Add(new ZoneState(
+                Id: zoneId,
+                Map: map,
+                Entities: SpawnNpcs(config, zoneId, map)));
+        }
+
+        ImmutableArray<ZoneState> initialZones = zones
+            .OrderBy(z => z.Id.Value)
+            .ToImmutableArray();
 
         return new WorldState(
             Tick: 0,
-            Zones: ImmutableArray.Create(localZone));
+            Zones: initialZones,
+            EntityLocations: BuildEntityLocations(initialZones));
     }
 
     public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs)
@@ -34,13 +54,25 @@ public static class Simulation
 
         WorldState updated = state with { Tick = state.Tick + 1 };
 
-        ImmutableArray<(ZoneId ZoneId, ImmutableArray<WorldCommand> Commands)> commandsByZone = commands
-            .GroupBy(c => c.ZoneId.Value)
-            .OrderBy(g => g.Key)
-            .Select(g => (new ZoneId(g.Key), g.ToImmutableArray()))
+        ImmutableArray<(WorldCommand Command, int Index)> orderedCommands = commands
+            .Select((command, index) => (Command: command, Index: index))
+            .OrderBy(x => x.Command.ZoneId.Value)
+            .ThenBy(x => x.Command.EntityId.Value)
+            .ThenBy(x => (int)x.Command.Kind)
+            .ThenBy(x => x.Index)
             .ToImmutableArray();
 
-        foreach ((ZoneId zoneId, ImmutableArray<WorldCommand> zoneCommands) in commandsByZone)
+        foreach (WorldCommand command in commands.Where(c => c.Kind == WorldCommandKind.TeleportIntent))
+        {
+            ValidateCommand(command);
+            updated = ApplyTeleportIntent(config, updated, command);
+        }
+
+        foreach ((ZoneId zoneId, ImmutableArray<WorldCommand> zoneCommands) in orderedCommands
+                     .Where(x => x.Command.Kind is WorldCommandKind.EnterZone or WorldCommandKind.MoveIntent or WorldCommandKind.AttackIntent or WorldCommandKind.LeaveZone)
+                     .GroupBy(x => x.Command.ZoneId.Value)
+                     .OrderBy(g => g.Key)
+                     .Select(g => (new ZoneId(g.Key), g.Select(v => v.Command).ToImmutableArray())))
         {
             if (!updated.TryGetZone(zoneId, out ZoneState zone))
             {
@@ -49,6 +81,7 @@ public static class Simulation
 
             ZoneState nextZone = ProcessZoneCommands(config, updated.Tick, zone, zoneCommands);
             updated = updated.WithZoneUpdated(nextZone);
+            updated = RebuildEntityLocations(updated);
         }
 
         foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
@@ -57,8 +90,8 @@ public static class Simulation
             updated = updated.WithZoneUpdated(nextZone);
         }
 
+        updated = RebuildEntityLocations(updated);
         _ = config.MaxSpeed;
-
         return updated;
     }
 
@@ -188,11 +221,11 @@ public static class Simulation
     private static ImmutableArray<EntityState> SpawnNpcs(SimulationConfig config, ZoneId zoneId, TileMap map)
     {
         SimRng rng = new(unchecked((int)Hash32(unchecked((uint)config.Seed), unchecked((uint)zoneId.Value), 0xA11CEu, 0xB07u)));
-        ImmutableArray<EntityState>.Builder npcs = ImmutableArray.CreateBuilder<EntityState>(config.NpcCount);
+        ImmutableArray<EntityState>.Builder npcs = ImmutableArray.CreateBuilder<EntityState>(config.NpcCountPerZone);
 
-        for (int i = 0; i < config.NpcCount; i++)
+        for (int i = 0; i < config.NpcCountPerZone; i++)
         {
-            EntityId entityId = new(1000 + i + 1);
+            EntityId entityId = new((zoneId.Value * 100000) + i + 1);
             Vec2Fix spawn = FindDeterministicNpcSpawn(map, config.Radius, rng);
             npcs.Add(new EntityState(
                 Id: entityId,
@@ -261,37 +294,110 @@ public static class Simulation
         return new SimRng(unchecked((int)seed));
     }
 
+
+    private static WorldState ApplyTeleportIntent(SimulationConfig config, WorldState state, WorldCommand command)
+    {
+        if (command.ToZoneId is null)
+        {
+            return state;
+        }
+
+        ZoneId fromZoneId = command.ZoneId;
+        ZoneId toZoneId = command.ToZoneId.Value;
+
+        if (fromZoneId.Value == toZoneId.Value)
+        {
+            return state;
+        }
+
+        if (!state.TryGetZone(fromZoneId, out ZoneState fromZone) || !state.TryGetZone(toZoneId, out ZoneState toZone))
+        {
+            return state;
+        }
+
+        EntityState? entity = fromZone.Entities.FirstOrDefault(e => e.Id.Value == command.EntityId.Value);
+        if (entity is null)
+        {
+            return state;
+        }
+
+        ZoneState nextFrom = fromZone with
+        {
+            Entities = fromZone.Entities
+                .Where(e => e.Id.Value != command.EntityId.Value)
+                .OrderBy(e => e.Id.Value)
+                .ToImmutableArray()
+        };
+
+        Vec2Fix spawn = FindSpawn(toZone.Map, config.Radius);
+        EntityState teleported = entity with
+        {
+            Pos = spawn,
+            Vel = Vec2Fix.Zero
+        };
+
+        ZoneState nextTo = toZone with
+        {
+            Entities = toZone.Entities
+                .Add(teleported)
+                .GroupBy(e => e.Id.Value)
+                .Select(g => g.Last())
+                .OrderBy(e => e.Id.Value)
+                .ToImmutableArray()
+        };
+
+        WorldState updated = state.WithZoneUpdated(nextFrom).WithZoneUpdated(nextTo);
+        return updated.WithEntityLocation(command.EntityId, toZoneId);
+    }
+
+    private static WorldState RebuildEntityLocations(WorldState state)
+    {
+        return state with
+        {
+            EntityLocations = BuildEntityLocations(state.Zones)
+        };
+    }
+
+    private static ImmutableArray<EntityLocation> BuildEntityLocations(ImmutableArray<ZoneState> zones)
+    {
+        ImmutableArray<EntityLocation>.Builder locations = ImmutableArray.CreateBuilder<EntityLocation>();
+
+        foreach (ZoneState zone in zones.OrderBy(z => z.Id.Value))
+        {
+            foreach (EntityState entity in zone.Entities.OrderBy(e => e.Id.Value))
+            {
+                locations.Add(new EntityLocation(entity.Id, zone.Id));
+            }
+        }
+
+        return locations
+            .OrderBy(location => location.Id.Value)
+            .ToImmutableArray();
+    }
+
     private static ZoneState ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<WorldCommand> zoneCommands)
     {
         ZoneState current = zone;
 
-        foreach (WorldCommand command in zoneCommands
-                     .Where(c => c.Kind is WorldCommandKind.EnterZone)
-                     .OrderBy(c => c.EntityId.Value))
+        foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.EnterZone))
         {
             ValidateCommand(command);
             current = ApplyEnterZone(config, current, command);
         }
 
-        foreach (WorldCommand command in zoneCommands
-                     .Where(c => c.Kind is WorldCommandKind.MoveIntent)
-                     .OrderBy(c => c.EntityId.Value))
+        foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.MoveIntent))
         {
             ValidateCommand(command);
             current = ApplyMoveIntent(config, current, command);
         }
 
-        foreach (WorldCommand command in zoneCommands
-                     .Where(c => c.Kind is WorldCommandKind.AttackIntent)
-                     .OrderBy(c => c.EntityId.Value))
+        foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.AttackIntent))
         {
             ValidateCommand(command);
             current = ApplyAttackIntent(tick, current, command);
         }
 
-        foreach (WorldCommand command in zoneCommands
-                     .Where(c => c.Kind is WorldCommandKind.LeaveZone)
-                     .OrderBy(c => c.EntityId.Value))
+        foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.LeaveZone))
         {
             ValidateCommand(command);
             current = ApplyLeaveZone(current, command);
@@ -313,6 +419,11 @@ public static class Simulation
             {
                 throw new ArgumentOutOfRangeException(nameof(command), "MoveY must be in range [-1..1].");
             }
+        }
+
+        if (command.Kind is WorldCommandKind.TeleportIntent && command.ToZoneId is null)
+        {
+            throw new ArgumentOutOfRangeException(nameof(command), "TeleportIntent requires ToZoneId.");
         }
     }
 

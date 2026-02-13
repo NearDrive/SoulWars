@@ -117,9 +117,10 @@ public sealed class CombatSimulationTests
         MoveSpeed: Fix32.FromInt(4),
         MaxSpeed: Fix32.FromInt(4),
         Radius: new(16384),
+        ZoneCount: 2,
         MapWidth: 16,
         MapHeight: 16,
-        NpcCount: 0,
+        NpcCountPerZone: 0,
         NpcWanderPeriodTicks: 30,
         NpcAggroRange: Fix32.FromInt(6));
 }

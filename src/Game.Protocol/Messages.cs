@@ -18,6 +18,8 @@ public sealed record AttackIntent(int Tick, int AttackerId, int TargetId, int Zo
 
 public sealed record LeaveZoneRequest(int ZoneId) : IClientMessage;
 
+public sealed record TeleportRequest(int ToZoneId) : IClientMessage;
+
 public sealed record Welcome(SessionId SessionId) : IServerMessage;
 
 public sealed record EnterZoneAck(int ZoneId, int EntityId) : IServerMessage;

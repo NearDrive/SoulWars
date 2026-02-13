@@ -7,9 +7,10 @@ public readonly record struct SimulationConfig(
     Fix32 MoveSpeed,
     Fix32 MaxSpeed,
     Fix32 Radius,
+    int ZoneCount,
     int MapWidth,
     int MapHeight,
-    int NpcCount,
+    int NpcCountPerZone,
     int NpcWanderPeriodTicks,
     Fix32 NpcAggroRange)
 {
@@ -20,9 +21,10 @@ public readonly record struct SimulationConfig(
         MoveSpeed: Fix32.FromInt(4),
         MaxSpeed: Fix32.FromInt(4),
         Radius: new(19661), // ~= 0.3
+        ZoneCount: 1,
         MapWidth: 64,
         MapHeight: 64,
-        NpcCount: 0,
+        NpcCountPerZone: 0,
         NpcWanderPeriodTicks: 30,
         NpcAggroRange: Fix32.FromInt(6));
 }

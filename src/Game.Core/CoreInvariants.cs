@@ -4,6 +4,8 @@ public static class CoreInvariants
 {
     public static void Validate(WorldState world)
     {
+        HashSet<int> seenEntityIds = new();
+        Dictionary<int, int> entityZones = new();
         int lastZoneId = int.MinValue;
         foreach (ZoneState zone in world.Zones)
         {
@@ -23,6 +25,13 @@ public static class CoreInvariants
                 }
 
                 lastEntityId = entity.Id.Value;
+
+                if (!seenEntityIds.Add(entity.Id.Value))
+                {
+                    throw new InvariantViolationException($"Entity {entity.Id.Value} exists in multiple zones.");
+                }
+
+                entityZones[entity.Id.Value] = zone.Id.Value;
 
                 if (entity.Hp > entity.MaxHp)
                 {
@@ -51,6 +60,27 @@ public static class CoreInvariants
                     throw new InvariantViolationException($"Entity {entity.Id.Value} overlaps solid tile at ({tileX},{tileY}) in zone {zone.Id.Value}.");
                 }
             }
+        }
+
+        int lastLocationEntityId = int.MinValue;
+        foreach (EntityLocation location in world.EntityLocations.OrderBy(l => l.Id.Value))
+        {
+            if (location.Id.Value <= lastLocationEntityId)
+            {
+                throw new InvariantViolationException("EntityLocations are not strictly ordered by EntityId.");
+            }
+
+            lastLocationEntityId = location.Id.Value;
+
+            if (!entityZones.TryGetValue(location.Id.Value, out int zoneId) || zoneId != location.ZoneId.Value)
+            {
+                throw new InvariantViolationException($"EntityLocation mismatch for entity {location.Id.Value}.");
+            }
+        }
+
+        if (entityZones.Count != world.EntityLocations.Length)
+        {
+            throw new InvariantViolationException("EntityLocations count mismatch.");
         }
     }
 }

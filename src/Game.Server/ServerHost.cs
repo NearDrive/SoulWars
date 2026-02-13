@@ -134,6 +134,7 @@ public sealed class ServerHost
 
         _world = Simulation.Step(_simulationConfig, _world, new Inputs(worldCommands.ToImmutableArray()));
         CoreInvariants.Validate(_world);
+        SynchronizeSessionZonesWithWorld();
 
         if (_world.Tick % _serverConfig.SnapshotEveryTicks == 0)
         {
@@ -195,6 +196,9 @@ public sealed class ServerHost
                 case LeaveZoneRequest leaveZoneRequest:
                     HandleLeaveZone(session, leaveZoneRequest, worldCommands);
                     break;
+                case TeleportRequest teleportRequest:
+                    HandleTeleport(session, teleportRequest, worldCommands);
+                    break;
             }
         }
     }
@@ -222,6 +226,27 @@ public sealed class ServerHost
             session.SessionId.Value,
             request.ZoneId,
             session.EntityId.Value);
+    }
+
+
+    private void HandleTeleport(SessionState session, TeleportRequest request, List<WorldCommand> worldCommands)
+    {
+        if (session.EntityId is null || session.ActiveZoneId is null)
+        {
+            return;
+        }
+
+        int fromZoneId = session.ActiveZoneId.Value;
+        if (request.ToZoneId <= 0 || request.ToZoneId > _simulationConfig.ZoneCount || request.ToZoneId == fromZoneId)
+        {
+            return;
+        }
+
+        worldCommands.Add(new WorldCommand(
+            Kind: WorldCommandKind.TeleportIntent,
+            EntityId: new EntityId(session.EntityId.Value),
+            ZoneId: new ZoneId(fromZoneId),
+            ToZoneId: new ZoneId(request.ToZoneId)));
     }
 
     private void HandleLeaveZone(SessionState session, LeaveZoneRequest request, List<WorldCommand> worldCommands)
@@ -286,6 +311,23 @@ public sealed class ServerHost
 
         _pendingAttackIntents.RemoveAll(p => p.Tick <= targetTick);
         return due;
+    }
+
+
+    private void SynchronizeSessionZonesWithWorld()
+    {
+        foreach (SessionState session in OrderedSessions())
+        {
+            if (session.EntityId is null)
+            {
+                continue;
+            }
+
+            if (_world.TryGetEntityZone(new EntityId(session.EntityId.Value), out ZoneId zoneId))
+            {
+                session.ActiveZoneId = zoneId.Value;
+            }
+        }
     }
 
     private void EmitSnapshots()
