@@ -388,9 +388,8 @@ public sealed class ServerHost
             }
             else if (session.PlayerId is PlayerId playerId)
             {
-                _playerRegistry.UpdateWorldState(playerId, null, null, isAlive: false);
+                _playerRegistry.UpdateWorldState(playerId, null, session.ActiveZoneId, isAlive: false);
                 session.EntityId = null;
-                session.ActiveZoneId = null;
             }
         }
     }
