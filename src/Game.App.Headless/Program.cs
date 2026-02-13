@@ -8,6 +8,7 @@ public static class Program
     private const int ExitSuccess = 0;
     private const int ExitVerifyFail = 3;
     private const int ExitFixtureNotFound = 4;
+    private const int ExitStressInvariantFail = 5;
 
     public static int Main(string[] args)
     {
@@ -21,6 +22,7 @@ public static class Program
         {
             "--verify-mvp1" => VerifyMvp1(),
             "--run-scenario" => RunScenario(),
+            "--stress-mvp2" => RunStressMvp2(),
             _ => UnknownMode(args[0])
         };
     }
@@ -92,6 +94,33 @@ public static class Program
         return result.InvariantFailures == 0 ? ExitSuccess : 2;
     }
 
+
+    private static int RunStressMvp2()
+    {
+        using ILoggerFactory loggerFactory = LoggerFactory.Create(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Information);
+            builder.AddSimpleConsole(options =>
+            {
+                options.SingleLine = true;
+                options.TimestampFormat = "HH:mm:ss ";
+            });
+        });
+
+        ScenarioConfig config = BaselineScenario.CreateStressPreset();
+        ScenarioResult result = ScenarioRunner.RunDetailed(config, loggerFactory);
+
+        Console.WriteLine("MVP2 STRESS");
+        Console.WriteLine($"bots={result.Bots} ticks={result.Ticks} zones={config.ZoneCount}");
+        Console.WriteLine($"checksum={NormalizeChecksum(result.Checksum)}");
+        Console.WriteLine($"messagesIn={result.MessagesIn} messagesOut={result.MessagesOut}");
+        Console.WriteLine($"tickAvgMs={result.TickAvgMs:F3} tickP95Ms={result.TickP95Ms:F3}");
+        Console.WriteLine($"invariantFailures={result.InvariantFailures}");
+        Console.WriteLine($"result={(result.InvariantFailures == 0 ? "PASS" : "FAIL")}");
+
+        return result.InvariantFailures == 0 ? ExitSuccess : ExitStressInvariantFail;
+    }
+
     private static int UnknownMode(string mode)
     {
         Console.Error.WriteLine($"Unknown mode: {mode}");
@@ -101,7 +130,7 @@ public static class Program
 
     private static void PrintUsage()
     {
-        Console.WriteLine("Usage: Game.App.Headless --verify-mvp1 | --run-scenario");
+        Console.WriteLine("Usage: Game.App.Headless --verify-mvp1 | --run-scenario | --stress-mvp2");
     }
 
     private static FixtureInput LoadReplayFixture()
