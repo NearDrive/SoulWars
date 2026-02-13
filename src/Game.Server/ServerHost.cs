@@ -133,7 +133,10 @@ public sealed class ServerHost
         }
 
         _world = Simulation.Step(_simulationConfig, _world, new Inputs(worldCommands.ToImmutableArray()));
-        CoreInvariants.Validate(_world);
+        if (_serverConfig.Invariants.EnableCoreInvariants)
+        {
+            CoreInvariants.Validate(_world, _world.Tick);
+        }
         SynchronizeSessionZonesWithWorld();
 
         if (_world.Tick % _serverConfig.SnapshotEveryTicks == 0)
@@ -141,11 +144,14 @@ public sealed class ServerHost
             EmitSnapshots();
         }
 
-        ServerInvariants.Validate(new ServerHostDebugView(
-            LastTick: _lastTick,
-            CurrentTick: _world.Tick,
-            Sessions: OrderedSessions().Select(s => new ServerSessionDebugView(s.SessionId.Value, s.EntityId)).ToArray(),
-            Snapshots: _recentSnapshots.ToArray()));
+        if (_serverConfig.Invariants.EnableServerInvariants)
+        {
+            ServerInvariants.Validate(new ServerHostDebugView(
+                LastTick: _lastTick,
+                CurrentTick: _world.Tick,
+                Sessions: OrderedSessions().Select(s => new ServerSessionDebugView(s.SessionId.Value, s.EntityId, s.LastSnapshotTick, s.ActiveZoneId)).ToArray(),
+                Snapshots: _recentSnapshots.ToArray()));
+        }
         _lastTick = _world.Tick;
         _recentSnapshots.Clear();
     }
@@ -383,6 +389,12 @@ public sealed class ServerHost
                 ZoneId: zone.Id.Value,
                 Entities: entities);
 
+            if (self is not null && !snapshot.Entities.Any(e => e.EntityId == self.Id.Value))
+            {
+                throw new InvariantViolationException($"invariant=SnapshotIncludesSelf tick={_world.Tick} zoneId={zone.Id.Value} sessionId={session.SessionId.Value} entityId={self.Id.Value}");
+            }
+
+            session.LastSnapshotTick = _world.Tick;
             session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(snapshot));
             Metrics.IncrementMessagesOut();
             emittedCount++;
@@ -429,6 +441,8 @@ public sealed class ServerHost
         public int? ActiveZoneId { get; set; }
 
         public List<PendingInput> PendingInputs { get; } = new();
+
+        public int LastSnapshotTick { get; set; } = -1;
     }
 
     private readonly record struct PendingInput(int Tick, SessionId SessionId, sbyte MoveX, sbyte MoveY);

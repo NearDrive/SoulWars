@@ -11,7 +11,8 @@ public readonly record struct ServerConfig(
     int ZoneCount,
     int MapWidth,
     int MapHeight,
-    int NpcCountPerZone)
+    int NpcCountPerZone,
+    InvariantOptions Invariants)
 {
     public SimulationConfig ToSimulationConfig()
     {
@@ -24,7 +25,8 @@ public readonly record struct ServerConfig(
             ZoneCount = ZoneCount,
             MapWidth = MapWidth,
             MapHeight = MapHeight,
-            NpcCountPerZone = NpcCountPerZone
+            NpcCountPerZone = NpcCountPerZone,
+            Invariants = Invariants
         };
     }
 
@@ -37,5 +39,6 @@ public readonly record struct ServerConfig(
         ZoneCount: 1,
         MapWidth: 32,
         MapHeight: 32,
-        NpcCountPerZone: 0);
+        NpcCountPerZone: 0,
+        Invariants: InvariantOptions.Enabled);
 }

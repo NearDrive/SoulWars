@@ -12,7 +12,8 @@ public readonly record struct SimulationConfig(
     int MapHeight,
     int NpcCountPerZone,
     int NpcWanderPeriodTicks,
-    Fix32 NpcAggroRange)
+    Fix32 NpcAggroRange,
+    InvariantOptions Invariants)
 {
     public static SimulationConfig Default(int seed) => new(
         Seed: seed,
@@ -26,5 +27,6 @@ public readonly record struct SimulationConfig(
         MapHeight: 64,
         NpcCountPerZone: 0,
         NpcWanderPeriodTicks: 30,
-        NpcAggroRange: Fix32.FromInt(6));
+        NpcAggroRange: Fix32.FromInt(6),
+        Invariants: InvariantOptions.Enabled);
 }
