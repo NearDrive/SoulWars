@@ -1,15 +1,29 @@
 using Game.Protocol;
 using Game.Server;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Game.BotRunner;
 
 public sealed class ScenarioRunner
 {
-    public static string Run(ScenarioConfig cfg) => RunDetailed(cfg).Checksum;
+    private readonly ILogger<ScenarioRunner> _logger;
 
-    public static ScenarioResult RunDetailed(ScenarioConfig cfg) => RunDetailedInternal(cfg, replayWriter: null);
+    public ScenarioRunner(ILoggerFactory? loggerFactory = null)
+    {
+        LoggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+        _logger = LoggerFactory.CreateLogger<ScenarioRunner>();
+    }
 
-    public static ScenarioResult RunAndRecord(ScenarioConfig cfg, Stream replayOut)
+    public ILoggerFactory LoggerFactory { get; }
+
+    public static string Run(ScenarioConfig cfg) => new ScenarioRunner().RunDetailed(cfg).Checksum;
+
+    public static ScenarioResult RunDetailed(ScenarioConfig cfg) => new ScenarioRunner().RunDetailed(cfg);
+
+    public static ScenarioResult RunAndRecord(ScenarioConfig cfg, Stream replayOut) => new ScenarioRunner().RunAndRecordDetailed(cfg, replayOut);
+
+    public ScenarioResult RunAndRecordDetailed(ScenarioConfig cfg, Stream replayOut)
     {
         ArgumentNullException.ThrowIfNull(replayOut);
         ReplayHeader header = ReplayHeader.FromScenarioConfig(cfg);
@@ -17,7 +31,9 @@ public sealed class ScenarioRunner
         return RunDetailedInternal(cfg, writer);
     }
 
-    private static ScenarioResult RunDetailedInternal(ScenarioConfig cfg, ReplayWriter? replayWriter)
+    public ScenarioResult RunDetailed(ScenarioConfig cfg) => RunDetailedInternal(cfg, replayWriter: null);
+
+    private ScenarioResult RunDetailedInternal(ScenarioConfig cfg, ReplayWriter? replayWriter)
     {
         Validate(cfg);
 
@@ -27,11 +43,14 @@ public sealed class ScenarioRunner
             SnapshotEveryTicks = cfg.SnapshotEveryTicks
         };
 
+        _logger.LogInformation(BotRunnerLogEvents.ScenarioStart, "ScenarioStart bots={Bots} ticks={Ticks} seed={Seed}", cfg.BotCount, cfg.TickCount, cfg.ServerSeed);
+
         using ScenarioChecksumBuilder checksum = new();
         List<BotClient> clients = new(cfg.BotCount);
         Dictionary<(int BotIndex, int Tick), Snapshot> committedSnapshots = new();
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot = new();
-        ServerHost host = new(serverConfig);
+        ServerHost host = new(serverConfig, LoggerFactory);
+        int invariantFailures = 0;
 
         try
         {
@@ -54,7 +73,6 @@ public sealed class ScenarioRunner
 
             ConnectBotsForTests(host, clients, cts.Token);
 
-            // Ignore snapshots that may have been received during handshake.
             DrainAllMessagesForTests(clients);
             foreach (SortedDictionary<int, Snapshot> pending in pendingSnapshotsByBot.Values)
             {
@@ -113,16 +131,39 @@ public sealed class ScenarioRunner
             string finalChecksum = checksum.BuildHexLower();
             replayWriter?.WriteFinalChecksum(finalChecksum);
 
-            BotScenarioStats[] stats = clients
+            BotStats[] stats = clients
                 .OrderBy(client => client.BotIndex)
-                .Select(client => new BotScenarioStats(
+                .Select(client => new BotStats(
                     BotIndex: client.BotIndex,
-                    SessionId: client.SessionId?.Value,
-                    EntityId: client.EntityId,
-                    SnapshotsReceived: client.SnapshotsReceived))
+                    SnapshotsReceived: client.SnapshotsReceived,
+                    Errors: 0))
                 .ToArray();
 
-            return new ScenarioResult(finalChecksum, stats);
+            foreach (BotStats stat in stats)
+            {
+                if (stat.SnapshotsReceived <= 0)
+                {
+                    invariantFailures++;
+                    _logger.LogWarning(BotRunnerLogEvents.InvariantFailed, "InvariantFailed botIndex={BotIndex} reason=snapshots_received_zero", stat.BotIndex);
+                }
+
+                _logger.LogInformation(BotRunnerLogEvents.BotSummary, "BotSummary botIndex={BotIndex} snapshots={Snapshots} errors={Errors}", stat.BotIndex, stat.SnapshotsReceived, stat.Errors);
+            }
+
+            ServerMetricsSnapshot metrics = host.SnapshotMetrics();
+            _logger.LogInformation(BotRunnerLogEvents.ScenarioEnd, "ScenarioEnd checksum={Checksum} ticks={Ticks}", finalChecksum, cfg.TickCount);
+
+            return new ScenarioResult(
+                Checksum: finalChecksum,
+                Ticks: cfg.TickCount,
+                Bots: cfg.BotCount,
+                MessagesIn: metrics.MessagesInTotal,
+                MessagesOut: metrics.MessagesOutTotal,
+                TickAvgMs: metrics.TickAvgMsWindow,
+                TickP95Ms: metrics.TickP95MsWindow,
+                PlayersConnectedMax: metrics.PlayersConnected,
+                BotStats: stats,
+                InvariantFailures: invariantFailures);
         }
         finally
         {
@@ -157,6 +198,7 @@ public sealed class ScenarioRunner
                 }
 
                 host.ProcessInboundOnce();
+                host.AdvanceSimulationOnce();
                 DrainAllMessagesForTests(clients);
             }
         }

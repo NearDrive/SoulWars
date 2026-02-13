@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Game.Server;
 
@@ -9,10 +11,18 @@ public sealed class TcpServerTransport : IAsyncDisposable
     private readonly ConcurrentQueue<IServerEndpoint> _accepted = new();
     private readonly List<TcpEndpoint> _allEndpoints = new();
     private readonly object _gate = new();
+    private readonly ILogger<TcpServerTransport> _logger;
+    private readonly ILoggerFactory _loggerFactory;
 
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
     private Task? _acceptTask;
+
+    public TcpServerTransport(ILoggerFactory? loggerFactory = null)
+    {
+        _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+        _logger = _loggerFactory.CreateLogger<TcpServerTransport>();
+    }
 
     public int BoundPort { get; private set; }
 
@@ -101,8 +111,13 @@ public sealed class TcpServerTransport : IAsyncDisposable
             {
                 break;
             }
+            catch (Exception ex)
+            {
+                _logger.LogError(ServerLogEvents.UnhandledException, ex, "UnhandledException");
+                break;
+            }
 
-            TcpEndpoint endpoint = new(client);
+            TcpEndpoint endpoint = new(client, _loggerFactory.CreateLogger<TcpEndpoint>());
             lock (_gate)
             {
                 _allEndpoints.Add(endpoint);

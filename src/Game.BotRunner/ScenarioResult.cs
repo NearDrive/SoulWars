@@ -1,11 +1,18 @@
 namespace Game.BotRunner;
 
-public sealed record BotScenarioStats(
+public sealed record BotStats(
     int BotIndex,
-    int? SessionId,
-    int? EntityId,
-    int SnapshotsReceived);
+    int SnapshotsReceived,
+    int Errors);
 
 public sealed record ScenarioResult(
     string Checksum,
-    IReadOnlyList<BotScenarioStats> BotStats);
+    int Ticks,
+    int Bots,
+    long MessagesIn,
+    long MessagesOut,
+    double TickAvgMs,
+    double TickP95Ms,
+    int PlayersConnectedMax,
+    BotStats[] BotStats,
+    int InvariantFailures);
