@@ -38,7 +38,9 @@ public sealed record ZoneState(ZoneId Id, TileMap Map, ImmutableArray<EntityStat
     };
 }
 
-public sealed record WorldState(int Tick, ImmutableArray<ZoneState> Zones)
+public readonly record struct EntityLocation(EntityId Id, ZoneId ZoneId);
+
+public sealed record WorldState(int Tick, ImmutableArray<ZoneState> Zones, ImmutableArray<EntityLocation> EntityLocations)
 {
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
@@ -53,6 +55,66 @@ public sealed record WorldState(int Tick, ImmutableArray<ZoneState> Zones)
 
         zone = null!;
         return false;
+    }
+
+
+    public bool TryGetEntityZone(EntityId entityId, out ZoneId zoneId)
+    {
+        for (int i = 0; i < EntityLocations.Length; i++)
+        {
+            EntityLocation location = EntityLocations[i];
+            if (location.Id.Value == entityId.Value)
+            {
+                zoneId = location.ZoneId;
+                return true;
+            }
+        }
+
+        zoneId = default;
+        return false;
+    }
+
+    public WorldState WithEntityLocation(EntityId entityId, ZoneId zoneId)
+    {
+        ImmutableArray<EntityLocation>.Builder locations = ImmutableArray.CreateBuilder<EntityLocation>(EntityLocations.Length + 1);
+        bool replaced = false;
+
+        for (int i = 0; i < EntityLocations.Length; i++)
+        {
+            EntityLocation current = EntityLocations[i];
+            if (current.Id.Value == entityId.Value)
+            {
+                locations.Add(new EntityLocation(entityId, zoneId));
+                replaced = true;
+            }
+            else
+            {
+                locations.Add(current);
+            }
+        }
+
+        if (!replaced)
+        {
+            locations.Add(new EntityLocation(entityId, zoneId));
+        }
+
+        return this with
+        {
+            EntityLocations = locations
+                .OrderBy(l => l.Id.Value)
+                .ToImmutableArray()
+        };
+    }
+
+    public WorldState WithoutEntityLocation(EntityId entityId)
+    {
+        return this with
+        {
+            EntityLocations = EntityLocations
+                .Where(location => location.Id.Value != entityId.Value)
+                .OrderBy(location => location.Id.Value)
+                .ToImmutableArray()
+        };
     }
 
     public WorldState WithZoneUpdated(ZoneState zone)
@@ -92,13 +154,15 @@ public enum WorldCommandKind : byte
     EnterZone = 1,
     LeaveZone = 2,
     MoveIntent = 3,
-    AttackIntent = 4
+    AttackIntent = 4,
+    TeleportIntent = 5
 }
 
 public sealed record WorldCommand(
     WorldCommandKind Kind,
     EntityId EntityId,
     ZoneId ZoneId,
+    ZoneId? ToZoneId = null,
     sbyte MoveX = 0,
     sbyte MoveY = 0,
     Vec2Fix? SpawnPos = null,

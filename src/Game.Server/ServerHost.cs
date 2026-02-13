@@ -195,6 +195,9 @@ public sealed class ServerHost
                 case LeaveZoneRequest leaveZoneRequest:
                     HandleLeaveZone(session, leaveZoneRequest, worldCommands);
                     break;
+                case TeleportRequest teleportRequest:
+                    HandleTeleport(session, teleportRequest, worldCommands);
+                    break;
             }
         }
     }
@@ -222,6 +225,29 @@ public sealed class ServerHost
             session.SessionId.Value,
             request.ZoneId,
             session.EntityId.Value);
+    }
+
+
+    private void HandleTeleport(SessionState session, TeleportRequest request, List<WorldCommand> worldCommands)
+    {
+        if (session.EntityId is null || session.ActiveZoneId is null)
+        {
+            return;
+        }
+
+        int fromZoneId = session.ActiveZoneId.Value;
+        if (request.ToZoneId <= 0 || request.ToZoneId > _simulationConfig.ZoneCount || request.ToZoneId == fromZoneId)
+        {
+            return;
+        }
+
+        worldCommands.Add(new WorldCommand(
+            Kind: WorldCommandKind.TeleportIntent,
+            EntityId: new EntityId(session.EntityId.Value),
+            ZoneId: new ZoneId(fromZoneId),
+            ToZoneId: new ZoneId(request.ToZoneId)));
+
+        session.ActiveZoneId = request.ToZoneId;
     }
 
     private void HandleLeaveZone(SessionState session, LeaveZoneRequest request, List<WorldCommand> worldCommands)

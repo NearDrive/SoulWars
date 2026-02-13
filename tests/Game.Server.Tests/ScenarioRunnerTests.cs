@@ -82,7 +82,7 @@ public sealed class ScenarioRunnerTests
         ServerConfig serverConfig = ServerConfig.Default(seed: 951) with
         {
             SnapshotEveryTicks = 1,
-            NpcCount = 3
+            NpcCountPerZone = 3
         };
 
         ServerHost host = new(serverConfig);

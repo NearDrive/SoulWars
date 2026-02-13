@@ -37,6 +37,36 @@ public sealed class ServerHostIntegrationTests
         Assert.Equal(1, snapshot.ZoneId);
     }
 
+
+    [Fact]
+    public async Task Server_Teleport_ChangesZoneSnapshots()
+    {
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+        await using ServerRuntime runtime = new();
+        await runtime.StartAsync(ServerConfig.Default(seed: 33) with { SnapshotEveryTicks = 1, ZoneCount = 2 }, IPAddress.Loopback, 0, cts.Token);
+
+        await using HeadlessClient client = new();
+        await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);
+
+        _ = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
+        client.Send(new Hello("teleport-client"));
+        client.EnterZone(1);
+
+        EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
+        _ = await WaitForMessageAsync<Snapshot>(runtime, client, TimeSpan.FromSeconds(2), s => s.ZoneId == 1 && s.Entities.Any(e => e.EntityId == ack.EntityId));
+
+        client.Teleport(2);
+
+        Snapshot teleported = await WaitForMessageAsync<Snapshot>(
+            runtime,
+            client,
+            TimeSpan.FromSeconds(2),
+            s => s.ZoneId == 2 && s.Entities.Any(e => e.EntityId == ack.EntityId));
+
+        Assert.Equal(2, teleported.ZoneId);
+        Assert.Contains(teleported.Entities, e => e.EntityId == ack.EntityId);
+    }
+
     [Fact]
     public async Task Tcp_MoveIntent_ChangesPosition()
     {
