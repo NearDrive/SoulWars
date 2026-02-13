@@ -16,6 +16,7 @@ public sealed class ServerHost
     private int _nextSessionId = 1;
     private int _nextEntityId = 1;
     private readonly List<WorldCommand> _pendingWorldCommands = new();
+    private readonly List<PendingAttackIntent> _pendingAttackIntents = new();
     private readonly List<Snapshot> _recentSnapshots = new();
     private WorldState _world;
     private int _lastTick;
@@ -107,6 +108,30 @@ public sealed class ServerHost
                 MoveY: pending.MoveY));
         }
 
+        foreach (PendingAttackIntent pending in OrderedPendingAttackIntents(targetTick))
+        {
+            if (!_sessions.TryGetValue(pending.SessionId.Value, out SessionState? session))
+            {
+                continue;
+            }
+
+            if (session.ActiveZoneId is null || session.EntityId is null)
+            {
+                continue;
+            }
+
+            if (session.ActiveZoneId.Value != pending.ZoneId)
+            {
+                continue;
+            }
+
+            worldCommands.Add(new WorldCommand(
+                Kind: WorldCommandKind.AttackIntent,
+                EntityId: new EntityId(session.EntityId.Value),
+                ZoneId: new ZoneId(pending.ZoneId),
+                TargetEntityId: new EntityId(pending.TargetEntityId)));
+        }
+
         _world = Simulation.Step(_simulationConfig, _world, new Inputs(worldCommands.ToImmutableArray()));
         CoreInvariants.Validate(_world);
 
@@ -163,6 +188,9 @@ public sealed class ServerHost
                     break;
                 case InputCommand inputCommand:
                     session.PendingInputs.Add(new PendingInput(targetTick, session.SessionId, inputCommand.MoveX, inputCommand.MoveY));
+                    break;
+                case AttackIntent attackIntent:
+                    _pendingAttackIntents.Add(new PendingAttackIntent(targetTick, session.SessionId, attackIntent.ZoneId, attackIntent.TargetId));
                     break;
                 case LeaveZoneRequest leaveZoneRequest:
                     HandleLeaveZone(session, leaveZoneRequest, worldCommands);
@@ -246,6 +274,20 @@ public sealed class ServerHost
             .ToArray();
     }
 
+
+    private IEnumerable<PendingAttackIntent> OrderedPendingAttackIntents(int targetTick)
+    {
+        PendingAttackIntent[] due = _pendingAttackIntents
+            .Where(p => p.Tick <= targetTick)
+            .OrderBy(p => p.Tick)
+            .ThenBy(p => p.SessionId.Value)
+            .ThenBy(p => p.TargetEntityId)
+            .ToArray();
+
+        _pendingAttackIntents.RemoveAll(p => p.Tick <= targetTick);
+        return due;
+    }
+
     private void EmitSnapshots()
     {
         int emittedCount = 0;
@@ -270,7 +312,8 @@ public sealed class ServerHost
                     PosXRaw: entity.Pos.X.Raw,
                     PosYRaw: entity.Pos.Y.Raw,
                     VelXRaw: entity.Vel.X.Raw,
-                    VelYRaw: entity.Vel.Y.Raw))
+                    VelYRaw: entity.Vel.Y.Raw,
+                    Hp: entity.Hp))
                 .ToArray();
 
             Snapshot snapshot = new(
@@ -320,4 +363,6 @@ public sealed class ServerHost
     }
 
     private readonly record struct PendingInput(int Tick, SessionId SessionId, sbyte MoveX, sbyte MoveY);
+
+    private readonly record struct PendingAttackIntent(int Tick, SessionId SessionId, int ZoneId, int TargetEntityId);
 }

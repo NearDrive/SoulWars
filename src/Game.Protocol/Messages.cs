@@ -14,6 +14,8 @@ public sealed record EnterZoneRequest(int ZoneId) : IClientMessage;
 
 public sealed record InputCommand(int Tick, sbyte MoveX, sbyte MoveY) : IClientMessage;
 
+public sealed record AttackIntent(int Tick, int AttackerId, int TargetId, int ZoneId) : IClientMessage;
+
 public sealed record LeaveZoneRequest(int ZoneId) : IClientMessage;
 
 public sealed record Welcome(SessionId SessionId) : IServerMessage;
@@ -24,4 +26,4 @@ public sealed record Snapshot(int Tick, int ZoneId, SnapshotEntity[] Entities) :
 
 public sealed record Error(string Code, string Message) : IServerMessage;
 
-public sealed record SnapshotEntity(int EntityId, int PosXRaw, int PosYRaw, int VelXRaw = 0, int VelYRaw = 0);
+public sealed record SnapshotEntity(int EntityId, int PosXRaw, int PosYRaw, int VelXRaw = 0, int VelYRaw = 0, int Hp = 0);

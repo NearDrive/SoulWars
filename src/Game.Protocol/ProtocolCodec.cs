@@ -9,6 +9,7 @@ public static class ProtocolCodec
     private const byte ClientEnterZoneRequest = 2;
     private const byte ClientInputCommand = 3;
     private const byte ClientLeaveZoneRequest = 4;
+    private const byte ClientAttackIntent = 5;
 
     private const byte ServerWelcome = 101;
     private const byte ServerEnterZoneAck = 102;
@@ -24,6 +25,7 @@ public static class ProtocolCodec
             Hello hello => EncodeHello(hello),
             EnterZoneRequest request => EncodeIntMessage(ClientEnterZoneRequest, request.ZoneId),
             InputCommand input => EncodeInputCommand(input),
+            AttackIntent attack => EncodeAttackIntent(attack),
             LeaveZoneRequest request => EncodeIntMessage(ClientLeaveZoneRequest, request.ZoneId),
             _ => throw new InvalidOperationException($"Unsupported client message type: {msg.GetType().Name}")
         };
@@ -69,6 +71,8 @@ public static class ProtocolCodec
                 return true;
             case ClientInputCommand:
                 return TryDecodeInputCommand(data, out msg, out error);
+            case ClientAttackIntent:
+                return TryDecodeAttackIntent(data, out msg, out error);
             case ClientLeaveZoneRequest:
                 if (!TryReadInt32(data, 1, out int leaveZoneId, out error))
                 {
@@ -243,6 +247,47 @@ public static class ProtocolCodec
         return true;
     }
 
+
+    private static byte[] EncodeAttackIntent(AttackIntent attack)
+    {
+        byte[] data = new byte[1 + 4 + 4 + 4 + 4];
+        data[0] = ClientAttackIntent;
+        WriteInt32(data, 1, attack.Tick);
+        WriteInt32(data, 5, attack.AttackerId);
+        WriteInt32(data, 9, attack.TargetId);
+        WriteInt32(data, 13, attack.ZoneId);
+        return data;
+    }
+
+    private static bool TryDecodeAttackIntent(ReadOnlySpan<byte> data, out IClientMessage? msg, out ProtocolErrorCode error)
+    {
+        msg = null;
+
+        if (data.Length < 17)
+        {
+            error = ProtocolErrorCode.Truncated;
+            return false;
+        }
+
+        if (!TryReadInt32(data, 1, out int tick, out error) ||
+            !TryReadInt32(data, 5, out int attackerId, out error) ||
+            !TryReadInt32(data, 9, out int targetId, out error) ||
+            !TryReadInt32(data, 13, out int zoneId, out error))
+        {
+            return false;
+        }
+
+        if (tick < 0 || attackerId <= 0 || targetId <= 0 || zoneId <= 0)
+        {
+            error = ProtocolErrorCode.ValueOutOfRange;
+            return false;
+        }
+
+        msg = new AttackIntent(tick, attackerId, targetId, zoneId);
+        error = ProtocolErrorCode.None;
+        return true;
+    }
+
     private static byte[] EncodeIntMessage(byte type, int value)
     {
         byte[] data = new byte[1 + 4];
@@ -263,7 +308,7 @@ public static class ProtocolCodec
     private static byte[] EncodeSnapshot(Snapshot snapshot)
     {
         SnapshotEntity[] entities = snapshot.Entities ?? Array.Empty<SnapshotEntity>();
-        byte[] data = new byte[1 + 4 + 4 + 4 + (entities.Length * (5 * 4))];
+        byte[] data = new byte[1 + 4 + 4 + 4 + (entities.Length * (6 * 4))];
         data[0] = ServerSnapshot;
         WriteInt32(data, 1, snapshot.Tick);
         WriteInt32(data, 5, snapshot.ZoneId);
@@ -278,7 +323,8 @@ public static class ProtocolCodec
             WriteInt32(data, offset + 8, entity.PosYRaw);
             WriteInt32(data, offset + 12, entity.VelXRaw);
             WriteInt32(data, offset + 16, entity.VelYRaw);
-            offset += 20;
+            WriteInt32(data, offset + 20, entity.Hp);
+            offset += 24;
         }
 
         return data;
@@ -305,7 +351,7 @@ public static class ProtocolCodec
         {
             checked
             {
-                requiredLength = 13 + (entityCount * 20);
+                requiredLength = 13 + (entityCount * 24);
             }
         }
         catch (OverflowException)
@@ -330,8 +376,9 @@ public static class ProtocolCodec
                 PosXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 4, 4)),
                 PosYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 8, 4)),
                 VelXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 12, 4)),
-                VelYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 16, 4)));
-            offset += 20;
+                VelYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 16, 4)),
+                Hp: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 20, 4)));
+            offset += 24;
         }
 
         msg = new Snapshot(tick, zoneId, entities);
