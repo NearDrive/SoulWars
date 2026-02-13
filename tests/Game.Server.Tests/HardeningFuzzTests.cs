@@ -138,6 +138,57 @@ public sealed class HardeningFuzzTests
         Assert.True(host.Metrics.ProtocolDecodeErrors > 0);
     }
 
+
+    [Fact]
+    public void ProtocolCodec_DecodeSnapshot_InvalidEntityKind_ReturnsErrorWithoutThrowing()
+    {
+        byte[] payload = ProtocolCodec.Encode(new Snapshot(
+            Tick: 1,
+            ZoneId: 1,
+            Entities: new[]
+            {
+                new SnapshotEntity(
+                    EntityId: 1,
+                    PosXRaw: 0,
+                    PosYRaw: 0,
+                    VelXRaw: 0,
+                    VelYRaw: 0,
+                    Hp: 100,
+                    Kind: SnapshotEntityKind.Player)
+            }));
+
+        payload[13 + 24] = 77;
+
+        bool ok = ProtocolCodec.TryDecodeServer(payload, out IServerMessage? decoded, out ProtocolErrorCode error);
+
+        Assert.False(ok);
+        Assert.Null(decoded);
+        Assert.Equal(ProtocolErrorCode.ValueOutOfRange, error);
+    }
+
+    [Fact]
+    public void ProtocolCodec_DecodeSnapshot_ValidEntityKind_Succeeds()
+    {
+        Snapshot expected = new(
+            Tick: 9,
+            ZoneId: 1,
+            Entities: new[]
+            {
+                new SnapshotEntity(1, 10, 11, 1, -1, 88, SnapshotEntityKind.Npc)
+            });
+
+        byte[] payload = ProtocolCodec.Encode(expected);
+
+        bool ok = ProtocolCodec.TryDecodeServer(payload, out IServerMessage? decoded, out ProtocolErrorCode error);
+
+        Assert.True(ok);
+        Assert.Equal(ProtocolErrorCode.None, error);
+
+        Snapshot snapshot = Assert.IsType<Snapshot>(decoded);
+        SnapshotEntity entity = Assert.Single(snapshot.Entities);
+        Assert.Equal(SnapshotEntityKind.Npc, entity.Kind);
+        Assert.Equal(88, entity.Hp);
+    }
     private static Snapshot ReadLastSnapshot(InMemoryEndpoint endpoint)
     {
         Snapshot? last = null;

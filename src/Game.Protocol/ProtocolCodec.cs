@@ -372,6 +372,12 @@ public static class ProtocolCodec
 
         for (int i = 0; i < entityCount; i++)
         {
+            byte rawKind = data[offset + 24];
+            if (!TryDecodeSnapshotEntityKind(rawKind, out SnapshotEntityKind kind, out error))
+            {
+                return false;
+            }
+
             entities[i] = new SnapshotEntity(
                 EntityId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset, 4)),
                 PosXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 4, 4)),
@@ -379,15 +385,30 @@ public static class ProtocolCodec
                 VelXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 12, 4)),
                 VelYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 16, 4)),
                 Hp: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 20, 4)),
-                Kind: Enum.IsDefined(typeof(SnapshotEntityKind), (int)data[offset + 24])
-                    ? (SnapshotEntityKind)data[offset + 24]
-                    : SnapshotEntityKind.Unknown);
+                Kind: kind);
             offset += 25;
         }
 
         msg = new Snapshot(tick, zoneId, entities);
         error = ProtocolErrorCode.None;
         return true;
+    }
+
+    private static bool TryDecodeSnapshotEntityKind(byte rawKind, out SnapshotEntityKind kind, out ProtocolErrorCode error)
+    {
+        switch ((SnapshotEntityKind)rawKind)
+        {
+            case SnapshotEntityKind.Unknown:
+            case SnapshotEntityKind.Player:
+            case SnapshotEntityKind.Npc:
+                kind = (SnapshotEntityKind)rawKind;
+                error = ProtocolErrorCode.None;
+                return true;
+            default:
+                kind = SnapshotEntityKind.Unknown;
+                error = ProtocolErrorCode.ValueOutOfRange;
+                return false;
+        }
     }
 
     private static byte[] EncodeError(Error error)
