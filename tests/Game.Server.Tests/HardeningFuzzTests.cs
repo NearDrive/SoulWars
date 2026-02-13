@@ -211,7 +211,7 @@ public sealed class HardeningFuzzTests
                     endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(i + 1, (sbyte)rng.NextInt(-10, 11), (sbyte)rng.NextInt(-10, 11))));
                     break;
                 case 1:
-                    endpoint.EnqueueToServer(ProtocolCodec.Encode(new AttackIntent(i + 1, rng.NextInt(-20, 200), rng.NextInt(-20, 200))));
+                    endpoint.EnqueueToServer(ProtocolCodec.Encode(new AttackIntent(i + 1, rng.NextInt(-20, 200), rng.NextInt(-20, 200), rng.NextInt(-4, 8))));
                     break;
                 case 2:
                     endpoint.EnqueueToServer(ProtocolCodec.Encode(new TeleportRequest(rng.NextInt(-4, 8))));

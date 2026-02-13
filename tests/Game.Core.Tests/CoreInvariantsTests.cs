@@ -160,7 +160,7 @@ public sealed class CoreInvariantsTests
             CoreInvariants.Validate(state, state.Tick);
         }
 
-        uint checksumA = StateChecksum.Compute(state);
+        string checksumA = StateChecksum.Compute(state);
         WorldState rerun = Simulation.CreateInitialState(config);
         rerun = Simulation.Step(config, rerun, new Inputs(ImmutableArray.Create(
             new WorldCommand(WorldCommandKind.EnterZone, players[0], new ZoneId(1)),
