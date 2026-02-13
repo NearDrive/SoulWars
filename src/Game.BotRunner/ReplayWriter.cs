@@ -37,11 +37,14 @@ public sealed class ReplayWriter : IDisposable
         BinaryPrimitives.WriteInt32LittleEndian(recordHeader[1..5], tick);
         _output.Write(recordHeader);
 
-        Span<byte> moveBytes = stackalloc byte[2];
+        Span<byte> moveBytes = stackalloc byte[2 + 1 + sizeof(int)];
         for (int i = 0; i < movesOrderedByBotIndex.Length; i++)
         {
-            moveBytes[0] = unchecked((byte)movesOrderedByBotIndex[i].MoveX);
-            moveBytes[1] = unchecked((byte)movesOrderedByBotIndex[i].MoveY);
+            ReplayMove move = movesOrderedByBotIndex[i];
+            moveBytes[0] = unchecked((byte)move.MoveX);
+            moveBytes[1] = unchecked((byte)move.MoveY);
+            moveBytes[2] = move.AttackTargetId.HasValue ? (byte)1 : (byte)0;
+            BinaryPrimitives.WriteInt32LittleEndian(moveBytes[3..], move.AttackTargetId ?? 0);
             _output.Write(moveBytes);
         }
     }

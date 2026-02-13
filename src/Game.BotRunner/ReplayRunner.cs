@@ -81,7 +81,12 @@ public static class ReplayRunner
                 for (int botIndex = 0; botIndex < header.BotCount; botIndex++)
                 {
                     ReplayMove move = evt.Moves[botIndex];
-                    clients[botIndex].SendInput(tick, move.MoveX, move.MoveY);
+                    BotClient client = clients[botIndex];
+                    client.SendInput(tick, move.MoveX, move.MoveY);
+                    if (move.AttackTargetId is int targetId && client.EntityId is int attackerId)
+                    {
+                        client.SendAttackIntent(tick, attackerId, targetId);
+                    }
                 }
 
                 host.StepOnce();

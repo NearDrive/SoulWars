@@ -58,4 +58,30 @@ public sealed class ReplayRunnerTests
 
         throw new FileNotFoundException("Unable to locate tests/Fixtures/replay_baseline.bin or replay_baseline.hex from AppContext.BaseDirectory.");
     }
+
+    [Fact]
+    public void Replay_RoundTrip_WithNpcAttacks_PreservesChecksum()
+    {
+        ScenarioConfig cfg = new(
+            ServerSeed: 451,
+            TickCount: 220,
+            SnapshotEveryTicks: 1,
+            BotCount: 2,
+            ZoneId: 1,
+            BaseBotSeed: 777,
+            NpcCount: 4);
+
+        using MemoryStream replay = new();
+        ScenarioResult scenarioResult = new ScenarioRunner().RunAndRecordDetailed(cfg, replay);
+        replay.Position = 0;
+
+        ReplayExecutionResult replayResult = ReplayRunner.RunReplayWithExpected(replay);
+
+        Assert.Equal(
+            TestChecksum.NormalizeFullHex(scenarioResult.Checksum),
+            TestChecksum.NormalizeFullHex(replayResult.Checksum));
+        Assert.Equal(
+            TestChecksum.NormalizeFullHex(scenarioResult.Checksum),
+            TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum));
+    }
 }

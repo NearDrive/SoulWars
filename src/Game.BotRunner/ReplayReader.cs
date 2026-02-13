@@ -55,13 +55,30 @@ public sealed class ReplayReader : IDisposable
         int tick = BinaryPrimitives.ReadInt32LittleEndian(tickBuffer);
 
         ReplayMove[] moves = new ReplayMove[Header.BotCount];
-        Span<byte> moveBuffer = stackalloc byte[2];
-        for (int i = 0; i < moves.Length; i++)
+        if (Header.Version >= ReplayHeader.CurrentVersion)
         {
-            FillExactly(moveBuffer);
-            moves[i] = new ReplayMove(
-                MoveX: unchecked((sbyte)moveBuffer[0]),
-                MoveY: unchecked((sbyte)moveBuffer[1]));
+            Span<byte> moveBuffer = stackalloc byte[2 + 1 + sizeof(int)];
+            for (int i = 0; i < moves.Length; i++)
+            {
+                FillExactly(moveBuffer);
+                int? attackTargetId = moveBuffer[2] == 1 ? BinaryPrimitives.ReadInt32LittleEndian(moveBuffer[3..]) : null;
+                moves[i] = new ReplayMove(
+                    MoveX: unchecked((sbyte)moveBuffer[0]),
+                    MoveY: unchecked((sbyte)moveBuffer[1]),
+                    AttackTargetId: attackTargetId);
+            }
+        }
+        else
+        {
+            Span<byte> moveBuffer = stackalloc byte[2];
+            for (int i = 0; i < moves.Length; i++)
+            {
+                FillExactly(moveBuffer);
+                moves[i] = new ReplayMove(
+                    MoveX: unchecked((sbyte)moveBuffer[0]),
+                    MoveY: unchecked((sbyte)moveBuffer[1]),
+                    AttackTargetId: null);
+            }
         }
 
         return new ReplayEvent(

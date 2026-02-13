@@ -12,6 +12,8 @@ public readonly record struct ReplayHeader(
     int BaseBotSeed,
     int Reserved)
 {
+    public const int CurrentVersion = 2;
+
     public const string MagicText = "SWRPL01\0";
     public static ReadOnlySpan<byte> MagicBytes => "SWRPL01\0"u8;
 
@@ -21,7 +23,7 @@ public readonly record struct ReplayHeader(
     {
         ArgumentNullException.ThrowIfNull(cfg);
         return new ReplayHeader(
-            Version: 1,
+            Version: CurrentVersion,
             ServerSeed: cfg.ServerSeed,
             TickCount: cfg.TickCount,
             SnapshotEveryTicks: cfg.SnapshotEveryTicks,
@@ -81,7 +83,7 @@ public readonly record struct ReplayHeader(
             BaseBotSeed: BinaryPrimitives.ReadInt32LittleEndian(buffer[32..36]),
             Reserved: BinaryPrimitives.ReadInt32LittleEndian(buffer[36..40]));
 
-        if (header.Version != 1)
+        if (header.Version is not 1 and not CurrentVersion)
         {
             throw new InvalidDataException($"Unsupported replay version '{header.Version}'.");
         }
