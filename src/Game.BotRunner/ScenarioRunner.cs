@@ -19,7 +19,7 @@ public sealed class ScenarioRunner
 
     public static string Run(ScenarioConfig cfg) => new ScenarioRunner().RunDetailed(cfg).Checksum;
 
-    public static ScenarioResult RunDetailed(ScenarioConfig cfg) => new ScenarioRunner().RunDetailed(cfg);
+    public static ScenarioResult RunDetailed(ScenarioConfig cfg, ILoggerFactory? loggerFactory = null) => new ScenarioRunner(loggerFactory).RunDetailed(cfg);
 
     public static ScenarioResult RunAndRecord(ScenarioConfig cfg, Stream replayOut) => new ScenarioRunner().RunAndRecordDetailed(cfg, replayOut);
 
