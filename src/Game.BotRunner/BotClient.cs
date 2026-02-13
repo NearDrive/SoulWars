@@ -22,10 +22,13 @@ public sealed class BotClient : IAsyncDisposable
 
         BotIndex = botIndex;
         ZoneId = zoneId;
+        AccountId = $"bot-{botIndex:000}";
         _client = endpoint is null ? new HeadlessClient(loggerFactory) : new HeadlessClient(endpoint, loggerFactory);
     }
 
     public int BotIndex { get; }
+
+    public string AccountId { get; }
 
     public SessionId? SessionId { get; private set; }
 
@@ -42,6 +45,7 @@ public sealed class BotClient : IAsyncDisposable
     public int? SelfHp { get; private set; }
 
     private bool _enterZoneSent;
+    private bool _helloSent;
 
     public bool HasWelcome => SessionId is not null;
 
@@ -52,6 +56,18 @@ public sealed class BotClient : IAsyncDisposable
     public Task ConnectAsync(string host, int port, CancellationToken ct)
     {
         return _client.ConnectAsync(host, port, ct);
+    }
+
+
+    public void SendHelloIfNeeded()
+    {
+        if (HasWelcome || _helloSent)
+        {
+            return;
+        }
+
+        _client.SendHello(AccountId, "bot-client");
+        _helloSent = true;
     }
 
     public void EnterZone()

@@ -114,6 +114,7 @@ public sealed class ScenarioRunnerTests
                 foreach (BotClient c in clients.OrderBy(c => c.BotIndex))
                 {
                     c.PumpMessages(_ => { });
+                    c.SendHelloIfNeeded();
                     if (c.HasWelcome)
                     {
                         c.EnterZone();

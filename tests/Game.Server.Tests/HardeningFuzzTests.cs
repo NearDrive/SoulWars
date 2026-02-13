@@ -121,7 +121,7 @@ public sealed class HardeningFuzzTests
         InMemoryEndpoint endpoint = new();
         host.Connect(endpoint);
 
-        endpoint.EnqueueToServer(ProtocolCodec.Encode(new Hello("x")));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("x", "x")));
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
         host.AdvanceTicks(2);
 
@@ -197,7 +197,7 @@ public sealed class HardeningFuzzTests
         InMemoryEndpoint endpoint = new();
         host.Connect(endpoint);
 
-        endpoint.EnqueueToServer(ProtocolCodec.Encode(new Hello("fuzz")));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("fuzz", "fuzz")));
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
         host.AdvanceTicks(2);
 
