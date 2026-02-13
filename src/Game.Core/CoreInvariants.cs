@@ -16,6 +16,42 @@ public static class CoreInvariants
 
             lastZoneId = zone.Id.Value;
 
+            if (zone.EntitiesData.AliveIds.Length != zone.EntitiesData.Masks.Length
+                || zone.EntitiesData.AliveIds.Length != zone.EntitiesData.Kinds.Length
+                || zone.EntitiesData.AliveIds.Length != zone.EntitiesData.Positions.Length
+                || zone.EntitiesData.AliveIds.Length != zone.EntitiesData.Health.Length
+                || zone.EntitiesData.AliveIds.Length != zone.EntitiesData.Combat.Length
+                || zone.EntitiesData.AliveIds.Length != zone.EntitiesData.Ai.Length)
+            {
+                throw new InvariantViolationException($"Zone {zone.Id.Value} has inconsistent component array lengths.");
+            }
+
+            int lastAliveId = int.MinValue;
+            for (int i = 0; i < zone.EntitiesData.AliveIds.Length; i++)
+            {
+                int id = zone.EntitiesData.AliveIds[i].Value;
+                if (id <= lastAliveId)
+                {
+                    throw new InvariantViolationException($"Zone {zone.Id.Value} AliveIds are not strictly sorted.");
+                }
+
+                lastAliveId = id;
+                ComponentMask mask = zone.EntitiesData.Masks[i];
+                if (!mask.Has(ComponentMask.PositionBit)
+                    || !mask.Has(ComponentMask.HealthBit)
+                    || !mask.Has(ComponentMask.CombatBit))
+                {
+                    throw new InvariantViolationException($"Entity {id} has invalid required component mask bits.");
+                }
+
+                bool expectsAi = zone.EntitiesData.Kinds[i] == EntityKind.Npc;
+                bool hasAi = mask.Has(ComponentMask.AiBit);
+                if (expectsAi != hasAi)
+                {
+                    throw new InvariantViolationException($"Entity {id} has inconsistent AI mask for kind {zone.EntitiesData.Kinds[i]}.");
+                }
+            }
+
             int lastEntityId = int.MinValue;
             foreach (EntityState entity in zone.Entities)
             {
