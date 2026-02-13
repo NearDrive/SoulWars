@@ -40,7 +40,8 @@ public sealed class ScenarioRunner
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(20));
         ServerConfig serverConfig = ServerConfig.Default(cfg.ServerSeed) with
         {
-            SnapshotEveryTicks = cfg.SnapshotEveryTicks
+            SnapshotEveryTicks = cfg.SnapshotEveryTicks,
+            NpcCount = cfg.NpcCount
         };
 
         _logger.LogInformation(BotRunnerLogEvents.ScenarioStart, "ScenarioStart bots={Bots} ticks={Ticks} seed={Seed}", cfg.BotCount, cfg.TickCount, cfg.ServerSeed);

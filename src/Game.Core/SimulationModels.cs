@@ -6,6 +6,12 @@ public readonly record struct EntityId(int Value);
 
 public readonly record struct ZoneId(int Value);
 
+public enum EntityKind : byte
+{
+    Player = 1,
+    Npc = 2
+}
+
 public sealed record EntityState(
     EntityId Id,
     Vec2Fix Pos,
@@ -16,7 +22,11 @@ public sealed record EntityState(
     Fix32 AttackRange,
     int AttackDamage,
     int AttackCooldownTicks,
-    int LastAttackTick);
+    int LastAttackTick,
+    EntityKind Kind = EntityKind.Player,
+    int NextWanderChangeTick = 0,
+    sbyte WanderX = 0,
+    sbyte WanderY = 0);
 
 public sealed record ZoneState(ZoneId Id, TileMap Map, ImmutableArray<EntityState> Entities)
 {
