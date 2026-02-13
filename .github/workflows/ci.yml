@@ -54,3 +54,6 @@ jobs:
 
       - name: Test
         run: dotnet test -c Release --no-build --logger "console;verbosity=detailed" --blame --blame-hang-timeout 2m
+
+      - name: MVP1 verify gate (headless)
+        run: dotnet run -c Release --project src/Game.App.Headless -- --verify-mvp1
