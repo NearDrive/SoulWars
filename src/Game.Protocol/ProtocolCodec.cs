@@ -31,20 +31,63 @@ public static class ProtocolCodec
 
     public static IClientMessage DecodeClient(byte[] data)
     {
-        ArgumentNullException.ThrowIfNull(data);
-        if (data.Length == 0)
+        if (TryDecodeClient(data, out IClientMessage? msg, out ProtocolErrorCode error))
         {
-            throw new InvalidOperationException("Client payload is empty.");
+            return msg!;
         }
 
-        return data[0] switch
+        throw new ProtocolDecodeException(error, $"Client decode failed with {error}.");
+    }
+
+    public static bool TryDecodeClient(ReadOnlySpan<byte> data, out IClientMessage? msg, out ProtocolErrorCode error)
+    {
+        msg = null;
+        if (data.Length == 0)
         {
-            ClientHello => DecodeHello(data),
-            ClientEnterZoneRequest => new EnterZoneRequest(ReadInt32(data, 1)),
-            ClientInputCommand => DecodeInputCommand(data),
-            ClientLeaveZoneRequest => new LeaveZoneRequest(ReadInt32(data, 1)),
-            _ => throw new InvalidOperationException($"Unknown client message type: {data[0]}")
-        };
+            error = ProtocolErrorCode.Truncated;
+            return false;
+        }
+
+        switch (data[0])
+        {
+            case ClientHello:
+                return TryDecodeHello(data, out msg, out error);
+            case ClientEnterZoneRequest:
+                if (!TryReadInt32(data, 1, out int enterZoneId, out error))
+                {
+                    return false;
+                }
+
+                if (enterZoneId <= 0)
+                {
+                    error = ProtocolErrorCode.ValueOutOfRange;
+                    return false;
+                }
+
+                msg = new EnterZoneRequest(enterZoneId);
+                error = ProtocolErrorCode.None;
+                return true;
+            case ClientInputCommand:
+                return TryDecodeInputCommand(data, out msg, out error);
+            case ClientLeaveZoneRequest:
+                if (!TryReadInt32(data, 1, out int leaveZoneId, out error))
+                {
+                    return false;
+                }
+
+                if (leaveZoneId <= 0)
+                {
+                    error = ProtocolErrorCode.ValueOutOfRange;
+                    return false;
+                }
+
+                msg = new LeaveZoneRequest(leaveZoneId);
+                error = ProtocolErrorCode.None;
+                return true;
+            default:
+                error = ProtocolErrorCode.UnknownMessageType;
+                return false;
+        }
     }
 
     public static byte[] Encode(IServerMessage msg)
@@ -63,20 +106,57 @@ public static class ProtocolCodec
 
     public static IServerMessage DecodeServer(byte[] data)
     {
-        ArgumentNullException.ThrowIfNull(data);
-        if (data.Length == 0)
+        if (TryDecodeServer(data, out IServerMessage? msg, out ProtocolErrorCode error))
         {
-            throw new InvalidOperationException("Server payload is empty.");
+            return msg!;
         }
 
-        return data[0] switch
+        throw new ProtocolDecodeException(error, $"Server decode failed with {error}.");
+    }
+
+    public static bool TryDecodeServer(ReadOnlySpan<byte> data, out IServerMessage? msg, out ProtocolErrorCode error)
+    {
+        msg = null;
+        if (data.Length == 0)
         {
-            ServerWelcome => new Welcome(new SessionId(ReadInt32(data, 1))),
-            ServerEnterZoneAck => new EnterZoneAck(ReadInt32(data, 1), ReadInt32(data, 5)),
-            ServerSnapshot => DecodeSnapshot(data),
-            ServerError => DecodeError(data),
-            _ => throw new InvalidOperationException($"Unknown server message type: {data[0]}")
-        };
+            error = ProtocolErrorCode.Truncated;
+            return false;
+        }
+
+        switch (data[0])
+        {
+            case ServerWelcome:
+                if (!TryReadInt32(data, 1, out int sessionId, out error))
+                {
+                    return false;
+                }
+
+                msg = new Welcome(new SessionId(sessionId));
+                error = ProtocolErrorCode.None;
+                return true;
+            case ServerEnterZoneAck:
+                if (!TryReadInt32(data, 1, out int zoneId, out error) || !TryReadInt32(data, 5, out int entityId, out error))
+                {
+                    return false;
+                }
+
+                if (zoneId <= 0)
+                {
+                    error = ProtocolErrorCode.ValueOutOfRange;
+                    return false;
+                }
+
+                msg = new EnterZoneAck(zoneId, entityId);
+                error = ProtocolErrorCode.None;
+                return true;
+            case ServerSnapshot:
+                return TryDecodeSnapshot(data, out msg, out error);
+            case ServerError:
+                return TryDecodeError(data, out msg, out error);
+            default:
+                error = ProtocolErrorCode.UnknownMessageType;
+                return false;
+        }
     }
 
     private static byte[] EncodeHello(Hello hello)
@@ -89,12 +169,31 @@ public static class ProtocolCodec
         return data;
     }
 
-    private static IClientMessage DecodeHello(byte[] data)
+    private static bool TryDecodeHello(ReadOnlySpan<byte> data, out IClientMessage? msg, out ProtocolErrorCode error)
     {
-        int length = ReadInt32(data, 1);
-        EnsureLength(data, 5 + length);
-        string version = Encoding.UTF8.GetString(data, 5, length);
-        return new Hello(version);
+        msg = null;
+        if (!TryReadInt32(data, 1, out int length, out error))
+        {
+            return false;
+        }
+
+        if (length < 0)
+        {
+            error = ProtocolErrorCode.InvalidLength;
+            return false;
+        }
+
+        long required = 5L + length;
+        if (required > data.Length)
+        {
+            error = ProtocolErrorCode.Truncated;
+            return false;
+        }
+
+        string version = Encoding.UTF8.GetString(data.Slice(5, length));
+        msg = new Hello(version);
+        error = ProtocolErrorCode.None;
+        return true;
     }
 
     private static byte[] EncodeInputCommand(InputCommand input)
@@ -111,13 +210,37 @@ public static class ProtocolCodec
         return data;
     }
 
-    private static InputCommand DecodeInputCommand(byte[] data)
+    private static bool TryDecodeInputCommand(ReadOnlySpan<byte> data, out IClientMessage? msg, out ProtocolErrorCode error)
     {
-        EnsureLength(data, 7);
-        int tick = ReadInt32(data, 1);
+        msg = null;
+        if (data.Length < 7)
+        {
+            error = ProtocolErrorCode.Truncated;
+            return false;
+        }
+
+        if (!TryReadInt32(data, 1, out int tick, out error))
+        {
+            return false;
+        }
+
+        if (tick < 0)
+        {
+            error = ProtocolErrorCode.ValueOutOfRange;
+            return false;
+        }
+
         sbyte moveX = unchecked((sbyte)data[5]);
         sbyte moveY = unchecked((sbyte)data[6]);
-        return new InputCommand(tick, moveX, moveY);
+        if ((moveX is < -1 or > 1) || (moveY is < -1 or > 1))
+        {
+            error = ProtocolErrorCode.ValueOutOfRange;
+            return false;
+        }
+
+        msg = new InputCommand(tick, moveX, moveY);
+        error = ProtocolErrorCode.None;
+        return true;
     }
 
     private static byte[] EncodeIntMessage(byte type, int value)
@@ -161,19 +284,41 @@ public static class ProtocolCodec
         return data;
     }
 
-    private static Snapshot DecodeSnapshot(byte[] data)
+    private static bool TryDecodeSnapshot(ReadOnlySpan<byte> data, out IServerMessage? msg, out ProtocolErrorCode error)
     {
-        int tick = ReadInt32(data, 1);
-        int zoneId = ReadInt32(data, 5);
-        int entityCount = ReadInt32(data, 9);
-
-        if (entityCount < 0)
+        msg = null;
+        if (!TryReadInt32(data, 1, out int tick, out error) ||
+            !TryReadInt32(data, 5, out int zoneId, out error) ||
+            !TryReadInt32(data, 9, out int entityCount, out error))
         {
-            throw new InvalidOperationException("Invalid negative entity count.");
+            return false;
         }
 
-        int requiredLength = 13 + (entityCount * 20);
-        EnsureLength(data, requiredLength);
+        if (tick < 0 || zoneId <= 0 || entityCount < 0)
+        {
+            error = ProtocolErrorCode.ValueOutOfRange;
+            return false;
+        }
+
+        int requiredLength;
+        try
+        {
+            checked
+            {
+                requiredLength = 13 + (entityCount * 20);
+            }
+        }
+        catch (OverflowException)
+        {
+            error = ProtocolErrorCode.InvalidLength;
+            return false;
+        }
+
+        if (data.Length < requiredLength)
+        {
+            error = ProtocolErrorCode.Truncated;
+            return false;
+        }
 
         SnapshotEntity[] entities = new SnapshotEntity[entityCount];
         int offset = 13;
@@ -181,15 +326,17 @@ public static class ProtocolCodec
         for (int i = 0; i < entityCount; i++)
         {
             entities[i] = new SnapshotEntity(
-                EntityId: ReadInt32(data, offset),
-                PosXRaw: ReadInt32(data, offset + 4),
-                PosYRaw: ReadInt32(data, offset + 8),
-                VelXRaw: ReadInt32(data, offset + 12),
-                VelYRaw: ReadInt32(data, offset + 16));
+                EntityId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset, 4)),
+                PosXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 4, 4)),
+                PosYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 8, 4)),
+                VelXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 12, 4)),
+                VelYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 16, 4)));
             offset += 20;
         }
 
-        return new Snapshot(tick, zoneId, entities);
+        msg = new Snapshot(tick, zoneId, entities);
+        error = ProtocolErrorCode.None;
+        return true;
     }
 
     private static byte[] EncodeError(Error error)
@@ -209,36 +356,71 @@ public static class ProtocolCodec
         return data;
     }
 
-    private static Error DecodeError(byte[] data)
+    private static bool TryDecodeError(ReadOnlySpan<byte> data, out IServerMessage? msg, out ProtocolErrorCode error)
     {
-        int codeLength = ReadInt32(data, 1);
-        EnsureLength(data, 5 + codeLength + 4);
-        string code = Encoding.UTF8.GetString(data, 5, codeLength);
+        msg = null;
+        if (!TryReadInt32(data, 1, out int codeLength, out error))
+        {
+            return false;
+        }
+
+        if (codeLength < 0)
+        {
+            error = ProtocolErrorCode.InvalidLength;
+            return false;
+        }
+
+        long minimum = 5L + codeLength + 4;
+        if (minimum > data.Length)
+        {
+            error = ProtocolErrorCode.Truncated;
+            return false;
+        }
+
+        string code = Encoding.UTF8.GetString(data.Slice(5, codeLength));
 
         int messageLengthOffset = 5 + codeLength;
-        int messageLength = ReadInt32(data, messageLengthOffset);
-        EnsureLength(data, messageLengthOffset + 4 + messageLength);
-        string message = Encoding.UTF8.GetString(data, messageLengthOffset + 4, messageLength);
+        if (!TryReadInt32(data, messageLengthOffset, out int messageLength, out error))
+        {
+            return false;
+        }
 
-        return new Error(code, message);
+        if (messageLength < 0)
+        {
+            error = ProtocolErrorCode.InvalidLength;
+            return false;
+        }
+
+        long required = (long)messageLengthOffset + 4 + messageLength;
+        if (required > data.Length)
+        {
+            error = ProtocolErrorCode.Truncated;
+            return false;
+        }
+
+        string message = Encoding.UTF8.GetString(data.Slice(messageLengthOffset + 4, messageLength));
+
+        msg = new Error(code, message);
+        error = ProtocolErrorCode.None;
+        return true;
     }
 
-    private static void EnsureLength(byte[] data, int requiredLength)
+    private static bool TryReadInt32(ReadOnlySpan<byte> data, int offset, out int value, out ProtocolErrorCode error)
     {
-        if (data.Length < requiredLength)
+        value = default;
+        if (offset < 0 || data.Length < offset + 4)
         {
-            throw new InvalidOperationException($"Payload too short. Expected at least {requiredLength}, got {data.Length}.");
+            error = ProtocolErrorCode.Truncated;
+            return false;
         }
+
+        value = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset, 4));
+        error = ProtocolErrorCode.None;
+        return true;
     }
 
     private static void WriteInt32(byte[] data, int offset, int value)
     {
         BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(offset, 4), value);
-    }
-
-    private static int ReadInt32(byte[] data, int offset)
-    {
-        EnsureLength(data, offset + 4);
-        return BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset, 4));
     }
 }

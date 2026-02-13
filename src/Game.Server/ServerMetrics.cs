@@ -12,6 +12,8 @@ public sealed class ServerMetrics
     private int _playersConnected;
     private long _messagesIn;
     private long _messagesOut;
+    private long _protocolDecodeErrors;
+    private long _transportErrors;
 
     private int _lastSnapshotTick;
     private long _lastSnapshotMessagesIn;
@@ -33,9 +35,17 @@ public sealed class ServerMetrics
 
     public int PlayersConnected => Volatile.Read(ref _playersConnected);
 
+    public long ProtocolDecodeErrors => Interlocked.Read(ref _protocolDecodeErrors);
+
+    public long TransportErrors => Interlocked.Read(ref _transportErrors);
+
     public void IncrementMessagesIn() => Interlocked.Increment(ref _messagesIn);
 
     public void IncrementMessagesOut() => Interlocked.Increment(ref _messagesOut);
+
+    public void IncrementProtocolDecodeErrors() => Interlocked.Increment(ref _protocolDecodeErrors);
+
+    public void IncrementTransportErrors() => Interlocked.Increment(ref _transportErrors);
 
     public void SetPlayersConnected(int count) => Volatile.Write(ref _playersConnected, Math.Max(0, count));
 

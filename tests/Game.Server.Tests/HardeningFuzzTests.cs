@@ -1,0 +1,149 @@
+using System.Buffers.Binary;
+using System.Net;
+using System.Net.Sockets;
+using Game.Core;
+using Game.Protocol;
+using Game.Server;
+using Xunit;
+
+namespace Game.Server.Tests;
+
+public sealed class HardeningFuzzTests
+{
+    [Fact]
+    public void ProtocolCodec_Fuzz_DoesNotThrowOrHang()
+    {
+        SimRng rng = new(1337);
+
+        for (int i = 0; i < 10_000; i++)
+        {
+            int len = rng.NextInt(0, 257);
+            byte[] payload = new byte[len];
+            for (int b = 0; b < payload.Length; b++)
+            {
+                payload[b] = (byte)rng.NextInt(0, 256);
+            }
+
+            bool ok = ProtocolCodec.TryDecodeClient(payload, out IClientMessage? msg, out _);
+            if (ok)
+            {
+                byte[] encoded = ProtocolCodec.Encode(msg!);
+                Assert.NotNull(encoded);
+            }
+        }
+    }
+
+    [Fact]
+    public void FrameDecoder_Fuzz_FragmentedInput_NoCrash()
+    {
+        SimRng rng = new(1337);
+        FrameDecoder decoder = new(TcpEndpoint.MaxFrameBytes);
+
+        for (int i = 0; i < 20_000; i++)
+        {
+            int len = rng.NextInt(1, 8);
+            byte[] fragment = new byte[len];
+            for (int j = 0; j < len; j++)
+            {
+                fragment[j] = (byte)rng.NextInt(0, 256);
+            }
+
+            decoder.Push(fragment);
+            if (decoder.IsClosed)
+            {
+                return;
+            }
+
+            while (decoder.TryDequeueFrame(out byte[] _))
+            {
+            }
+        }
+    }
+
+    [Fact]
+    public void ServerInboundPipeline_Fuzz_NoCrash_AndCountsDecodeErrors()
+    {
+        ServerHost host = new(ServerConfig.Default(seed: 123));
+        InMemoryEndpoint endpoint = new();
+        host.Connect(endpoint);
+
+        SimRng rng = new(1337);
+        for (int i = 0; i < 3_000; i++)
+        {
+            int len = rng.NextInt(0, 257);
+            byte[] payload = new byte[len];
+            for (int b = 0; b < payload.Length; b++)
+            {
+                payload[b] = (byte)rng.NextInt(0, 256);
+            }
+
+            endpoint.EnqueueToServer(payload);
+        }
+
+        host.AdvanceTicks(50);
+
+        Assert.True(host.Metrics.ProtocolDecodeErrors > 0);
+    }
+
+    [Fact]
+    public async Task OversizedFrame_DisconnectsSession()
+    {
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+        await using ServerRuntime runtime = new();
+        await runtime.StartAsync(ServerConfig.Default(seed: 1), IPAddress.Loopback, 0, cts.Token);
+
+        using TcpClient client = new();
+        await client.ConnectAsync(IPAddress.Loopback, runtime.BoundPort, cts.Token);
+        NetworkStream stream = client.GetStream();
+
+        byte[] len = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(len, TcpEndpoint.MaxFrameBytes + 1);
+        await stream.WriteAsync(len, cts.Token);
+        await stream.FlushAsync(cts.Token);
+
+        runtime.AdvanceTicks(5);
+        await Task.Delay(50, cts.Token);
+
+        int read = await stream.ReadAsync(new byte[1], cts.Token);
+        Assert.Equal(0, read);
+    }
+
+    [Fact]
+    public void InvalidMove_IsRejected_NotApplied()
+    {
+        ServerHost host = new(ServerConfig.Default(seed: 99) with { SnapshotEveryTicks = 1 });
+        InMemoryEndpoint endpoint = new();
+        host.Connect(endpoint);
+
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new Hello("x")));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
+        host.AdvanceTicks(2);
+
+        Snapshot before = ReadLastSnapshot(endpoint);
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(before.Tick + 1, (sbyte)5, (sbyte)0)));
+        host.AdvanceTicks(3);
+        Snapshot after = ReadLastSnapshot(endpoint);
+
+        SnapshotEntity beforeEntity = before.Entities.OrderBy(e => e.EntityId).First();
+        SnapshotEntity afterEntity = after.Entities.Single(e => e.EntityId == beforeEntity.EntityId);
+
+        Assert.Equal(beforeEntity.PosXRaw, afterEntity.PosXRaw);
+        Assert.Equal(beforeEntity.PosYRaw, afterEntity.PosYRaw);
+        Assert.True(host.Metrics.ProtocolDecodeErrors > 0);
+    }
+
+    private static Snapshot ReadLastSnapshot(InMemoryEndpoint endpoint)
+    {
+        Snapshot? last = null;
+        while (endpoint.TryDequeueFromServer(out byte[] msg))
+        {
+            if (ProtocolCodec.TryDecodeServer(msg, out IServerMessage? decoded, out _) && decoded is Snapshot s)
+            {
+                last = s;
+            }
+        }
+
+        Assert.NotNull(last);
+        return last!;
+    }
+}

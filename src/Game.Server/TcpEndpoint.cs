@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
@@ -8,7 +7,7 @@ namespace Game.Server;
 
 public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
 {
-    private const int MaxFrameLength = 1024 * 1024;
+    public const int MaxFrameBytes = 1024 * 1024;
 
     private readonly TcpClient _client;
     private readonly NetworkStream _stream;
@@ -19,6 +18,7 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
     private readonly Task _readerTask;
     private readonly Task _writerTask;
     private readonly ILogger<TcpEndpoint> _logger;
+    private readonly FrameDecoder _frameDecoder = new(MaxFrameBytes);
 
     public TcpEndpoint(TcpClient client, ILogger<TcpEndpoint>? logger = null)
     {
@@ -28,6 +28,8 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
         _readerTask = Task.Run(ReadLoopAsync);
         _writerTask = Task.Run(WriteLoopAsync);
     }
+
+    public bool IsClosed => _cts.IsCancellationRequested;
 
     public bool TryDequeueToServer(out byte[] msg) => _inbound.TryDequeue(out msg!);
 
@@ -52,6 +54,7 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
         }
 
         _cts.Cancel();
+        _frameDecoder.Close();
         try
         {
             _client.Close();
@@ -77,23 +80,30 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
 
     private async Task ReadLoopAsync()
     {
-        byte[] lengthBuffer = new byte[4];
+        byte[] readBuffer = new byte[4096];
 
         try
         {
             while (!_cts.IsCancellationRequested)
             {
-                await ReadExactlyAsync(_stream, lengthBuffer, _cts.Token).ConfigureAwait(false);
-                int length = BinaryPrimitives.ReadInt32LittleEndian(lengthBuffer);
-                if (length <= 0 || length > MaxFrameLength)
+                int read = await _stream.ReadAsync(readBuffer, _cts.Token).ConfigureAwait(false);
+                if (read == 0)
                 {
-                    _logger.LogWarning(ServerLogEvents.OversizedMessage, "OversizedMessage len={Length}", length);
-                    throw new InvalidOperationException($"Invalid frame length {length}.");
+                    _logger.LogInformation(ServerLogEvents.SessionDisconnected, "SessionDisconnected reason={Reason}", "tcp_eof");
+                    break;
                 }
 
-                byte[] payload = new byte[length];
-                await ReadExactlyAsync(_stream, payload, _cts.Token).ConfigureAwait(false);
-                _inbound.Enqueue(payload);
+                _frameDecoder.Push(readBuffer.AsSpan(0, read));
+                if (_frameDecoder.IsClosed)
+                {
+                    _logger.LogWarning(ServerLogEvents.OversizedMessage, "OversizedMessage reason={Reason}", "invalid_frame_length");
+                    break;
+                }
+
+                while (_frameDecoder.TryDequeueFrame(out byte[] frame))
+                {
+                    _inbound.Enqueue(frame);
+                }
             }
         }
         catch (OperationCanceledException)
@@ -101,6 +111,7 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
         }
         catch (IOException)
         {
+            _logger.LogInformation(ServerLogEvents.SessionDisconnected, "SessionDisconnected reason={Reason}", "tcp_io_error");
         }
         catch (ObjectDisposedException)
         {
@@ -127,7 +138,14 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
 
                 while (_outbound.TryDequeue(out byte[]? payload))
                 {
-                    BinaryPrimitives.WriteInt32LittleEndian(framePrefix, payload.Length);
+                    if (payload.Length <= 0 || payload.Length > MaxFrameBytes)
+                    {
+                        _logger.LogWarning(ServerLogEvents.OversizedMessage, "OversizedMessage len={Length}", payload.Length);
+                        Close();
+                        return;
+                    }
+
+                    System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(framePrefix, payload.Length);
                     await _stream.WriteAsync(framePrefix, _cts.Token).ConfigureAwait(false);
                     await _stream.WriteAsync(payload, _cts.Token).ConfigureAwait(false);
                 }
@@ -138,6 +156,7 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
         }
         catch (IOException)
         {
+            _logger.LogInformation(ServerLogEvents.SessionDisconnected, "SessionDisconnected reason={Reason}", "tcp_write_io_error");
         }
         catch (ObjectDisposedException)
         {
@@ -149,21 +168,6 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
         finally
         {
             Close();
-        }
-    }
-
-    private static async Task ReadExactlyAsync(Stream stream, byte[] buffer, CancellationToken ct)
-    {
-        int totalRead = 0;
-        while (totalRead < buffer.Length)
-        {
-            int read = await stream.ReadAsync(buffer.AsMemory(totalRead, buffer.Length - totalRead), ct).ConfigureAwait(false);
-            if (read == 0)
-            {
-                throw new IOException("Connection closed while reading frame.");
-            }
-
-            totalRead += read;
         }
     }
 }

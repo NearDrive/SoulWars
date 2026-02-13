@@ -2,6 +2,8 @@ namespace Game.Server;
 
 public interface IServerEndpoint
 {
+    bool IsClosed { get; }
+
     bool TryDequeueToServer(out byte[] msg);
 
     void EnqueueToClient(byte[] msg);

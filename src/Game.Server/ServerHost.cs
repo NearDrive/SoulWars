@@ -16,7 +16,9 @@ public sealed class ServerHost
     private int _nextSessionId = 1;
     private int _nextEntityId = 1;
     private readonly List<WorldCommand> _pendingWorldCommands = new();
+    private readonly List<Snapshot> _recentSnapshots = new();
     private WorldState _world;
+    private int _lastTick;
 
     public ServerHost(ServerConfig config, ILoggerFactory? loggerFactory = null, ServerMetrics? metrics = null)
     {
@@ -31,6 +33,7 @@ public sealed class ServerHost
         ILoggerFactory factory = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = factory.CreateLogger<ServerHost>();
         Metrics = metrics ?? new ServerMetrics();
+        _lastTick = _world.Tick;
     }
 
     public ServerMetrics Metrics { get; }
@@ -63,9 +66,22 @@ public sealed class ServerHost
     {
         int targetTick = _world.Tick + 1;
 
-        foreach (SessionState session in OrderedSessions())
+        foreach (SessionState session in OrderedSessions().ToArray())
         {
+            if (session.Endpoint.IsClosed)
+            {
+                Metrics.IncrementTransportErrors();
+                DisconnectSession(session, "endpoint_closed");
+                continue;
+            }
+
             DrainSessionMessages(session, targetTick, _pendingWorldCommands);
+
+            if (session.Endpoint.IsClosed)
+            {
+                Metrics.IncrementTransportErrors();
+                DisconnectSession(session, "endpoint_closed");
+            }
         }
     }
 
@@ -92,11 +108,20 @@ public sealed class ServerHost
         }
 
         _world = Simulation.Step(_simulationConfig, _world, new Inputs(worldCommands.ToImmutableArray()));
+        CoreInvariants.Validate(_world);
 
         if (_world.Tick % _serverConfig.SnapshotEveryTicks == 0)
         {
             EmitSnapshots();
         }
+
+        ServerInvariants.Validate(new ServerHostDebugView(
+            LastTick: _lastTick,
+            CurrentTick: _world.Tick,
+            Sessions: OrderedSessions().Select(s => new ServerSessionDebugView(s.SessionId.Value, s.EntityId)).ToArray(),
+            Snapshots: _recentSnapshots.ToArray()));
+        _lastTick = _world.Tick;
+        _recentSnapshots.Clear();
     }
 
     public void AdvanceTicks(int n)
@@ -118,18 +143,16 @@ public sealed class ServerHost
     {
         while (session.Endpoint.TryDequeueToServer(out byte[] payload))
         {
-            IClientMessage message;
-            try
+            if (!ProtocolCodec.TryDecodeClient(payload, out IClientMessage? message, out ProtocolErrorCode error))
             {
-                message = ProtocolCodec.DecodeClient(payload);
-                Metrics.IncrementMessagesIn();
+                Metrics.IncrementProtocolDecodeErrors();
+                _logger.LogWarning(ServerLogEvents.ProtocolDecodeFailed, "ProtocolDecodeFailed sessionId={SessionId} error={Error}", session.SessionId.Value, error);
+                session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Error("protocol_error", error.ToString())));
+                Metrics.IncrementMessagesOut();
+                continue;
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ServerLogEvents.ProtocolDecodeFailed, ex, "ProtocolDecodeFailed sessionId={SessionId}", session.SessionId.Value);
-                DisconnectSession(session, "protocol_decode_failed");
-                return;
-            }
+
+            Metrics.IncrementMessagesIn();
 
             switch (message)
             {
@@ -258,6 +281,7 @@ public sealed class ServerHost
             session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(snapshot));
             Metrics.IncrementMessagesOut();
             emittedCount++;
+            _recentSnapshots.Add(snapshot);
         }
 
         if (emittedCount > 0)
