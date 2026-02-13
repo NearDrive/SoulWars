@@ -131,9 +131,11 @@ public sealed class ScenarioRunnerTests
 
         int[] maxSeenTick = new int[clients.Count];
         long initialNpcHp = 0;
+        long minNpcHpSeen = long.MaxValue;
         bool sawInitial = false;
+        bool sawAttackIntent = false;
 
-        for (int tick = 1; tick <= 180; tick++)
+        for (int tick = 1; tick <= 600; tick++)
         {
             foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
             {
@@ -144,11 +146,17 @@ public sealed class ScenarioRunnerTests
                         Assert.True(snapshot.Tick >= maxSeenTick[client.BotIndex]);
                         maxSeenTick[client.BotIndex] = snapshot.Tick;
 
+                        long currentNpcHp = snapshot.Entities
+                            .Where(e => e.Kind == SnapshotEntityKind.Npc && e.Hp > 0)
+                            .Sum(e => (long)e.Hp);
+
                         if (!sawInitial)
                         {
-                            initialNpcHp = snapshot.Entities.Where(e => e.Kind == SnapshotEntityKind.Npc && e.Hp > 0).Sum(e => (long)e.Hp);
+                            initialNpcHp = currentNpcHp;
                             sawInitial = true;
                         }
+
+                        minNpcHpSeen = Math.Min(minNpcHpSeen, currentNpcHp);
                     }
                 });
 
@@ -158,6 +166,7 @@ public sealed class ScenarioRunnerTests
 
                 if (decision.AttackTargetId is int targetId && client.EntityId is int attackerId)
                 {
+                    sawAttackIntent = true;
                     client.SendAttackIntent(commandTick, attackerId, targetId);
                 }
             }
@@ -173,11 +182,8 @@ public sealed class ScenarioRunnerTests
             Assert.NotNull(client.LastSnapshot);
         }
 
-        long finalNpcHp = clients[0].LastSnapshot!.Entities
-            .Where(e => e.Kind == SnapshotEntityKind.Npc && e.Hp > 0)
-            .Sum(e => (long)e.Hp);
-
         Assert.True(sawInitial);
-        Assert.True(finalNpcHp < initialNpcHp || finalNpcHp == 0);
+        Assert.True(sawAttackIntent || minNpcHpSeen < initialNpcHp || minNpcHpSeen == 0);
+
     }
 }

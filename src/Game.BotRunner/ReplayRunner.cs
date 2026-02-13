@@ -30,7 +30,8 @@ public static class ReplayRunner
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(20));
         ServerConfig serverConfig = ServerConfig.Default(header.ServerSeed) with
         {
-            SnapshotEveryTicks = header.SnapshotEveryTicks
+            SnapshotEveryTicks = header.SnapshotEveryTicks,
+            NpcCount = header.NpcCount
         };
 
         using ScenarioChecksumBuilder checksum = new();
@@ -56,8 +57,12 @@ public static class ReplayRunner
             ScenarioRunner.ConnectBotsForTests(host, clients, cts.Token);
             ScenarioRunner.DrainAllMessagesForTests(clients);
 
+            int[] lastSentInputTickByBot = new int[header.BotCount];
+
             for (int tick = 1; tick <= header.TickCount; tick++)
             {
+                ScenarioRunner.DrainSnapshotsForTests(clients, pendingSnapshotsByBot);
+
                 if (!reader.TryReadNext(out ReplayEvent evt))
                 {
                     throw new InvalidDataException($"Replay ended before tick {tick}.");
@@ -81,7 +86,16 @@ public static class ReplayRunner
                 for (int botIndex = 0; botIndex < header.BotCount; botIndex++)
                 {
                     ReplayMove move = evt.Moves[botIndex];
-                    clients[botIndex].SendInput(tick, move.MoveX, move.MoveY);
+                    BotClient client = clients[botIndex];
+                    int snapshotTick = client.LastSnapshot?.Tick ?? tick;
+                    int commandTick = Math.Max(lastSentInputTickByBot[botIndex] + 1, snapshotTick);
+                    client.SendInput(commandTick, move.MoveX, move.MoveY);
+                    lastSentInputTickByBot[botIndex] = commandTick;
+
+                    if (move.AttackTargetId is int targetId && client.EntityId is int attackerId)
+                    {
+                        client.SendAttackIntent(commandTick, attackerId, targetId);
+                    }
                 }
 
                 host.StepOnce();

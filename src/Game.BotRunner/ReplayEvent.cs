@@ -8,7 +8,7 @@ public enum ReplayRecordType : byte
     FinalChecksum = 2
 }
 
-public readonly record struct ReplayMove(sbyte MoveX, sbyte MoveY);
+public readonly record struct ReplayMove(sbyte MoveX, sbyte MoveY, int? AttackTargetId);
 
 public readonly record struct ReplayEvent(
     ReplayRecordType RecordType,

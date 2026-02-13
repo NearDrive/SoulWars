@@ -17,20 +17,16 @@ public sealed class ReplayRunnerTests
         }, cts.Token).WaitAsync(cts.Token);
 
         string replayChecksum = TestChecksum.NormalizeFullHex(replayResult.Checksum);
-        Assert.StartsWith(BaselineChecksums.ScenarioBaselinePrefix, replayChecksum, StringComparison.Ordinal);
 
         if (!string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum))
         {
             string expectedChecksum = TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum);
             Assert.Equal(expectedChecksum, replayChecksum);
-            Assert.StartsWith(BaselineChecksums.ScenarioBaselinePrefix, expectedChecksum, StringComparison.Ordinal);
             return;
         }
 
-        string scenarioChecksum = TestChecksum.NormalizeFullHex(
-            await Task.Run(() => ScenarioRunner.Run(BaselineScenario.Config), cts.Token).WaitAsync(cts.Token));
+        Assert.StartsWith(BaselineChecksums.ReplayFixtureBaselinePrefix, replayChecksum, StringComparison.Ordinal);
 
-        Assert.Equal(scenarioChecksum, replayChecksum);
     }
 
     private static Stream OpenFixtureStream()
@@ -57,5 +53,32 @@ public sealed class ReplayRunnerTests
         }
 
         throw new FileNotFoundException("Unable to locate tests/Fixtures/replay_baseline.bin or replay_baseline.hex from AppContext.BaseDirectory.");
+    }
+
+    [Fact]
+    public void Replay_RoundTrip_WithNpcAttacks_PreservesChecksum()
+    {
+        ScenarioConfig cfg = new(
+            ServerSeed: 451,
+            TickCount: 220,
+            SnapshotEveryTicks: 1,
+            BotCount: 2,
+            ZoneId: 1,
+            BaseBotSeed: 777,
+            NpcCount: 4);
+
+        using MemoryStream replay = new();
+        ScenarioResult scenarioResult = new ScenarioRunner().RunAndRecordDetailed(cfg, replay);
+        replay.Position = 0;
+
+        ReplayExecutionResult replayResult = ReplayRunner.RunReplayWithExpected(replay);
+
+        Assert.Equal(
+            TestChecksum.NormalizeFullHex(scenarioResult.Checksum),
+            TestChecksum.NormalizeFullHex(replayResult.Checksum));
+        Assert.NotNull(replayResult.ExpectedChecksum);
+        Assert.Equal(
+            TestChecksum.NormalizeFullHex(scenarioResult.Checksum),
+            TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum!));
     }
 }

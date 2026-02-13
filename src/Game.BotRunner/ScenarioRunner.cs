@@ -100,7 +100,7 @@ public sealed class ScenarioRunner
                         client.SendAttackIntent(commandTick, attackerId, targetId);
                     }
 
-                    tickMoves[client.BotIndex] = new ReplayMove(decision.MoveX, decision.MoveY);
+                    tickMoves[client.BotIndex] = new ReplayMove(decision.MoveX, decision.MoveY, decision.AttackTargetId);
                 }
 
                 replayWriter?.WriteTickInputs(tick, tickMoves);
