@@ -42,11 +42,11 @@ public sealed class CombatSimulationTests
         SimulationConfig config = CreateConfig(123);
         WorldState state = SpawnDuel(config);
 
-        for (int i = 0; i < 10; i++)
-        {
-            state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
-                new WorldCommand(WorldCommandKind.AttackIntent, new EntityId(1), new ZoneId(1), TargetEntityId: new EntityId(2)))));
-        }
+        // Make kill deterministic in a single hit so the assertion does not depend on cooldown tick spacing.
+        state = WithAttackDamage(state, zoneId: 1, entityId: 1, attackDamage: 100);
+
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.AttackIntent, new EntityId(1), new ZoneId(1), TargetEntityId: new EntityId(2)))));
 
         Assert.True(state.TryGetZone(new ZoneId(1), out ZoneState zone));
         Assert.DoesNotContain(zone.Entities, e => e.Id.Value == 2);
@@ -71,6 +71,21 @@ public sealed class CombatSimulationTests
             new WorldCommand(WorldCommandKind.EnterZone, new EntityId(2), new ZoneId(1), SpawnPos: new Vec2Fix(Fix32.FromInt(2), Fix32.FromInt(2) + new Fix32(Fix32.OneRaw / 2))))));
 
         return state;
+    }
+
+
+    private static WorldState WithAttackDamage(WorldState state, int zoneId, int entityId, int attackDamage)
+    {
+        Assert.True(state.TryGetZone(new ZoneId(zoneId), out ZoneState zone));
+
+        ZoneState updatedZone = zone with
+        {
+            Entities = zone.Entities
+                .Select(entity => entity.Id.Value == entityId ? entity with { AttackDamage = attackDamage } : entity)
+                .ToImmutableArray()
+        };
+
+        return state.WithZoneUpdated(updatedZone);
     }
 
     private static string RunCombatSequence(SimulationConfig config)
