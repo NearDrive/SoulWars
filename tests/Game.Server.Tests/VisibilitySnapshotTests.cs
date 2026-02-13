@@ -31,10 +31,8 @@ public sealed class VisibilitySnapshotTests
 
         host.AdvanceTicks(2);
 
-        EnterZoneAck ackA = ReadLastMessage<EnterZoneAck>(endpointA);
-        EnterZoneAck ackB = ReadLastMessage<EnterZoneAck>(endpointB);
-        Snapshot snapshotA = ReadLastMessage<Snapshot>(endpointA);
-        Snapshot snapshotB = ReadLastMessage<Snapshot>(endpointB);
+        (EnterZoneAck ackA, Snapshot snapshotA) = ReadEnterZoneAckAndLastSnapshot(endpointA);
+        (EnterZoneAck ackB, Snapshot snapshotB) = ReadEnterZoneAckAndLastSnapshot(endpointB);
 
         SnapshotEntity selfA = snapshotA.Entities.Single(e => e.EntityId == ackA.EntityId);
         SnapshotEntity selfB = snapshotB.Entities.Single(e => e.EntityId == ackB.EntityId);
@@ -55,8 +53,8 @@ public sealed class VisibilitySnapshotTests
             endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(snapshotB.Tick + 1, moveX, moveY)));
             host.StepOnce();
 
-            snapshotA = ReadLastMessage<Snapshot>(endpointA);
-            snapshotB = ReadLastMessage<Snapshot>(endpointB);
+            snapshotA = ReadLastSnapshot(endpointA);
+            snapshotB = ReadLastSnapshot(endpointB);
 
             bMissingFromA = snapshotA.Entities.All(e => e.EntityId != ackB.EntityId);
             aMissingFromB = snapshotB.Entities.All(e => e.EntityId != ackA.EntityId);
@@ -106,25 +104,51 @@ public sealed class VisibilitySnapshotTests
 
         host.AdvanceTicks(2);
 
-        EnterZoneAck ack = ReadLastMessage<EnterZoneAck>(endpoint);
-        Snapshot snapshot = ReadLastMessage<Snapshot>(endpoint);
+        (EnterZoneAck ack, Snapshot snapshot) = ReadEnterZoneAckAndLastSnapshot(endpoint);
 
         Assert.Contains(snapshot.Entities, entity => entity.EntityId == ack.EntityId);
     }
 
-    private static T ReadLastMessage<T>(InMemoryEndpoint endpoint)
-        where T : class, IServerMessage
+    private static (EnterZoneAck Ack, Snapshot Snapshot) ReadEnterZoneAckAndLastSnapshot(InMemoryEndpoint endpoint)
     {
-        T? last = null;
+        EnterZoneAck? ack = null;
+        Snapshot? snapshot = null;
+
         while (endpoint.TryDequeueFromServer(out byte[] msg))
         {
-            if (ProtocolCodec.TryDecodeServer(msg, out IServerMessage? decoded, out _) && decoded is T typed)
+            if (!ProtocolCodec.TryDecodeServer(msg, out IServerMessage? decoded, out _))
             {
-                last = typed;
+                continue;
+            }
+
+            switch (decoded)
+            {
+                case EnterZoneAck typedAck:
+                    ack = typedAck;
+                    break;
+                case Snapshot typedSnapshot:
+                    snapshot = typedSnapshot;
+                    break;
             }
         }
 
-        Assert.NotNull(last);
-        return last!;
+        Assert.NotNull(ack);
+        Assert.NotNull(snapshot);
+        return (ack!, snapshot!);
+    }
+
+    private static Snapshot ReadLastSnapshot(InMemoryEndpoint endpoint)
+    {
+        Snapshot? snapshot = null;
+        while (endpoint.TryDequeueFromServer(out byte[] msg))
+        {
+            if (ProtocolCodec.TryDecodeServer(msg, out IServerMessage? decoded, out _) && decoded is Snapshot typed)
+            {
+                snapshot = typed;
+            }
+        }
+
+        Assert.NotNull(snapshot);
+        return snapshot!;
     }
 }
