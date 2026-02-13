@@ -1,3 +1,4 @@
+using System.Linq;
 using Game.Protocol;
 using Game.Server;
 
@@ -35,6 +36,10 @@ public sealed class BotClient : IAsyncDisposable
     public int SnapshotsReceived { get; private set; }
 
     public int LastSnapshotTick { get; private set; }
+
+    public Snapshot? LastSnapshot { get; private set; }
+
+    public int? SelfHp { get; private set; }
 
     private bool _enterZoneSent;
 
@@ -75,6 +80,16 @@ public sealed class BotClient : IAsyncDisposable
         _client.SendInput(tick, mx, my);
     }
 
+    public void SendAttackIntent(int tick, int attackerId, int targetId)
+    {
+        if (tick <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(tick));
+        }
+
+        _client.SendAttackIntent(tick, attackerId, targetId, ZoneId);
+    }
+
     public void DrainMessages(Action<IServerMessage> onMsg)
     {
         ArgumentNullException.ThrowIfNull(onMsg);
@@ -97,6 +112,16 @@ public sealed class BotClient : IAsyncDisposable
                 case Snapshot snapshot:
                     SnapshotsReceived++;
                     LastSnapshotTick = Math.Max(LastSnapshotTick, snapshot.Tick);
+                    LastSnapshot = snapshot;
+                    if (EntityId is int selfId)
+                    {
+                        SnapshotEntity? self = snapshot.Entities.FirstOrDefault(entity => entity.EntityId == selfId);
+                        if (self is not null)
+                        {
+                            SelfHp = self.Hp;
+                        }
+                    }
+
                     break;
             }
 

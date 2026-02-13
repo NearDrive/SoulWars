@@ -313,7 +313,13 @@ public sealed class ServerHost
                     PosYRaw: entity.Pos.Y.Raw,
                     VelXRaw: entity.Vel.X.Raw,
                     VelYRaw: entity.Vel.Y.Raw,
-                    Hp: entity.Hp))
+                    Hp: entity.Hp,
+                    Kind: entity.Kind switch
+                    {
+                        Game.Core.EntityKind.Player => SnapshotEntityKind.Player,
+                        Game.Core.EntityKind.Npc => SnapshotEntityKind.Npc,
+                        _ => SnapshotEntityKind.Unknown
+                    }))
                 .ToArray();
 
             Snapshot snapshot = new(

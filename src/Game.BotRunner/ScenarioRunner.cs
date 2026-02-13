@@ -81,14 +81,26 @@ public sealed class ScenarioRunner
             }
 
             ReplayMove[] tickMoves = new ReplayMove[cfg.BotCount];
+            int[] lastSentInputTickByBot = new int[cfg.BotCount];
 
             for (int tick = 1; tick <= cfg.TickCount; tick++)
             {
-                for (int i = 0; i < agents.Count; i++)
+                DrainSnapshotsForTests(clients, pendingSnapshotsByBot);
+
+                foreach (BotClient client in clients.OrderBy(c => c.BotIndex))
                 {
-                    (sbyte mx, sbyte my) = agents[i].GetMoveForTick(tick);
-                    tickMoves[i] = new ReplayMove(mx, my);
-                    clients[i].SendInput(tick, mx, my);
+                    BotDecision decision = agents[client.BotIndex].Decide(client);
+                    int snapshotTick = client.LastSnapshot?.Tick ?? tick;
+                    int commandTick = Math.Max(lastSentInputTickByBot[client.BotIndex] + 1, snapshotTick);
+                    client.SendInput(commandTick, decision.MoveX, decision.MoveY);
+                    lastSentInputTickByBot[client.BotIndex] = commandTick;
+
+                    if (decision.AttackTargetId is int targetId && client.EntityId is int attackerId)
+                    {
+                        client.SendAttackIntent(commandTick, attackerId, targetId);
+                    }
+
+                    tickMoves[client.BotIndex] = new ReplayMove(decision.MoveX, decision.MoveY);
                 }
 
                 replayWriter?.WriteTickInputs(tick, tickMoves);

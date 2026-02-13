@@ -76,6 +76,9 @@ public sealed class HeadlessClient : IAsyncDisposable
 
     public void SendInput(int tick, sbyte mx, sbyte my) => Send(new InputCommand(tick, mx, my));
 
+    public void SendAttackIntent(int tick, int attackerId, int targetId, int zoneId) =>
+        Send(new AttackIntent(tick, attackerId, targetId, zoneId));
+
     public async ValueTask DisposeAsync()
     {
         if (_tcpEndpoint is not null)

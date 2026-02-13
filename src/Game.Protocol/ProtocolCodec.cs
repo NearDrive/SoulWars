@@ -308,7 +308,7 @@ public static class ProtocolCodec
     private static byte[] EncodeSnapshot(Snapshot snapshot)
     {
         SnapshotEntity[] entities = snapshot.Entities ?? Array.Empty<SnapshotEntity>();
-        byte[] data = new byte[1 + 4 + 4 + 4 + (entities.Length * (6 * 4))];
+        byte[] data = new byte[1 + 4 + 4 + 4 + (entities.Length * ((6 * 4) + 1))];
         data[0] = ServerSnapshot;
         WriteInt32(data, 1, snapshot.Tick);
         WriteInt32(data, 5, snapshot.ZoneId);
@@ -324,7 +324,8 @@ public static class ProtocolCodec
             WriteInt32(data, offset + 12, entity.VelXRaw);
             WriteInt32(data, offset + 16, entity.VelYRaw);
             WriteInt32(data, offset + 20, entity.Hp);
-            offset += 24;
+            data[offset + 24] = (byte)entity.Kind;
+            offset += 25;
         }
 
         return data;
@@ -351,7 +352,7 @@ public static class ProtocolCodec
         {
             checked
             {
-                requiredLength = 13 + (entityCount * 24);
+                requiredLength = 13 + (entityCount * 25);
             }
         }
         catch (OverflowException)
@@ -371,19 +372,43 @@ public static class ProtocolCodec
 
         for (int i = 0; i < entityCount; i++)
         {
+            byte rawKind = data[offset + 24];
+            if (!TryDecodeSnapshotEntityKind(rawKind, out SnapshotEntityKind kind, out error))
+            {
+                return false;
+            }
+
             entities[i] = new SnapshotEntity(
                 EntityId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset, 4)),
                 PosXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 4, 4)),
                 PosYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 8, 4)),
                 VelXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 12, 4)),
                 VelYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 16, 4)),
-                Hp: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 20, 4)));
-            offset += 24;
+                Hp: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 20, 4)),
+                Kind: kind);
+            offset += 25;
         }
 
         msg = new Snapshot(tick, zoneId, entities);
         error = ProtocolErrorCode.None;
         return true;
+    }
+
+    private static bool TryDecodeSnapshotEntityKind(byte rawKind, out SnapshotEntityKind kind, out ProtocolErrorCode error)
+    {
+        switch ((SnapshotEntityKind)rawKind)
+        {
+            case SnapshotEntityKind.Unknown:
+            case SnapshotEntityKind.Player:
+            case SnapshotEntityKind.Npc:
+                kind = (SnapshotEntityKind)rawKind;
+                error = ProtocolErrorCode.None;
+                return true;
+            default:
+                kind = SnapshotEntityKind.Unknown;
+                error = ProtocolErrorCode.ValueOutOfRange;
+                return false;
+        }
     }
 
     private static byte[] EncodeError(Error error)

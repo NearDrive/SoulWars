@@ -21,12 +21,14 @@ public sealed class ScenarioChecksumBuilder : IDisposable
 
         foreach (SnapshotEntity entity in snapshot.Entities.OrderBy(e => e.EntityId))
         {
-            byte[] entityData = new byte[20];
+            byte[] entityData = new byte[25];
             BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(0, 4), entity.EntityId);
             BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(4, 4), entity.PosXRaw);
             BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(8, 4), entity.PosYRaw);
             BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(12, 4), entity.VelXRaw);
             BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(16, 4), entity.VelYRaw);
+            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(20, 4), entity.Hp);
+            entityData[24] = (byte)entity.Kind;
             _hash.AppendData(entityData);
         }
     }
