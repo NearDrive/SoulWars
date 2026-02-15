@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../Game.Core/Game.Core.csproj" />
+    <ProjectReference Include="../Game.Audit/Game.Audit.csproj" />
     <ProjectReference Include="../Game.Protocol/Game.Protocol.csproj" />
     <ProjectReference Include="../Game.Persistence/Game.Persistence.csproj" />
     <ProjectReference Include="../Game.Persistence.Sqlite/Game.Persistence.Sqlite.csproj" />
