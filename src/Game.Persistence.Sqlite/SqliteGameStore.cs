@@ -207,7 +207,7 @@ VALUES ($accountId, $playerId, $entityId, $zoneId);",
             players.Add(new PlayerRecord(accountId, playerId, entityId, zoneId));
         }
 
-        return players.MoveToImmutable();
+        return players.ToImmutable();
     }
 
     private static string? ReadMetaValue(SqliteConnection connection, SqliteTransaction transaction, string key)
