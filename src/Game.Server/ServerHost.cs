@@ -22,7 +22,7 @@ public sealed class ServerHost
     private WorldState _world;
     private int _lastTick;
 
-    public ServerHost(ServerConfig config, ILoggerFactory? loggerFactory = null, ServerMetrics? metrics = null)
+    public ServerHost(ServerConfig config, ILoggerFactory? loggerFactory = null, ServerMetrics? metrics = null, ServerBootstrap? bootstrap = null)
     {
         if (config.SnapshotEveryTicks <= 0)
         {
@@ -31,13 +31,24 @@ public sealed class ServerHost
 
         _serverConfig = config;
         _simulationConfig = config.ToSimulationConfig();
-        _world = Simulation.CreateInitialState(_simulationConfig);
+        _world = bootstrap?.World ?? Simulation.CreateInitialState(_simulationConfig);
+        if (bootstrap is not null)
+        {
+            _playerRegistry.LoadFromRecords(bootstrap.Players);
+            _nextEntityId = Math.Max(_nextEntityId, ComputeNextEntityId(_world));
+        }
         ILoggerFactory factory = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = factory.CreateLogger<ServerHost>();
         Metrics = metrics ?? new ServerMetrics();
         _lastTick = _world.Tick;
     }
 
+
+    public WorldState CurrentWorld => _world;
+
+    public int Seed => _serverConfig.Seed;
+
+    public IReadOnlyList<PlayerState> GetPlayersSnapshot() => _playerRegistry.OrderedStates().ToArray();
     public ServerMetrics Metrics { get; }
 
     public SessionId Connect(IServerEndpoint endpoint)
@@ -53,6 +64,20 @@ public sealed class ServerHost
         return sessionId;
     }
 
+
+    public void SaveToSqlite(string dbPath)
+    {
+        ServerPersistence persistence = new();
+        persistence.Save(this, dbPath);
+    }
+
+    public static ServerHost LoadFromSqlite(ServerConfig config, string dbPath, ILoggerFactory? loggerFactory = null, ServerMetrics? metrics = null)
+    {
+        ServerPersistence persistence = new();
+        ServerBootstrap bootstrap = persistence.Load(dbPath);
+        ServerConfig loadedConfig = config with { Seed = bootstrap.ServerSeed };
+        return new ServerHost(loadedConfig, loggerFactory, metrics, bootstrap);
+    }
     public void StepOnce()
     {
         long start = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -571,6 +596,20 @@ public sealed class ServerHost
         }
     }
 
+
+    private static int ComputeNextEntityId(WorldState world)
+    {
+        int maxEntityId = 0;
+        foreach (ZoneState zone in world.Zones)
+        {
+            foreach (EntityState entity in zone.Entities)
+            {
+                maxEntityId = Math.Max(maxEntityId, entity.Id.Value);
+            }
+        }
+
+        return maxEntityId + 1;
+    }
     private sealed class SessionState
     {
         public SessionState(SessionId sessionId, IServerEndpoint endpoint)
