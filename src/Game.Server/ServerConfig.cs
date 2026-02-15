@@ -12,6 +12,7 @@ public readonly record struct ServerConfig(
     int MapWidth,
     int MapHeight,
     int NpcCountPerZone,
+    int DisconnectGraceTicks,
     InvariantOptions Invariants)
 {
     public SimulationConfig ToSimulationConfig()
@@ -40,5 +41,6 @@ public readonly record struct ServerConfig(
         MapWidth: 32,
         MapHeight: 32,
         NpcCountPerZone: 0,
+        DisconnectGraceTicks: 300,
         Invariants: InvariantOptions.Enabled);
 }

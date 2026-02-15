@@ -32,7 +32,7 @@ public sealed class PlayerRegistry
             if (!_byPlayerId.TryGetValue(candidate, out PlayerState? state))
             {
                 PlayerId created = new(candidate);
-                PlayerState newState = new(created, accountId, null, null, false);
+                PlayerState newState = new(created, accountId, null, null, false, false, null, null, null);
                 _byAccount[accountId] = created;
                 _byPlayerId[candidate] = newState;
                 return created;
@@ -58,10 +58,13 @@ public sealed class PlayerRegistry
 
     public bool TryGetState(PlayerId pid, out PlayerState state) => _byPlayerId.TryGetValue(pid.Value, out state!);
 
+    public IEnumerable<PlayerState> OrderedStates() => _byPlayerId.Values.OrderBy(s => s.PlayerId.Value);
+
     public void AttachSession(PlayerId pid, SessionId sid)
     {
         _activeSessionByPlayerId[pid.Value] = sid;
         _playerBySessionId[sid.Value] = pid;
+        UpdateConnectionState(pid, isConnected: true, attachedSessionId: sid, disconnectedAtTick: null, despawnAtTick: null);
     }
 
     public void DetachSession(SessionId sid)
@@ -74,6 +77,8 @@ public sealed class PlayerRegistry
         }
     }
 
+    public bool TryGetPlayerBySession(SessionId sid, out PlayerId playerId) => _playerBySessionId.TryGetValue(sid.Value, out playerId);
+
     public bool TryGetActiveSession(PlayerId pid, out SessionId sid) => _activeSessionByPlayerId.TryGetValue(pid.Value, out sid);
 
     public void UpdateWorldState(PlayerId pid, int? entityId, int? zoneId, bool isAlive)
@@ -81,6 +86,20 @@ public sealed class PlayerRegistry
         if (_byPlayerId.TryGetValue(pid.Value, out PlayerState? state) && state is not null)
         {
             _byPlayerId[pid.Value] = state with { EntityId = entityId, ZoneId = zoneId, IsAlive = isAlive };
+        }
+    }
+
+    public void UpdateConnectionState(PlayerId pid, bool isConnected, SessionId? attachedSessionId, int? disconnectedAtTick, int? despawnAtTick)
+    {
+        if (_byPlayerId.TryGetValue(pid.Value, out PlayerState? state) && state is not null)
+        {
+            _byPlayerId[pid.Value] = state with
+            {
+                IsConnected = isConnected,
+                AttachedSessionId = attachedSessionId,
+                DisconnectedAtTick = disconnectedAtTick,
+                DespawnAtTick = despawnAtTick
+            };
         }
     }
 
@@ -101,4 +120,13 @@ public sealed class PlayerRegistry
     }
 }
 
-public sealed record PlayerState(PlayerId PlayerId, string AccountId, int? EntityId, int? ZoneId, bool IsAlive);
+public sealed record PlayerState(
+    PlayerId PlayerId,
+    string AccountId,
+    int? EntityId,
+    int? ZoneId,
+    bool IsAlive,
+    bool IsConnected,
+    SessionId? AttachedSessionId,
+    int? DisconnectedAtTick,
+    int? DespawnAtTick);

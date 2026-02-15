@@ -131,6 +131,7 @@ public sealed class ServerHost
         }
 
         _world = Simulation.Step(_simulationConfig, _world, new Inputs(worldCommands.ToImmutableArray()));
+        ProcessDisconnectedPlayerCleanup(_world.Tick);
         if (_serverConfig.Invariants.EnableCoreInvariants)
         {
             CoreInvariants.Validate(_world, _world.Tick);
@@ -168,6 +169,30 @@ public sealed class ServerHost
     }
 
     public ServerMetricsSnapshot SnapshotMetrics() => Metrics.Snapshot(_world.Tick, _serverConfig.TickHz);
+
+    public bool WorldContainsEntity(int entityId)
+    {
+        return _world.TryGetEntityZone(new EntityId(entityId), out _);
+    }
+
+    public int CountWorldEntitiesForPlayer(PlayerId playerId)
+    {
+        if (!_playerRegistry.TryGetState(playerId, out PlayerState state) || state.EntityId is null)
+        {
+            return 0;
+        }
+
+        int id = state.EntityId.Value;
+        int count = 0;
+        foreach (ZoneState zone in _world.Zones)
+        {
+            count += zone.Entities.Count(entity => entity.Id.Value == id);
+        }
+
+        return count;
+    }
+
+    public bool TryGetPlayerState(PlayerId playerId, out PlayerState state) => _playerRegistry.TryGetState(playerId, out state);
 
     private void DrainSessionMessages(SessionState session, int targetTick, List<WorldCommand> worldCommands)
     {
@@ -251,12 +276,14 @@ public sealed class ServerHost
             return;
         }
 
+        int zoneId = playerState.ZoneId ?? request.ZoneId;
         int entityId;
+
         if (playerState.EntityId is int existingEntityId &&
-            _world.TryGetEntityZone(new EntityId(existingEntityId), out ZoneId existingZoneId) &&
-            existingZoneId.Value == request.ZoneId)
+            _world.TryGetEntityZone(new EntityId(existingEntityId), out ZoneId existingZoneId))
         {
             entityId = existingEntityId;
+            zoneId = existingZoneId.Value;
         }
         else
         {
@@ -264,14 +291,14 @@ public sealed class ServerHost
             worldCommands.Add(new WorldCommand(
                 Kind: WorldCommandKind.EnterZone,
                 EntityId: new EntityId(entityId),
-                ZoneId: new ZoneId(request.ZoneId)));
+                ZoneId: new ZoneId(zoneId)));
         }
 
         session.EntityId = entityId;
-        session.ActiveZoneId = request.ZoneId;
-        _playerRegistry.UpdateWorldState(session.PlayerId.Value, entityId, request.ZoneId, isAlive: true);
+        session.ActiveZoneId = zoneId;
+        _playerRegistry.UpdateWorldState(session.PlayerId.Value, entityId, zoneId, isAlive: true);
 
-        session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new EnterZoneAck(request.ZoneId, entityId)));
+        session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new EnterZoneAck(zoneId, entityId)));
         Metrics.IncrementMessagesOut();
 
         _logger.LogInformation(
@@ -279,7 +306,7 @@ public sealed class ServerHost
             "SessionEnteredZone sessionId={SessionId} playerId={PlayerId} zoneId={ZoneId} entityId={EntityId}",
             session.SessionId.Value,
             session.PlayerId.Value.Value,
-            request.ZoneId,
+            zoneId,
             entityId);
     }
 
@@ -392,6 +419,57 @@ public sealed class ServerHost
                 session.EntityId = null;
             }
         }
+
+        foreach (PlayerState playerState in _playerRegistry.OrderedStates())
+        {
+            if (playerState.IsConnected || playerState.EntityId is null)
+            {
+                continue;
+            }
+
+            if (!_world.TryGetEntityZone(new EntityId(playerState.EntityId.Value), out ZoneId zoneId))
+            {
+                _playerRegistry.UpdateWorldState(playerState.PlayerId, null, playerState.ZoneId, isAlive: false);
+            }
+            else
+            {
+                _playerRegistry.UpdateWorldState(playerState.PlayerId, playerState.EntityId.Value, zoneId.Value, isAlive: true);
+            }
+        }
+    }
+
+    private void ProcessDisconnectedPlayerCleanup(int tick)
+    {
+        foreach (PlayerState playerState in _playerRegistry.OrderedStates())
+        {
+            if (playerState.IsConnected || playerState.EntityId is null || playerState.DespawnAtTick is null)
+            {
+                continue;
+            }
+
+            if (playerState.DespawnAtTick.Value > tick)
+            {
+                continue;
+            }
+
+            EntityId entityId = new(playerState.EntityId.Value);
+            if (_world.TryGetEntityZone(entityId, out ZoneId zoneId) && _world.TryGetZone(zoneId, out ZoneState zone))
+            {
+                ZoneState updatedZone = zone.WithEntities(zone.Entities
+                    .Where(entity => entity.Id.Value != entityId.Value)
+                    .OrderBy(entity => entity.Id.Value)
+                    .ToImmutableArray());
+                _world = _world.WithZoneUpdated(updatedZone).WithoutEntityLocation(entityId);
+            }
+
+            _playerRegistry.UpdateWorldState(playerState.PlayerId, null, null, isAlive: false);
+            _playerRegistry.UpdateConnectionState(
+                playerState.PlayerId,
+                isConnected: false,
+                attachedSessionId: null,
+                disconnectedAtTick: playerState.DisconnectedAtTick,
+                despawnAtTick: null);
+        }
     }
 
     private void EmitSnapshots()
@@ -479,10 +557,12 @@ public sealed class ServerHost
             if (session.PlayerId is PlayerId playerId)
             {
                 _playerRegistry.DetachSession(session.SessionId);
-                if (_playerRegistry.TryGetState(playerId, out PlayerState state))
-                {
-                    _playerRegistry.UpdateWorldState(playerId, state.EntityId, state.ZoneId, state.IsAlive);
-                }
+                _playerRegistry.UpdateConnectionState(
+                    playerId,
+                    isConnected: false,
+                    attachedSessionId: null,
+                    disconnectedAtTick: _world.Tick,
+                    despawnAtTick: _world.Tick + _serverConfig.DisconnectGraceTicks);
             }
 
             session.Endpoint.Close();
