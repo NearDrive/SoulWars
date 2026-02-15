@@ -287,7 +287,7 @@ public sealed class ServerHost
         }
         else
         {
-            entityId = _nextEntityId++;
+            entityId = playerState.EntityId ?? _nextEntityId++;
             worldCommands.Add(new WorldCommand(
                 Kind: WorldCommandKind.EnterZone,
                 EntityId: new EntityId(entityId),
