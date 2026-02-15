@@ -60,6 +60,34 @@ public sealed class PlayerRegistry
 
     public IEnumerable<PlayerState> OrderedStates() => _byPlayerId.Values.OrderBy(s => s.PlayerId.Value);
 
+    public void LoadFromRecords(IEnumerable<BootstrapPlayerRecord> players)
+    {
+        ArgumentNullException.ThrowIfNull(players);
+
+        _byAccount.Clear();
+        _byPlayerId.Clear();
+        _activeSessionByPlayerId.Clear();
+        _playerBySessionId.Clear();
+
+        foreach (BootstrapPlayerRecord player in players.OrderBy(p => p.PlayerId))
+        {
+            PlayerId playerId = new(player.PlayerId);
+            PlayerState state = new(
+                PlayerId: playerId,
+                AccountId: player.AccountId,
+                EntityId: player.EntityId,
+                ZoneId: player.ZoneId,
+                IsAlive: player.EntityId is not null,
+                IsConnected: false,
+                AttachedSessionId: null,
+                DisconnectedAtTick: null,
+                DespawnAtTick: null);
+
+            _byAccount[player.AccountId] = playerId;
+            _byPlayerId[playerId.Value] = state;
+        }
+    }
+
     public void AttachSession(PlayerId pid, SessionId sid)
     {
         _activeSessionByPlayerId[pid.Value] = sid;

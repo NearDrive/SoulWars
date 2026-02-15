@@ -23,9 +23,9 @@ public sealed class ServerRuntime : IAsyncDisposable
 
     public int BoundPort => _transport.BoundPort;
 
-    public async Task StartAsync(ServerConfig cfg, IPAddress ip, int port, CancellationToken ct)
+    public async Task StartAsync(ServerConfig cfg, IPAddress ip, int port, CancellationToken ct, ServerBootstrap? bootstrap = null)
     {
-        Host = new ServerHost(cfg, LoggerFactory);
+        Host = new ServerHost(cfg, LoggerFactory, bootstrap: bootstrap);
         await _transport.StartAsync(ip, port, ct).ConfigureAwait(false);
         _logger.LogInformation(
             ServerLogEvents.ServerStarted,
