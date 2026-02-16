@@ -16,27 +16,30 @@ public sealed class AuditTrailTests
         {
             SnapshotEveryTicks = 1,
             ZoneCount = 2,
-            NpcCountPerZone = 10,
+            NpcCountPerZone = 0,
             DisconnectGraceTicks = 2000
         }, auditSink: audit);
 
-        InMemoryEndpoint endpoint = new();
-        host.Connect(endpoint);
-        endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("v", "alice")));
-        host.ProcessInboundOnce();
-        ReadSingle<Welcome>(endpoint);
+        (InMemoryEndpoint endpointA, _, EnterZoneAck ackA) = ConnectAndEnterWithAck(host, "alice", 1);
+        (InMemoryEndpoint endpointB, _, EnterZoneAck ackB) = ConnectAndEnterWithAck(host, "bob", 1);
 
-        endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
-        host.ProcessInboundOnce();
-        ReadSingle<EnterZoneAck>(endpoint);
-        host.AdvanceSimulationOnce();
-
-        endpoint.EnqueueToServer(ProtocolCodec.Encode(new TeleportRequest(2)));
+        endpointA.EnqueueToServer(ProtocolCodec.Encode(new TeleportRequest(2)));
+        endpointB.EnqueueToServer(ProtocolCodec.Encode(new TeleportRequest(2)));
         host.ProcessInboundOnce();
         host.AdvanceSimulationOnce();
 
-        WaitForEntityDeath(host, new PlayerId(1), maxTicks: 1600);
+        bool sawDeath = false;
+        for (int tick = 0; tick < 220 && !sawDeath; tick++)
+        {
+            endpointA.EnqueueToServer(ProtocolCodec.Encode(new AttackIntent(tick + 1, ackA.EntityId, ackB.EntityId, 2)));
+            endpointB.EnqueueToServer(ProtocolCodec.Encode(new AttackIntent(tick + 1, ackB.EntityId, ackA.EntityId, 2)));
+            host.ProcessInboundOnce();
+            host.AdvanceSimulationOnce();
 
+            sawDeath = audit.Events.Any(e => e.Header.Type == AuditEventType.Death);
+        }
+
+        Assert.True(sawDeath);
         Assert.NotEmpty(audit.Events);
 
         for (int i = 1; i < audit.Events.Count; i++)
@@ -114,30 +117,22 @@ public sealed class AuditTrailTests
 
     private static void ConnectAndEnter(ServerHost host, string accountId, int zoneId)
     {
+        _ = ConnectAndEnterWithAck(host, accountId, zoneId);
+    }
+
+    private static (InMemoryEndpoint Endpoint, Welcome Welcome, EnterZoneAck Ack) ConnectAndEnterWithAck(ServerHost host, string accountId, int zoneId)
+    {
         InMemoryEndpoint endpoint = new();
         host.Connect(endpoint);
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("v", accountId)));
         host.ProcessInboundOnce();
-        ReadSingle<Welcome>(endpoint);
+        Welcome welcome = ReadSingle<Welcome>(endpoint);
 
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(zoneId)));
         host.ProcessInboundOnce();
-        ReadSingle<EnterZoneAck>(endpoint);
+        EnterZoneAck ack = ReadSingle<EnterZoneAck>(endpoint);
         host.AdvanceSimulationOnce();
-    }
-
-    private static void WaitForEntityDeath(ServerHost host, PlayerId playerId, int maxTicks)
-    {
-        for (int i = 0; i < maxTicks; i++)
-        {
-            host.AdvanceTicks(1);
-            if (!host.TryGetPlayerState(playerId, out PlayerState state) || state.EntityId is null)
-            {
-                return;
-            }
-        }
-
-        throw new Xunit.Sdk.XunitException("Player entity did not die within expected ticks.");
+        return (endpoint, welcome, ack);
     }
 
     private static T ReadSingle<T>(InMemoryEndpoint endpoint)
