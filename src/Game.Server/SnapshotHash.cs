@@ -19,8 +19,20 @@ public static class SnapshotHash
     {
         ArgumentNullException.ThrowIfNull(snapshots);
 
+        (Snapshot Snapshot, string Digest)[] canonical = snapshots
+            .Select(snapshot => (Snapshot: snapshot, Digest: ComputeHex(snapshot)))
+            .OrderBy(entry => entry.Snapshot.Tick)
+            .ThenBy(entry => entry.Snapshot.ZoneId)
+            .ThenBy(entry => entry.Digest, StringComparer.Ordinal)
+            .ToArray();
+
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        foreach (Snapshot snapshot in snapshots)
+
+        byte[] count = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(count, canonical.Length);
+        hash.AppendData(count);
+
+        foreach ((Snapshot snapshot, _) in canonical)
         {
             Append(hash, snapshot);
         }
