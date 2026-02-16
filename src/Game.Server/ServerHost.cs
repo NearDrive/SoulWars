@@ -251,7 +251,33 @@ public sealed class ServerHost
     {
         while (session.Endpoint.TryDequeueToServer(out byte[] payload))
         {
-            if (!ProtocolCodec.TryDecodeClient(payload, out IClientMessage? message, out ProtocolErrorCode error))
+            if (payload.Length > _serverConfig.MaxPayloadBytes)
+            {
+                _logger.LogWarning(ServerLogEvents.OversizedMessage, "OversizedMessage sessionId={SessionId} payloadBytes={PayloadBytes}", session.SessionId.Value, payload.Length);
+                session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Disconnect(DisconnectReason.PayloadTooLarge)));
+                Metrics.IncrementMessagesOut();
+                DisconnectSession(session, "payload_too_large");
+                break;
+            }
+
+            IClientMessage? message;
+            ProtocolErrorCode error;
+            bool decoded;
+            try
+            {
+                decoded = ProtocolCodec.TryDecodeClient(payload, out message, out error);
+            }
+            catch (Exception ex)
+            {
+                Metrics.IncrementProtocolDecodeErrors();
+                _logger.LogWarning(ServerLogEvents.ProtocolDecodeFailed, ex, "ProtocolDecodeFailed sessionId={SessionId} error={Error}", session.SessionId.Value, "exception");
+                session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Disconnect(DisconnectReason.DecodeError)));
+                Metrics.IncrementMessagesOut();
+                DisconnectSession(session, "decode_exception");
+                break;
+            }
+
+            if (!decoded)
             {
                 Metrics.IncrementProtocolDecodeErrors();
                 if (error == ProtocolErrorCode.UnknownMessageType)
@@ -291,7 +317,11 @@ public sealed class ServerHost
                     HandleEnterZone(session, enterZoneRequest, worldCommands);
                     break;
                 case InputCommand inputCommand:
-                    session.PendingInputs.Add(new PendingInput(targetTick, session.SessionId, inputCommand.MoveX, inputCommand.MoveY));
+                    if (!TryEnqueueInputForTick(session, targetTick, inputCommand))
+                    {
+                        break;
+                    }
+
                     break;
                 case AttackIntent attackIntent:
                     _pendingAttackIntents.Add(new PendingAttackIntent(targetTick, session.SessionId, attackIntent.ZoneId, attackIntent.TargetId));
@@ -304,6 +334,57 @@ public sealed class ServerHost
                     break;
             }
         }
+    }
+
+    private bool TryEnqueueInputForTick(SessionState session, int targetTick, InputCommand inputCommand)
+    {
+        if (session.LastTickSeen != targetTick)
+        {
+            session.LastTickSeen = targetTick;
+            session.InputsAcceptedThisTick = 0;
+        }
+
+        if (session.InputsAcceptedThisTick >= _serverConfig.MaxInputsPerTickPerSession)
+        {
+            return false;
+        }
+
+        PendingInput pending = ClampMoveInput(targetTick, session.SessionId, inputCommand.MoveX, inputCommand.MoveY);
+        session.PendingInputs.Add(pending);
+        session.InputsAcceptedThisTick++;
+        return true;
+    }
+
+    private PendingInput ClampMoveInput(int tick, SessionId sessionId, sbyte moveX, sbyte moveY)
+    {
+        long x = moveX;
+        long y = moveY;
+        long lenSq = (x * x) + (y * y);
+
+        int clampedX = moveX;
+        int clampedY = moveY;
+
+        if (lenSq > 0)
+        {
+            Fix32 len = Fix32.FromFloat(MathF.Sqrt(lenSq));
+            if (len > _serverConfig.MaxMoveVectorLen && _serverConfig.MaxMoveVectorLen > Fix32.Zero)
+            {
+                Fix32 scale = _serverConfig.MaxMoveVectorLen / len;
+                clampedX = Fix32.FloorToInt(Fix32.FromInt(moveX) * scale);
+                clampedY = Fix32.FloorToInt(Fix32.FromInt(moveY) * scale);
+            }
+        }
+
+        clampedX = Math.Clamp(clampedX, sbyte.MinValue, sbyte.MaxValue);
+        clampedY = Math.Clamp(clampedY, sbyte.MinValue, sbyte.MaxValue);
+
+        if (Math.Abs(clampedX) > 1 || Math.Abs(clampedY) > 1)
+        {
+            clampedX = Math.Sign(clampedX);
+            clampedY = Math.Sign(clampedY);
+        }
+
+        return new PendingInput(tick, sessionId, (sbyte)clampedX, (sbyte)clampedY);
     }
 
     private void HandleHandshake(SessionState session, HandshakeRequest request)
@@ -697,6 +778,10 @@ public sealed class ServerHost
         public int? ActiveZoneId { get; set; }
 
         public List<PendingInput> PendingInputs { get; } = new();
+
+        public int LastTickSeen { get; set; } = -1;
+
+        public int InputsAcceptedThisTick { get; set; }
 
         public int LastSnapshotTick { get; set; } = -1;
     }

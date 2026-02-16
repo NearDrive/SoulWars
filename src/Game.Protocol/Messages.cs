@@ -12,7 +12,8 @@ public enum DisconnectReason : byte
 {
     Unknown = 0,
     VersionMismatch = 1,
-    DecodeError = 2
+    DecodeError = 2,
+    PayloadTooLarge = 3
 }
 
 public static class ProtocolConstants
