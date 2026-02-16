@@ -144,7 +144,6 @@ public sealed class PersistenceConsistencyIntegrationTests
         }
 
         host.ProcessInboundOnce();
-        host.AdvanceSimulationOnce();
 
         for (int i = 0; i < botCount; i++)
         {
