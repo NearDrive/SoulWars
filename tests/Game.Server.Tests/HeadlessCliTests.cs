@@ -1,4 +1,5 @@
 using Game.App.Headless;
+using Xunit;
 
 namespace Game.Server.Tests;
 
