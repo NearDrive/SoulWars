@@ -10,6 +10,7 @@ public static class ServerLogEvents
     public static readonly EventId SessionDisconnected = new(1003, nameof(SessionDisconnected));
     public static readonly EventId ProtocolDecodeFailed = new(1100, nameof(ProtocolDecodeFailed));
     public static readonly EventId OversizedMessage = new(1101, nameof(OversizedMessage));
+    public static readonly EventId UnknownClientMessageType = new(1102, nameof(UnknownClientMessageType));
     public static readonly EventId SnapshotEmitted = new(1004, nameof(SnapshotEmitted));
     public static readonly EventId UnhandledException = new(1200, nameof(UnhandledException));
 }

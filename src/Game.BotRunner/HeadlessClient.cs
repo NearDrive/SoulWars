@@ -75,7 +75,7 @@ public sealed class HeadlessClient : IAsyncDisposable
 
     public void SendHello(string accountId, string clientVersion = "headless-client")
     {
-        Send(new HelloV2(clientVersion, accountId));
+        Send(new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, accountId));
     }
 
     public void EnterZone(int zoneId) => Send(new EnterZoneRequest(zoneId));

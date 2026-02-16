@@ -6,17 +6,19 @@ namespace Game.Protocol;
 public static class ProtocolCodec
 {
     private const byte ClientHello = 1;
-    private const byte ClientHelloV2 = 7;
     private const byte ClientEnterZoneRequest = 2;
     private const byte ClientInputCommand = 3;
     private const byte ClientLeaveZoneRequest = 4;
     private const byte ClientAttackIntent = 5;
     private const byte ClientTeleportRequest = 6;
+    private const byte ClientHelloV2 = 7;
+    private const byte ClientHandshakeRequest = 8;
 
     private const byte ServerWelcome = 101;
     private const byte ServerEnterZoneAck = 102;
     private const byte ServerSnapshot = 103;
     private const byte ServerError = 104;
+    private const byte ServerDisconnect = 105;
 
     public static byte[] Encode(IClientMessage msg)
     {
@@ -24,6 +26,7 @@ public static class ProtocolCodec
 
         return msg switch
         {
+            HandshakeRequest handshake => EncodeHandshakeRequest(handshake),
             Hello hello => EncodeHello(hello),
             HelloV2 helloV2 => EncodeHelloV2(helloV2),
             EnterZoneRequest request => EncodeIntMessage(ClientEnterZoneRequest, request.ZoneId),
@@ -60,6 +63,8 @@ public static class ProtocolCodec
                 return TryDecodeHello(data, out msg, out error);
             case ClientHelloV2:
                 return TryDecodeHelloV2(data, out msg, out error);
+            case ClientHandshakeRequest:
+                return TryDecodeHandshakeRequest(data, out msg, out error);
             case ClientEnterZoneRequest:
                 if (!TryReadInt32(data, 1, out int enterZoneId, out error))
                 {
@@ -125,6 +130,7 @@ public static class ProtocolCodec
             EnterZoneAck ack => EncodeEnterZoneAck(ack),
             Snapshot snapshot => EncodeSnapshot(snapshot),
             Error error => EncodeError(error),
+            Disconnect disconnect => EncodeDisconnect(disconnect),
             _ => throw new InvalidOperationException($"Unsupported server message type: {msg.GetType().Name}")
         };
     }
@@ -151,21 +157,7 @@ public static class ProtocolCodec
         switch (data[0])
         {
             case ServerWelcome:
-                if (!TryReadInt32(data, 1, out int sessionId, out error) ||
-                    !TryReadInt32(data, 5, out int playerId, out error))
-                {
-                    return false;
-                }
-
-                if (sessionId <= 0 || playerId <= 0)
-                {
-                    error = ProtocolErrorCode.ValueOutOfRange;
-                    return false;
-                }
-
-                msg = new Welcome(new SessionId(sessionId), new PlayerId(playerId));
-                error = ProtocolErrorCode.None;
-                return true;
+                return TryDecodeWelcome(data, out msg, out error);
             case ServerEnterZoneAck:
                 if (!TryReadInt32(data, 1, out int zoneId, out error) || !TryReadInt32(data, 5, out int entityId, out error))
                 {
@@ -185,10 +177,52 @@ public static class ProtocolCodec
                 return TryDecodeSnapshot(data, out msg, out error);
             case ServerError:
                 return TryDecodeError(data, out msg, out error);
+            case ServerDisconnect:
+                return TryDecodeDisconnect(data, out msg, out error);
             default:
                 error = ProtocolErrorCode.UnknownMessageType;
                 return false;
         }
+    }
+
+    private static byte[] EncodeHandshakeRequest(HandshakeRequest handshake)
+    {
+        byte[] accountId = Encoding.UTF8.GetBytes(handshake.AccountId ?? string.Empty);
+        byte[] data = new byte[1 + 4 + 4 + accountId.Length];
+        data[0] = ClientHandshakeRequest;
+        WriteInt32(data, 1, handshake.ProtocolVersion);
+        WriteInt32(data, 5, accountId.Length);
+        accountId.CopyTo(data.AsSpan(9));
+        return data;
+    }
+
+    private static bool TryDecodeHandshakeRequest(ReadOnlySpan<byte> data, out IClientMessage? msg, out ProtocolErrorCode error)
+    {
+        msg = null;
+
+        if (!TryReadInt32(data, 1, out int protocolVersion, out error) ||
+            !TryReadInt32(data, 5, out int accountLength, out error))
+        {
+            return false;
+        }
+
+        if (accountLength < 0)
+        {
+            error = ProtocolErrorCode.InvalidLength;
+            return false;
+        }
+
+        long required = 9L + accountLength;
+        if (required > data.Length)
+        {
+            error = ProtocolErrorCode.Truncated;
+            return false;
+        }
+
+        string accountId = Encoding.UTF8.GetString(data.Slice(9, accountLength));
+        msg = new HandshakeRequest(protocolVersion, accountId);
+        error = ProtocolErrorCode.None;
+        return true;
     }
 
     private static byte[] EncodeHello(Hello hello)
@@ -222,8 +256,7 @@ public static class ProtocolCodec
             return false;
         }
 
-        string version = Encoding.UTF8.GetString(data.Slice(5, length));
-        msg = new Hello(version);
+        msg = new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, string.Empty);
         error = ProtocolErrorCode.None;
         return true;
     }
@@ -277,9 +310,8 @@ public static class ProtocolCodec
             return false;
         }
 
-        string version = Encoding.UTF8.GetString(data.Slice(5, versionLength));
         string accountId = Encoding.UTF8.GetString(data.Slice(accountLengthOffset + 4, accountLength));
-        msg = new HelloV2(version, accountId);
+        msg = new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, accountId);
         error = ProtocolErrorCode.None;
         return true;
     }
@@ -383,11 +415,128 @@ public static class ProtocolCodec
 
     private static byte[] EncodeWelcome(Welcome welcome)
     {
-        byte[] data = new byte[1 + 4 + 4];
+        string[] capabilities = welcome.ServerCapabilities ?? ProtocolConstants.ServerCapabilities;
+        int payloadLength = 1 + 4 + 4 + 4 + 4;
+        int capBytes = 0;
+
+        for (int i = 0; i < capabilities.Length; i++)
+        {
+            capBytes += 4 + Encoding.UTF8.GetByteCount(capabilities[i] ?? string.Empty);
+        }
+
+        byte[] data = new byte[payloadLength + capBytes];
         data[0] = ServerWelcome;
         WriteInt32(data, 1, welcome.SessionId.Value);
         WriteInt32(data, 5, welcome.PlayerId.Value);
+        WriteInt32(data, 9, welcome.ProtocolVersion);
+        WriteInt32(data, 13, capabilities.Length);
+
+        int offset = 17;
+        for (int i = 0; i < capabilities.Length; i++)
+        {
+            byte[] cap = Encoding.UTF8.GetBytes(capabilities[i] ?? string.Empty);
+            WriteInt32(data, offset, cap.Length);
+            cap.CopyTo(data.AsSpan(offset + 4));
+            offset += 4 + cap.Length;
+        }
+
         return data;
+    }
+
+    private static bool TryDecodeWelcome(ReadOnlySpan<byte> data, out IServerMessage? msg, out ProtocolErrorCode error)
+    {
+        msg = null;
+        if (!TryReadInt32(data, 1, out int sessionId, out error) ||
+            !TryReadInt32(data, 5, out int playerId, out error))
+        {
+            return false;
+        }
+
+        if (sessionId <= 0 || playerId <= 0)
+        {
+            error = ProtocolErrorCode.ValueOutOfRange;
+            return false;
+        }
+
+        if (data.Length < 13)
+        {
+            msg = new Welcome(new SessionId(sessionId), new PlayerId(playerId));
+            error = ProtocolErrorCode.None;
+            return true;
+        }
+
+        if (!TryReadInt32(data, 9, out int protocolVersion, out error))
+        {
+            return false;
+        }
+
+        if (data.Length < 17)
+        {
+            msg = new Welcome(new SessionId(sessionId), new PlayerId(playerId), protocolVersion, Array.Empty<string>());
+            error = ProtocolErrorCode.None;
+            return true;
+        }
+
+        if (!TryReadInt32(data, 13, out int capabilityCount, out error))
+        {
+            return false;
+        }
+
+        if (capabilityCount < 0)
+        {
+            error = ProtocolErrorCode.InvalidLength;
+            return false;
+        }
+
+        string[] capabilities = new string[capabilityCount];
+        int offset = 17;
+
+        for (int i = 0; i < capabilityCount; i++)
+        {
+            if (!TryReadInt32(data, offset, out int capLength, out error))
+            {
+                return false;
+            }
+
+            if (capLength < 0)
+            {
+                error = ProtocolErrorCode.InvalidLength;
+                return false;
+            }
+
+            int capStart = offset + 4;
+            if (capStart < 0 || capStart > data.Length || capLength > data.Length - capStart)
+            {
+                error = ProtocolErrorCode.Truncated;
+                return false;
+            }
+
+            capabilities[i] = Encoding.UTF8.GetString(data.Slice(capStart, capLength));
+            offset = capStart + capLength;
+        }
+
+        msg = new Welcome(new SessionId(sessionId), new PlayerId(playerId), protocolVersion, capabilities);
+        error = ProtocolErrorCode.None;
+        return true;
+    }
+
+    private static byte[] EncodeDisconnect(Disconnect disconnect)
+    {
+        return new[] { ServerDisconnect, (byte)disconnect.Reason };
+    }
+
+    private static bool TryDecodeDisconnect(ReadOnlySpan<byte> data, out IServerMessage? msg, out ProtocolErrorCode error)
+    {
+        msg = null;
+        if (data.Length < 2)
+        {
+            error = ProtocolErrorCode.Truncated;
+            return false;
+        }
+
+        msg = new Disconnect((DisconnectReason)data[1]);
+        error = ProtocolErrorCode.None;
+        return true;
     }
 
     private static byte[] EncodeEnterZoneAck(EnterZoneAck ack)

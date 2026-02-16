@@ -33,6 +33,103 @@ public sealed class HardeningFuzzTests
         }
     }
 
+
+    [Fact]
+    public void ProtocolCodec_KnownMessage_WithExtraTail_DoesNotThrow()
+    {
+        byte[] payload = ProtocolCodec.Encode(new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, "tail-test"));
+        byte[] withTail = new byte[payload.Length + 3];
+        payload.CopyTo(withTail, 0);
+        withTail[^3] = 0xAA;
+        withTail[^2] = 0xBB;
+        withTail[^1] = 0xCC;
+
+        Exception? ex = Record.Exception(() => ProtocolCodec.TryDecodeClient(withTail, out _, out _));
+
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void TruncatedPayload_DisconnectsWithDecodeError()
+    {
+        ServerHost host = new(ServerConfig.Default(seed: 777));
+        InMemoryEndpoint endpoint = new();
+        host.Connect(endpoint);
+
+        byte[] handshake = ProtocolCodec.Encode(new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, "decode-error"));
+        byte[] truncated = handshake.Take(handshake.Length - 1).ToArray();
+        endpoint.EnqueueToServer(truncated);
+
+        host.ProcessInboundOnce();
+
+        Assert.True(endpoint.IsClosed);
+        Assert.Equal(0, host.Metrics.PlayersConnected);
+
+        Assert.True(endpoint.TryDequeueFromServer(out byte[] disconnectPayload));
+        Assert.True(ProtocolCodec.TryDecodeServer(disconnectPayload, out IServerMessage? msg, out ProtocolErrorCode error));
+        Assert.Equal(ProtocolErrorCode.None, error);
+        Disconnect disconnect = Assert.IsType<Disconnect>(msg);
+        Assert.Equal(DisconnectReason.DecodeError, disconnect.Reason);
+    }
+
+    [Fact]
+    public void VersionMismatch_DoesNotKeepActiveSession()
+    {
+        ServerHost host = new(ServerConfig.Default(seed: 778));
+        InMemoryEndpoint endpoint = new();
+        host.Connect(endpoint);
+
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new HandshakeRequest(999, "mismatch")));
+
+        host.ProcessInboundOnce();
+
+        Assert.True(endpoint.IsClosed);
+        Assert.Equal(0, host.Metrics.PlayersConnected);
+
+        Assert.True(endpoint.TryDequeueFromServer(out byte[] disconnectPayload));
+        Assert.True(ProtocolCodec.TryDecodeServer(disconnectPayload, out IServerMessage? msg, out ProtocolErrorCode error));
+        Assert.Equal(ProtocolErrorCode.None, error);
+        Disconnect disconnect = Assert.IsType<Disconnect>(msg);
+        Assert.Equal(DisconnectReason.VersionMismatch, disconnect.Reason);
+    }
+
+    [Fact]
+    public void Handshake_SendsWelcomeWithProtocolAndCapabilities()
+    {
+        ServerHost host = new(ServerConfig.Default(seed: 780));
+        InMemoryEndpoint endpoint = new();
+        host.Connect(endpoint);
+
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, "caps")));
+        host.ProcessInboundOnce();
+
+        Assert.True(endpoint.TryDequeueFromServer(out byte[] welcomePayload));
+        Assert.True(ProtocolCodec.TryDecodeServer(welcomePayload, out IServerMessage? msg, out ProtocolErrorCode error));
+        Assert.Equal(ProtocolErrorCode.None, error);
+
+        Welcome welcome = Assert.IsType<Welcome>(msg);
+        Assert.Equal(ProtocolConstants.CurrentProtocolVersion, welcome.ProtocolVersion);
+        Assert.Equal(ProtocolConstants.ServerCapabilities, welcome.ServerCapabilities);
+    }
+
+    [Fact]
+    public void UnknownClientMessageType_IsIgnoredWithoutDisconnect()
+    {
+        ServerHost host = new(ServerConfig.Default(seed: 779));
+        InMemoryEndpoint endpoint = new();
+        host.Connect(endpoint);
+
+        endpoint.EnqueueToServer(new byte[] { 250, 1, 2, 3, 4 });
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, "ok")));
+
+        host.ProcessInboundOnce();
+
+        Assert.False(endpoint.IsClosed);
+        Assert.Equal(1, host.Metrics.PlayersConnected);
+        Assert.True(endpoint.TryDequeueFromServer(out byte[] welcomePayload));
+        Assert.True(ProtocolCodec.TryDecodeServer(welcomePayload, out IServerMessage? msg, out _));
+        _ = Assert.IsType<Welcome>(msg);
+    }
     [Fact]
     public void FrameDecoder_Fuzz_FragmentedInput_NoCrash()
     {

@@ -8,6 +8,27 @@ public interface IClientMessage;
 
 public interface IServerMessage;
 
+public enum DisconnectReason : byte
+{
+    Unknown = 0,
+    VersionMismatch = 1,
+    DecodeError = 2
+}
+
+public static class ProtocolConstants
+{
+    public const int CurrentProtocolVersion = 1;
+
+    public static readonly string[] ServerCapabilities =
+    {
+        "mvp4-proto-v1",
+        "snapshots",
+        "replay-verify"
+    };
+}
+
+public sealed record HandshakeRequest(int ProtocolVersion, string AccountId) : IClientMessage;
+
 public sealed record Hello(string ClientVersion) : IClientMessage;
 
 public sealed record HelloV2(string ClientVersion, string AccountId) : IClientMessage;
@@ -22,7 +43,13 @@ public sealed record LeaveZoneRequest(int ZoneId) : IClientMessage;
 
 public sealed record TeleportRequest(int ToZoneId) : IClientMessage;
 
-public sealed record Welcome(SessionId SessionId, PlayerId PlayerId) : IServerMessage;
+public sealed record Welcome(
+    SessionId SessionId,
+    PlayerId PlayerId,
+    int ProtocolVersion = ProtocolConstants.CurrentProtocolVersion,
+    string[]? ServerCapabilities = null) : IServerMessage;
+
+public sealed record Disconnect(DisconnectReason Reason) : IServerMessage;
 
 public sealed record EnterZoneAck(int ZoneId, int EntityId) : IServerMessage;
 

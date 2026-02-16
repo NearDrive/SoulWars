@@ -254,9 +254,25 @@ public sealed class ServerHost
             if (!ProtocolCodec.TryDecodeClient(payload, out IClientMessage? message, out ProtocolErrorCode error))
             {
                 Metrics.IncrementProtocolDecodeErrors();
+                if (error == ProtocolErrorCode.UnknownMessageType)
+                {
+                    _logger.LogWarning(
+                        ServerLogEvents.UnknownClientMessageType,
+                        "UnknownClientMessageType sessionId={SessionId} messageTypeId={MessageTypeId}",
+                        session.SessionId.Value,
+                        payload.Length > 0 ? payload[0] : (byte)0);
+                    continue;
+                }
+
                 _logger.LogWarning(ServerLogEvents.ProtocolDecodeFailed, "ProtocolDecodeFailed sessionId={SessionId} error={Error}", session.SessionId.Value, error);
-                session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Error("protocol_error", error.ToString())));
-                Metrics.IncrementMessagesOut();
+                if (error is ProtocolErrorCode.Truncated or ProtocolErrorCode.InvalidLength)
+                {
+                    session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Disconnect(DisconnectReason.DecodeError)));
+                    Metrics.IncrementMessagesOut();
+                    DisconnectSession(session, "decode_error");
+                    break;
+                }
+
                 continue;
             }
 
@@ -264,11 +280,12 @@ public sealed class ServerHost
 
             switch (message)
             {
-                case Hello hello:
-                    HandleHello(session, hello.ClientVersion, $"legacy-session-{session.SessionId.Value}");
+                case HandshakeRequest handshake:
+                    HandleHandshake(session, handshake);
                     break;
-                case HelloV2 helloV2:
-                    HandleHello(session, helloV2.ClientVersion, helloV2.AccountId);
+                case Hello _:
+                case HelloV2 _:
+                    _logger.LogWarning(ServerLogEvents.UnknownClientMessageType, "UnknownClientMessageType sessionId={SessionId} reason={Reason}", session.SessionId.Value, "legacy_hello_unexpected_after_decode");
                     break;
                 case EnterZoneRequest enterZoneRequest:
                     HandleEnterZone(session, enterZoneRequest, worldCommands);
@@ -289,11 +306,19 @@ public sealed class ServerHost
         }
     }
 
-    private void HandleHello(SessionState session, string clientVersion, string accountId)
+    private void HandleHandshake(SessionState session, HandshakeRequest request)
     {
-        string normalizedAccountId = string.IsNullOrWhiteSpace(accountId)
+        if (request.ProtocolVersion != ProtocolConstants.CurrentProtocolVersion)
+        {
+            session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Disconnect(DisconnectReason.VersionMismatch)));
+            Metrics.IncrementMessagesOut();
+            DisconnectSession(session, "version_mismatch");
+            return;
+        }
+
+        string normalizedAccountId = string.IsNullOrWhiteSpace(request.AccountId)
             ? $"anon-session-{session.SessionId.Value}"
-            : accountId.Trim();
+            : request.AccountId.Trim();
 
         PlayerId playerId = _playerRegistry.GetOrCreate(normalizedAccountId);
         if (_playerRegistry.TryGetActiveSession(playerId, out SessionId existingSessionId) &&
@@ -313,7 +338,7 @@ public sealed class ServerHost
             session.ActiveZoneId = state.ZoneId;
         }
 
-        session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Welcome(session.SessionId, playerId)));
+        session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Welcome(session.SessionId, playerId, ProtocolConstants.CurrentProtocolVersion, ProtocolConstants.ServerCapabilities)));
         Metrics.IncrementMessagesOut();
 
         _auditSink.Emit(AuditEvent.PlayerConnected(_world.Tick, NextAuditSeq(), normalizedAccountId, playerId.Value));
