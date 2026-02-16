@@ -1,5 +1,6 @@
 using Game.App.Headless;
 using Xunit;
+using HeadlessProgram = Game.App.Headless.Program;
 
 namespace Game.Server.Tests;
 
@@ -8,7 +9,7 @@ public sealed class HeadlessCliTests
     [Fact]
     public void Cli_Smoke_StartStop()
     {
-        int exitCode = Program.Main([
+        int exitCode = HeadlessProgram.Main([
             "--seed", "123",
             "--zone-count", "1",
             "--bot-count", "0",
@@ -25,7 +26,7 @@ public sealed class HeadlessCliTests
     [InlineData("--port", "-1")]
     public void Cli_InvalidConfig_ReturnsError(string key, string value)
     {
-        int exitCode = Program.Main([
+        int exitCode = HeadlessProgram.Main([
             key, value,
             "--bot-count", "0",
             "--ticks", "10"
@@ -44,8 +45,8 @@ public sealed class HeadlessCliTests
             ZoneCount: 2,
             BotCount: 8);
 
-        RunResult first = Program.RunOnce(config, ticks: 120);
-        RunResult second = Program.RunOnce(config, ticks: 120);
+        RunResult first = HeadlessProgram.RunOnce(config, ticks: 120);
+        RunResult second = HeadlessProgram.RunOnce(config, ticks: 120);
 
         Assert.Equal(first.Checksum, second.Checksum);
     }
