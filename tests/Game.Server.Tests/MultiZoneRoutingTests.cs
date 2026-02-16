@@ -57,6 +57,29 @@ public sealed class MultiZoneRoutingTests
     }
 
     [Fact]
+    public void Leave_WithWrongZoneId_DoesNotRemoveCurrentEntity()
+    {
+        ServerHost host = new(ServerConfig.Default(seed: 202) with { SnapshotEveryTicks = 1, ZoneCount = 3 });
+        InMemoryEndpoint endpoint = new();
+        host.Connect(endpoint);
+
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("v", "leave-wrong-zone")));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(2)));
+        host.AdvanceTicks(2);
+
+        IServerMessage[] initialMessages = DrainMessages(endpoint);
+        Welcome welcome = Assert.IsType<Welcome>(initialMessages.First(message => message is Welcome));
+        int enteredEntityId = Assert.IsType<EnterZoneAck>(initialMessages.First(message => message is EnterZoneAck)).EntityId;
+
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new LeaveZoneRequestV2(1)));
+        host.AdvanceTicks(1);
+
+        Assert.True(host.TryGetPlayerState(welcome.PlayerId, out PlayerState state));
+        Assert.Equal(enteredEntityId, state.EntityId);
+        Assert.Equal(1, host.CountWorldEntitiesForPlayer(welcome.PlayerId));
+    }
+
+    [Fact]
     public void MultiZone_3Zones_IndependentBots_ChecksumStable_TwoRuns()
     {
         string checksumRun1 = RunMultiZoneScenario(seed: 2025);

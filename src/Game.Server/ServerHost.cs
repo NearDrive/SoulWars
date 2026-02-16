@@ -454,6 +454,7 @@ public sealed class ServerHost
 
         if (session.CurrentZoneId == requestedZoneId &&
             session.EntityId is int currentEntityId &&
+            !HasPendingLeaveCommand(worldCommands, currentEntityId) &&
             _world.TryGetEntityZone(new EntityId(currentEntityId), out ZoneId currentZoneId) &&
             currentZoneId.Value == requestedZoneId)
         {
@@ -466,6 +467,7 @@ public sealed class ServerHost
         int entityId;
 
         if (playerState.EntityId is int existingEntityId &&
+            !HasPendingLeaveCommand(worldCommands, existingEntityId) &&
             _world.TryGetEntityZone(new EntityId(existingEntityId), out ZoneId existingZoneId))
         {
             entityId = existingEntityId;
@@ -496,6 +498,13 @@ public sealed class ServerHost
             entityId);
 
         _auditSink.Emit(AuditEvent.EnterZone(_world.Tick + 1, NextAuditSeq(), session.PlayerId.Value.Value, zoneId, entityId));
+    }
+
+    private static bool HasPendingLeaveCommand(List<WorldCommand> worldCommands, int entityId)
+    {
+        return worldCommands.Any(command =>
+            command.Kind == WorldCommandKind.LeaveZone &&
+            command.EntityId.Value == entityId);
     }
 
 
