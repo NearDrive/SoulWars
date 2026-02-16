@@ -128,9 +128,6 @@ public sealed class BotClient : IAsyncDisposable
                 case Snapshot snapshot:
                     UpdateSnapshotState(snapshot);
                     break;
-                case SnapshotV2 snapshotV2:
-                    UpdateSnapshotState(new Snapshot(snapshotV2.Tick, snapshotV2.ZoneId, snapshotV2.Entities));
-                    break;
             }
 
             onMsg(message);

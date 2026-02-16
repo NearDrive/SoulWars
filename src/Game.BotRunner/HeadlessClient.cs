@@ -60,6 +60,11 @@ public sealed class HeadlessClient : IAsyncDisposable
             try
             {
                 message = ProtocolCodec.DecodeServer(payload);
+                if (message is SnapshotV2 snapshotV2)
+                {
+                    Send(new ClientAckV2(snapshotV2.ZoneId, snapshotV2.SnapshotSeq));
+                }
+
                 return true;
             }
             catch (Exception ex)

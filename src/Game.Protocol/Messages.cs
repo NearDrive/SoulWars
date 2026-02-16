@@ -24,6 +24,7 @@ public static class ProtocolConstants
     {
         "mvp4-proto-v1",
         "snapshots",
+        "snapshot-seq-ack",
         "replay-verify"
     };
 }
@@ -46,6 +47,8 @@ public sealed record LeaveZoneRequest(int ZoneId) : IClientMessage;
 
 public sealed record LeaveZoneRequestV2(int ZoneId) : IClientMessage;
 
+public sealed record ClientAckV2(int ZoneId, int LastSnapshotSeqReceived) : IClientMessage;
+
 public sealed record TeleportRequest(int ToZoneId) : IClientMessage;
 
 public sealed record Welcome(
@@ -58,9 +61,10 @@ public sealed record Disconnect(DisconnectReason Reason) : IServerMessage;
 
 public sealed record EnterZoneAck(int ZoneId, int EntityId) : IServerMessage;
 
-public sealed record Snapshot(int Tick, int ZoneId, SnapshotEntity[] Entities) : IServerMessage;
+public record Snapshot(int Tick, int ZoneId, SnapshotEntity[] Entities) : IServerMessage;
 
-public sealed record SnapshotV2(int Tick, int ZoneId, SnapshotEntity[] Entities) : IServerMessage;
+public sealed record SnapshotV2(int Tick, int ZoneId, int SnapshotSeq, bool IsFull, SnapshotEntity[] Entities)
+    : Snapshot(Tick, ZoneId, Entities);
 
 public sealed record Error(string Code, string Message) : IServerMessage;
 
