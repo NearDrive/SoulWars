@@ -12,7 +12,6 @@ public sealed record LoadResult(WorldState World, int ServerSeed, IReadOnlyList<
 
 public sealed class SqliteGameStore
 {
-    private const string SchemaVersion = "1";
     private const string FormatVersion = "1";
 
     private readonly string _dbPath;
@@ -25,42 +24,7 @@ public sealed class SqliteGameStore
 
     public void InitializeSchema()
     {
-        using SqliteConnection connection = OpenConnection();
-        using SqliteTransaction transaction = connection.BeginTransaction();
-
-        ExecuteNonQuery(connection, transaction, @"
-CREATE TABLE IF NOT EXISTS meta (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);");
-
-        ExecuteNonQuery(connection, transaction, @"
-CREATE TABLE IF NOT EXISTS world_snapshots (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    saved_at_tick INTEGER NOT NULL,
-    world_blob BLOB NOT NULL,
-    checksum TEXT NOT NULL
-);");
-
-        ExecuteNonQuery(connection, transaction, @"
-CREATE TABLE IF NOT EXISTS players (
-    account_id TEXT PRIMARY KEY,
-    player_id INTEGER NOT NULL,
-    entity_id INTEGER NULL,
-    zone_id INTEGER NULL
-);");
-
-        string? existingVersion = ReadMetaValue(connection, transaction, "schema_version");
-        if (existingVersion is null)
-        {
-            WriteMetaValue(connection, transaction, "schema_version", SchemaVersion);
-        }
-        else if (!string.Equals(existingVersion, SchemaVersion, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException($"Unsupported sqlite schema_version '{existingVersion}'. Expected '{SchemaVersion}'.");
-        }
-
-        transaction.Commit();
+        SqliteMigrator.InitializeOrMigrate(_dbPath);
     }
 
     public void SaveWorld(WorldState world, int serverSeed, IReadOnlyList<PlayerRecord> players, string checksumHex)
@@ -77,12 +41,8 @@ CREATE TABLE IF NOT EXISTS players (
         using SqliteTransaction transaction = connection.BeginTransaction();
 
         ExecuteNonQuery(connection, transaction, @"
-INSERT INTO world_snapshots (id, saved_at_tick, world_blob, checksum)
-VALUES (1, $tick, $blob, $checksum)
-ON CONFLICT(id) DO UPDATE SET
-    saved_at_tick = excluded.saved_at_tick,
-    world_blob = excluded.world_blob,
-    checksum = excluded.checksum;",
+INSERT INTO world_snapshots (saved_at_tick, world_blob, checksum)
+VALUES ($tick, $blob, $checksum);",
             ("$tick", world.Tick),
             ("$blob", worldBlob),
             ("$checksum", checksumHex));
@@ -119,13 +79,15 @@ VALUES ($accountId, $playerId, $entityId, $zoneId);",
             throw new FileNotFoundException($"SQLite database file not found at '{_dbPath}'.", _dbPath);
         }
 
+        InitializeSchema();
+
         using SqliteConnection connection = OpenConnection();
         using SqliteTransaction transaction = connection.BeginTransaction(IsolationLevel.Serializable);
 
         string? schemaVersion = ReadMetaValue(connection, transaction, "schema_version");
-        if (!string.Equals(schemaVersion, SchemaVersion, StringComparison.Ordinal))
+        if (!int.TryParse(schemaVersion, out int parsedSchemaVersion) || parsedSchemaVersion != SqliteSchema.CurrentVersion)
         {
-            throw new InvalidOperationException($"Unsupported sqlite schema_version '{schemaVersion ?? "<missing>"}'. Expected '{SchemaVersion}'.");
+            throw new InvalidOperationException($"Unsupported sqlite schema_version '{schemaVersion ?? "<missing>"}'. Expected '{SqliteSchema.CurrentVersion}'.");
         }
 
         string? formatVersion = ReadMetaValue(connection, transaction, "format_version");
@@ -178,7 +140,11 @@ VALUES ($accountId, $playerId, $entityId, $zoneId);",
     {
         using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT world_blob, checksum FROM world_snapshots WHERE id = 1;";
+        command.CommandText = @"
+SELECT world_blob, checksum
+FROM world_snapshots
+ORDER BY saved_at_tick DESC, id DESC
+LIMIT 1;";
 
         using SqliteDataReader reader = command.ExecuteReader();
         if (!reader.Read())

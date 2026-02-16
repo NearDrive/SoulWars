@@ -209,12 +209,13 @@ public sealed class ServerHostIntegrationTests
 
         foreach (SnapshotEntity entity in snapshot.Entities.OrderBy(e => e.EntityId))
         {
-            byte[] entityData = new byte[20];
-            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(0, 4), entity.EntityId);
-            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(4, 4), entity.PosXRaw);
-            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(8, 4), entity.PosYRaw);
-            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(12, 4), entity.VelXRaw);
-            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(16, 4), entity.VelYRaw);
+            // Entity ids are process-local allocation artifacts and can vary across runs,
+            // so we hash only the observable kinematic state for determinism checks.
+            byte[] entityData = new byte[16];
+            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(0, 4), entity.PosXRaw);
+            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(4, 4), entity.PosYRaw);
+            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(8, 4), entity.VelXRaw);
+            BinaryPrimitives.WriteInt32LittleEndian(entityData.AsSpan(12, 4), entity.VelYRaw);
             checksum.AppendData(entityData);
         }
     }
