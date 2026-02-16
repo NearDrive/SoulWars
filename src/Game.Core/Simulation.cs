@@ -9,8 +9,13 @@ public static class Simulation
     private const int DefaultAttackCooldownTicks = 10;
     private const int NpcSpawnMaxAttempts = 64;
 
-    public static WorldState CreateInitialState(SimulationConfig config)
+    public static WorldState CreateInitialState(SimulationConfig config, ZoneDefinitions? zoneDefinitions = null)
     {
+        if (zoneDefinitions is not null)
+        {
+            return CreateInitialStateFromManualDefinitions(config, zoneDefinitions);
+        }
+
         if (config.ZoneCount <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(config), "ZoneCount must be > 0.");
@@ -30,7 +35,7 @@ public static class Simulation
             zones.Add(new ZoneState(
                 Id: zoneId,
                 Map: map,
-                Entities: SpawnNpcs(config, zoneId, map)));
+                Entities: SpawnNpcsProcedural(config, zoneId, map)));
         }
 
         ImmutableArray<ZoneState> initialZones = zones
@@ -41,6 +46,27 @@ public static class Simulation
             Tick: 0,
             Zones: initialZones,
             EntityLocations: BuildEntityLocations(initialZones));
+    }
+
+    private static WorldState CreateInitialStateFromManualDefinitions(SimulationConfig config, ZoneDefinitions definitions)
+    {
+        if (definitions.Zones.IsDefaultOrEmpty)
+        {
+            throw new InvalidOperationException("Zone definitions are empty.");
+        }
+
+        ImmutableArray<ZoneState> zones = definitions.Zones
+            .OrderBy(z => z.ZoneId.Value)
+            .Select(z => new ZoneState(
+                Id: z.ZoneId,
+                Map: BuildMapFromObstacles(config, z.StaticObstacles),
+                Entities: SpawnNpcsFromDefinitions(z)))
+            .ToImmutableArray();
+
+        return new WorldState(
+            Tick: 0,
+            Zones: zones,
+            EntityLocations: BuildEntityLocations(zones));
     }
 
     public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs, SimulationInstrumentation? instrumentation = null)
@@ -226,7 +252,7 @@ public static class Simulation
         return 0;
     }
 
-    private static ImmutableArray<EntityState> SpawnNpcs(SimulationConfig config, ZoneId zoneId, TileMap map)
+    private static ImmutableArray<EntityState> SpawnNpcsProcedural(SimulationConfig config, ZoneId zoneId, TileMap map)
     {
         SimRng rng = new(unchecked((int)Hash32(unchecked((uint)config.Seed), unchecked((uint)zoneId.Value), 0xA11CEu, 0xB07u)));
         ImmutableArray<EntityState>.Builder npcs = ImmutableArray.CreateBuilder<EntityState>(config.NpcCountPerZone);
@@ -256,6 +282,107 @@ public static class Simulation
             .ToImmutable()
             .OrderBy(e => e.Id.Value)
             .ToImmutableArray();
+    }
+
+    private static ImmutableArray<EntityState> SpawnNpcsFromDefinitions(ZoneDefinition zone)
+    {
+        List<Vec2Fix> orderedSpawns = new();
+
+        foreach (NpcSpawnDefinition spawn in zone.NpcSpawns
+                     .OrderBy(s => s.NpcArchetypeId, StringComparer.Ordinal)
+                     .ThenBy(s => s.Level)
+                     .ThenBy(s => s.Count))
+        {
+            for (int i = 0; i < spawn.Count; i++)
+            {
+                orderedSpawns.Add(spawn.SpawnPoints[i]);
+            }
+        }
+
+        if (orderedSpawns.Count > 99_999)
+        {
+            throw new InvalidOperationException($"Zone {zone.ZoneId.Value} defines too many NPC spawns ({orderedSpawns.Count}).");
+        }
+
+        ImmutableArray<EntityState>.Builder npcs = ImmutableArray.CreateBuilder<EntityState>(orderedSpawns.Count);
+        for (int i = 0; i < orderedSpawns.Count; i++)
+        {
+            Vec2Fix position = orderedSpawns[i];
+            int entityIdValue = (zone.ZoneId.Value * 100000) + i + 1;
+
+            npcs.Add(new EntityState(
+                Id: new EntityId(entityIdValue),
+                Pos: position,
+                Vel: Vec2Fix.Zero,
+                MaxHp: DefaultMaxHp,
+                Hp: DefaultMaxHp,
+                IsAlive: true,
+                AttackRange: Fix32.FromInt(1),
+                AttackDamage: DefaultAttackDamage,
+                AttackCooldownTicks: DefaultAttackCooldownTicks,
+                LastAttackTick: -DefaultAttackCooldownTicks,
+                Kind: EntityKind.Npc,
+                NextWanderChangeTick: 0,
+                WanderX: 0,
+                WanderY: 0));
+
+        }
+
+        return npcs
+            .ToImmutable()
+            .OrderBy(e => e.Id.Value)
+            .ToImmutableArray();
+    }
+
+    private static TileMap BuildMapFromObstacles(SimulationConfig config, ImmutableArray<ZoneAabb> obstacles)
+    {
+        ImmutableArray<TileKind>.Builder tiles = ImmutableArray.CreateBuilder<TileKind>(config.MapWidth * config.MapHeight);
+
+        for (int y = 0; y < config.MapHeight; y++)
+        {
+            for (int x = 0; x < config.MapWidth; x++)
+            {
+                bool border = x == 0 || y == 0 || x == config.MapWidth - 1 || y == config.MapHeight - 1;
+                if (border)
+                {
+                    tiles.Add(TileKind.Solid);
+                    continue;
+                }
+
+                tiles.Add(TileOverlapsObstacle(x, y, obstacles)
+                    ? TileKind.Solid
+                    : TileKind.Empty);
+            }
+        }
+
+        return new TileMap(config.MapWidth, config.MapHeight, tiles.MoveToImmutable());
+    }
+
+    private static bool TileOverlapsObstacle(int tileX, int tileY, ImmutableArray<ZoneAabb> obstacles)
+    {
+        Fix32 tileMinX = Fix32.FromInt(tileX);
+        Fix32 tileMinY = Fix32.FromInt(tileY);
+        Fix32 tileMaxX = Fix32.FromInt(tileX + 1);
+        Fix32 tileMaxY = Fix32.FromInt(tileY + 1);
+
+        foreach (ZoneAabb obstacle in obstacles)
+        {
+            Fix32 obstacleMinX = obstacle.Center.X - obstacle.HalfExtents.X;
+            Fix32 obstacleMaxX = obstacle.Center.X + obstacle.HalfExtents.X;
+            Fix32 obstacleMinY = obstacle.Center.Y - obstacle.HalfExtents.Y;
+            Fix32 obstacleMaxY = obstacle.Center.Y + obstacle.HalfExtents.Y;
+
+            bool overlaps = tileMinX < obstacleMaxX
+                            && tileMaxX > obstacleMinX
+                            && tileMinY < obstacleMaxY
+                            && tileMaxY > obstacleMinY;
+            if (overlaps)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static Vec2Fix FindDeterministicNpcSpawn(TileMap map, Fix32 radius, SimRng rng)

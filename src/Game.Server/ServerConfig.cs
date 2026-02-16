@@ -27,7 +27,8 @@ public readonly record struct ServerConfig(
     Fix32 MaxMoveVectorLen,
     InvariantOptions Invariants,
     bool EnableStructuredLogs,
-    bool EnableMetrics)
+    bool EnableMetrics,
+    string? ZoneDefinitionsPath)
 {
     public Fix32 AoiRadius => VisionRadius;
 
@@ -74,5 +75,6 @@ public readonly record struct ServerConfig(
         MaxMoveVectorLen: Fix32.One,
         Invariants: InvariantOptions.Enabled,
         EnableStructuredLogs: false,
-        EnableMetrics: true);
+        EnableMetrics: true,
+        ZoneDefinitionsPath: null);
 }

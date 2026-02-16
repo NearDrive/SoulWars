@@ -144,7 +144,8 @@ public static class Program
         return ServerConfig.Default(appConfig.Seed) with
         {
             Seed = appConfig.Seed,
-            ZoneCount = appConfig.ZoneCount
+            ZoneCount = appConfig.ZoneCount,
+            ZoneDefinitionsPath = appConfig.ZoneDefinitionsPath
         };
     }
 
@@ -339,7 +340,7 @@ public static class Program
     private static void PrintUsage()
     {
         Console.WriteLine("Usage:");
-        Console.WriteLine("  Game.App.Headless --seed <int> --port <int> --sqlite <path> --zone-count <int> --bot-count <int> [--ticks <int>]");
+        Console.WriteLine("  Game.App.Headless --seed <int> --port <int> --sqlite <path> --zone-count <int> --bot-count <int> [--zone-definitions <path>] [--ticks <int>]");
         Console.WriteLine("  (alias: --ports for --port)");
         Console.WriteLine("Legacy modes:");
         Console.WriteLine("  Game.App.Headless --verify-mvp1 | --run-scenario | --stress-mvp2 | --soak | --perf-budgets");

@@ -5,4 +5,5 @@ public sealed record ServerAppConfig(
     int Port,
     string? SqlitePath,
     int ZoneCount,
-    int BotCount);
+    int BotCount,
+    string? ZoneDefinitionsPath = null);

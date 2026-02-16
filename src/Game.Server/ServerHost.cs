@@ -19,6 +19,7 @@ public sealed class ServerHost
     private readonly SimulationInstrumentation _simulationInstrumentation;
     private readonly DenyList _denyList = new();
     private readonly Dictionary<string, Queue<int>> _abuseDisconnectTicksByEndpoint = new(StringComparer.Ordinal);
+    private readonly ZoneDefinitions? _zoneDefinitions;
 
     private int _nextSessionId = 1;
     private int _nextEntityId = 1;
@@ -38,11 +39,19 @@ public sealed class ServerHost
 
         _serverConfig = config;
         _simulationConfig = config.ToSimulationConfig();
-        _world = bootstrap?.World ?? Simulation.CreateInitialState(_simulationConfig);
+        _zoneDefinitions = string.IsNullOrWhiteSpace(config.ZoneDefinitionsPath)
+            ? null
+            : ZoneDefinitionsLoader.LoadFromDirectory(config.ZoneDefinitionsPath);
+        _world = bootstrap?.World ?? Simulation.CreateInitialState(_simulationConfig, _zoneDefinitions);
         _nextEntityId = Math.Max(_nextEntityId, ComputeNextEntityId(_world));
         if (bootstrap is not null)
         {
             _playerRegistry.LoadFromRecords(bootstrap.Players);
+        }
+
+        if (_zoneDefinitions is not null)
+        {
+            ServerInvariants.ValidateManualZoneDefinitions(_world, _zoneDefinitions, _world.Tick);
         }
         ILoggerFactory factory = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = factory.CreateLogger<ServerHost>();
@@ -250,6 +259,11 @@ public sealed class ServerHost
                 Players: _playerRegistry.OrderedStates().ToArray(),
                 Snapshots: _recentSnapshots.ToArray(),
                 World: _world));
+        }
+
+        if (_zoneDefinitions is not null)
+        {
+            ServerInvariants.ValidateManualZoneDefinitions(_world, _zoneDefinitions, _world.Tick);
         }
         _lastTick = _world.Tick;
         _recentSnapshots.Clear();
@@ -531,6 +545,11 @@ public sealed class ServerHost
 
         int zoneId = playerState.ZoneId ?? requestedZoneId;
         int entityId;
+
+        if (_zoneDefinitions is not null && !_zoneDefinitions.TryGetZone(new ZoneId(zoneId), out _))
+        {
+            throw new InvalidOperationException($"Zone {zoneId} is not defined in manual zone definitions.");
+        }
 
         if (playerState.EntityId is int existingEntityId &&
             !HasPendingLeaveCommand(worldCommands, existingEntityId) &&

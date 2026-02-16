@@ -9,7 +9,8 @@ public static class ServerAppConfigParser
             Port: 7777,
             SqlitePath: null,
             ZoneCount: 1,
-            BotCount: 0);
+            BotCount: 0,
+            ZoneDefinitionsPath: null);
         error = string.Empty;
 
         if (args is null)
@@ -52,6 +53,9 @@ public static class ServerAppConfigParser
                         break;
                     case "--bot-count":
                         config = config with { BotCount = ParseInt(value, "--bot-count") };
+                        break;
+                    case "--zone-definitions":
+                        config = config with { ZoneDefinitionsPath = string.IsNullOrWhiteSpace(value) ? null : value };
                         break;
                     default:
                         error = $"Unknown argument '{key}'.";
