@@ -1,4 +1,5 @@
 using Game.BotRunner;
+using Game.Core;
 using Game.Server;
 using Microsoft.Extensions.Logging;
 
@@ -15,20 +16,135 @@ public static class Program
 
     public static int Main(string[] args)
     {
-        if (args.Length != 1)
+        if (TryRunLegacyMode(args, out int legacyExitCode))
         {
+            return legacyExitCode;
+        }
+
+        if (!TryParseTicks(args, out int ticks, out string[] configArgs, out string tickError))
+        {
+            Console.Error.WriteLine(tickError);
             PrintUsage();
             return 1;
         }
 
-        return args[0] switch
+        if (!ServerAppConfigParser.TryParse(configArgs, out ServerAppConfig appConfig, out string configError))
+        {
+            Console.Error.WriteLine(configError);
+            PrintUsage();
+            return 1;
+        }
+
+        if (ticks <= 0)
+        {
+            Console.Error.WriteLine("--ticks must be greater than 0.");
+            PrintUsage();
+            return 1;
+        }
+
+        RunResult result = RunOnce(appConfig, ticks);
+        Console.WriteLine($"checksum={NormalizeChecksum(result.Checksum)}");
+        Console.WriteLine($"ticks={result.Ticks}");
+        Console.WriteLine($"zones={appConfig.ZoneCount}");
+        Console.WriteLine($"bots={appConfig.BotCount}");
+        Console.WriteLine($"port={appConfig.Port}");
+
+        return ExitSuccess;
+    }
+
+    public static RunResult RunOnce(ServerAppConfig appConfig, int ticks)
+    {
+        ServerConfig serverConfig = CreateRuntimeConfig(appConfig);
+
+        if (appConfig.BotCount > 0)
+        {
+            ScenarioConfig scenarioConfig = new(
+                ServerSeed: appConfig.Seed,
+                TickCount: ticks,
+                SnapshotEveryTicks: 1,
+                BotCount: appConfig.BotCount,
+                ZoneId: 1,
+                BaseBotSeed: unchecked(appConfig.Seed + 5000),
+                ZoneCount: appConfig.ZoneCount,
+                NpcCount: 0,
+                VisionRadiusTiles: 12);
+
+            ScenarioResult result = ScenarioRunner.RunDetailed(scenarioConfig);
+            return new RunResult(result.Checksum, result.Ticks);
+        }
+
+        ServerHost host = new(serverConfig);
+        host.AdvanceTicks(ticks);
+
+        if (!string.IsNullOrWhiteSpace(appConfig.SqlitePath))
+        {
+            host.SaveToSqlite(appConfig.SqlitePath);
+        }
+
+        return new RunResult(StateChecksum.Compute(host.CurrentWorld), ticks);
+    }
+
+    private static bool TryRunLegacyMode(string[] args, out int exitCode)
+    {
+        exitCode = ExitSuccess;
+        if (args.Length != 1)
+        {
+            return false;
+        }
+
+        exitCode = args[0] switch
         {
             "--verify-mvp1" => VerifyMvp1(),
             "--run-scenario" => RunScenario(),
             "--stress-mvp2" => RunStressMvp2(),
             "--soak" => RunSoak(),
             "--perf-budgets" => RunPerfBudgets(),
-            _ => UnknownMode(args[0])
+            _ => int.MinValue
+        };
+
+        return exitCode != int.MinValue;
+    }
+
+    private static bool TryParseTicks(string[] args, out int ticks, out string[] configArgs, out string error)
+    {
+        ticks = 50;
+        error = string.Empty;
+        List<string> filtered = new(args.Length);
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            string arg = args[i];
+            if (!string.Equals(arg, "--ticks", StringComparison.Ordinal))
+            {
+                filtered.Add(arg);
+                continue;
+            }
+
+            if (i + 1 >= args.Length)
+            {
+                configArgs = Array.Empty<string>();
+                error = "Argument '--ticks' requires a value.";
+                return false;
+            }
+
+            if (!int.TryParse(args[++i], out ticks))
+            {
+                configArgs = Array.Empty<string>();
+                error = $"Argument '--ticks' expects an integer value. Received '{args[i]}'.";
+                return false;
+            }
+        }
+
+        configArgs = filtered.ToArray();
+        return true;
+    }
+
+    private static ServerConfig CreateRuntimeConfig(ServerAppConfig appConfig)
+    {
+        return ServerConfig.Default(appConfig.Seed) with
+        {
+            Seed = appConfig.Seed,
+            ZoneCount = appConfig.ZoneCount
         };
     }
 
@@ -220,17 +336,13 @@ public static class Program
         return budgetResult.Ok ? ExitSuccess : ExitPerfBudgetFail;
     }
 
-
-    private static int UnknownMode(string mode)
-    {
-        Console.Error.WriteLine($"Unknown mode: {mode}");
-        PrintUsage();
-        return 1;
-    }
-
     private static void PrintUsage()
     {
-        Console.WriteLine("Usage: Game.App.Headless --verify-mvp1 | --run-scenario | --stress-mvp2 | --soak | --perf-budgets");
+        Console.WriteLine("Usage:");
+        Console.WriteLine("  Game.App.Headless --seed <int> --port <int> --sqlite <path> --zone-count <int> --bot-count <int> [--ticks <int>]");
+        Console.WriteLine("  (alias: --ports for --port)");
+        Console.WriteLine("Legacy modes:");
+        Console.WriteLine("  Game.App.Headless --verify-mvp1 | --run-scenario | --stress-mvp2 | --soak | --perf-budgets");
     }
 
     private static FixtureInput LoadReplayFixture()
@@ -283,5 +395,7 @@ public static class Program
         return normalized.ToLowerInvariant();
     }
 }
+
+public sealed record RunResult(string Checksum, int Ticks);
 
 internal sealed record FixtureInput(string DisplayPath, Stream Stream);
