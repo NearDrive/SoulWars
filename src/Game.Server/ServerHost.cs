@@ -42,7 +42,8 @@ public sealed class ServerHost
         }
         ILoggerFactory factory = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = factory.CreateLogger<ServerHost>();
-        Metrics = metrics ?? new ServerMetrics();
+        bool enableMetrics = config.EnableMetrics;
+        Metrics = metrics ?? new ServerMetrics(enableMetrics);
         _auditSink = auditSink ?? NullAuditSink.Instance;
         _lastTick = _world.Tick;
     }
@@ -85,9 +86,25 @@ public sealed class ServerHost
     public void StepOnce()
     {
         long start = System.Diagnostics.Stopwatch.GetTimestamp();
+        long messagesInBefore = Metrics.MessagesIn;
+        long messagesOutBefore = Metrics.MessagesOut;
+
         ProcessInboundOnce();
         AdvanceSimulationOnce();
-        Metrics.RecordTick(System.Diagnostics.Stopwatch.GetTimestamp() - start);
+
+        double simStepMs = (System.Diagnostics.Stopwatch.GetTimestamp() - start) * 1000d / System.Diagnostics.Stopwatch.Frequency;
+        long deltaIn = Metrics.MessagesIn - messagesInBefore;
+        long deltaOut = Metrics.MessagesOut - messagesOutBefore;
+        int messagesIn = (int)Math.Clamp(deltaIn, 0, int.MaxValue);
+        int messagesOut = (int)Math.Clamp(deltaOut, 0, int.MaxValue);
+        int sessionCount = _sessions.Count;
+
+        Metrics.OnTickCompleted(_world.Tick, simStepMs, messagesIn, messagesOut, sessionCount);
+        if (_serverConfig.EnableStructuredLogs)
+        {
+            string json = LogJson.TickEntry(_world.Tick, sessionCount, messagesIn, messagesOut, simStepMs);
+            _logger.LogInformation("{Json}", json);
+        }
     }
 
     public void ProcessInboundOnce()
@@ -221,7 +238,7 @@ public sealed class ServerHost
         }
     }
 
-    public ServerMetricsSnapshot SnapshotMetrics() => Metrics.Snapshot(_world.Tick, _serverConfig.TickHz);
+    public MetricsSnapshot SnapshotMetrics() => Metrics.Snapshot(_serverConfig.TickHz);
 
     public bool WorldContainsEntity(int entityId)
     {

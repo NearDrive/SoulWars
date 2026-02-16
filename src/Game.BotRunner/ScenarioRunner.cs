@@ -168,9 +168,9 @@ public sealed class ScenarioRunner
                 _logger.LogInformation(BotRunnerLogEvents.BotSummary, "BotSummary botIndex={BotIndex} snapshots={Snapshots} errors={Errors}", stat.BotIndex, stat.SnapshotsReceived, stat.Errors);
             }
 
-            ServerMetricsSnapshot metrics = host.SnapshotMetrics();
-            double tickAvgMs = metrics.TickAvgMsWindow > 0 ? metrics.TickAvgMsWindow : double.Epsilon;
-            double tickP95Ms = metrics.TickP95MsWindow >= tickAvgMs ? metrics.TickP95MsWindow : tickAvgMs;
+            MetricsSnapshot metrics = host.SnapshotMetrics();
+            double tickAvgMs = metrics.TickP50Ms > 0 ? metrics.TickP50Ms : double.Epsilon;
+            double tickP95Ms = metrics.TickP95Ms >= tickAvgMs ? metrics.TickP95Ms : tickAvgMs;
 
             _logger.LogInformation(BotRunnerLogEvents.ScenarioEnd, "ScenarioEnd checksum={Checksum} ticks={Ticks}", finalChecksum, cfg.TickCount);
 
@@ -178,11 +178,11 @@ public sealed class ScenarioRunner
                 Checksum: finalChecksum,
                 Ticks: cfg.TickCount,
                 Bots: cfg.BotCount,
-                MessagesIn: metrics.MessagesInTotal,
-                MessagesOut: metrics.MessagesOutTotal,
+                MessagesIn: host.Metrics.MessagesIn,
+                MessagesOut: host.Metrics.MessagesOut,
                 TickAvgMs: tickAvgMs,
                 TickP95Ms: tickP95Ms,
-                PlayersConnectedMax: metrics.PlayersConnected,
+                PlayersConnectedMax: host.Metrics.PlayersConnected,
                 BotStats: stats,
                 InvariantFailures: invariantFailures);
         }

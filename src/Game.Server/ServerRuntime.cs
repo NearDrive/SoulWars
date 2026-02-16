@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -25,7 +24,7 @@ public sealed class ServerRuntime : IAsyncDisposable
 
     public async Task StartAsync(ServerConfig cfg, IPAddress ip, int port, CancellationToken ct, ServerBootstrap? bootstrap = null)
     {
-        Host = new ServerHost(cfg, LoggerFactory, bootstrap: bootstrap);
+        Host = new ServerHost(cfg, LoggerFactory, metrics: new ServerMetrics(cfg.EnableMetrics), bootstrap: bootstrap);
         await _transport.StartAsync(ip, port, ct).ConfigureAwait(false);
         _logger.LogInformation(
             ServerLogEvents.ServerStarted,
@@ -37,11 +36,8 @@ public sealed class ServerRuntime : IAsyncDisposable
 
     public void StepOnce()
     {
-        long start = Stopwatch.GetTimestamp();
         PumpTransportOnce();
-        Host.ProcessInboundOnce();
-        Host.AdvanceSimulationOnce();
-        Host.Metrics.RecordTick(Stopwatch.GetTimestamp() - start);
+        Host.StepOnce();
     }
 
     public void ProcessInboundOnce()
