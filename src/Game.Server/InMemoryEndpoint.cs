@@ -9,6 +9,10 @@ public sealed class InMemoryEndpoint : IServerEndpoint, IClientEndpoint
 
     public bool IsClosed { get; private set; }
 
+    public int PendingToServerCount => _toServer.Count;
+
+    public int PendingToClientCount => _toClient.Count;
+
     public bool TryDequeueToServer(out byte[] msg) => _toServer.TryDequeue(out msg!);
 
     public void EnqueueToServer(byte[] msg)

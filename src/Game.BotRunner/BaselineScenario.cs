@@ -22,4 +22,15 @@ public static class BaselineScenario
         ZoneCount: 2,
         NpcCount: 5,
         VisionRadiusTiles: 12);
+
+    public static ScenarioConfig CreateSoakPreset() => new(
+        ServerSeed: 12345,
+        TickCount: 10_000,
+        SnapshotEveryTicks: 10,
+        BotCount: 50,
+        ZoneId: 1,
+        BaseBotSeed: 54_321,
+        ZoneCount: 1,
+        NpcCount: 0,
+        VisionRadiusTiles: 12);
 }
