@@ -64,7 +64,7 @@ public sealed class ServerRuntime : IAsyncDisposable
     {
         foreach (IServerEndpoint endpoint in _transport.DrainAcceptedEndpoints())
         {
-            Host.Connect(endpoint);
+            Host.TryConnect(endpoint, out _, out _);
         }
     }
 }

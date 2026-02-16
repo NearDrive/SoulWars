@@ -13,7 +13,11 @@ public enum DisconnectReason : byte
     Unknown = 0,
     VersionMismatch = 1,
     DecodeError = 2,
-    PayloadTooLarge = 3
+    PayloadTooLarge = 3,
+    ConnLimitExceeded = 4,
+    RateLimitExceeded = 5,
+    DenyListed = 6,
+    ProtocolViolation = 7
 }
 
 public static class ProtocolConstants

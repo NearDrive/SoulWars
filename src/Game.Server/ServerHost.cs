@@ -17,6 +17,8 @@ public sealed class ServerHost
     private readonly IAuditSink _auditSink;
     private readonly IAoiProvider _aoiProvider;
     private readonly SimulationInstrumentation _simulationInstrumentation;
+    private readonly DenyList _denyList = new();
+    private readonly Dictionary<string, Queue<int>> _abuseDisconnectTicksByEndpoint = new(StringComparer.Ordinal);
 
     private int _nextSessionId = 1;
     private int _nextEntityId = 1;
@@ -67,16 +69,47 @@ public sealed class ServerHost
 
     public PerfCounters Perf { get; }
 
-    public SessionId Connect(IServerEndpoint endpoint)
+    public bool TryConnect(IServerEndpoint endpoint, out SessionId sessionId, out DisconnectReason? denyReason)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
-        SessionId sessionId = new(_nextSessionId++);
+        _denyList.CleanupExpired(_world.Tick);
+        if (_denyList.IsDenied(endpoint.EndpointKey, _world.Tick))
+        {
+            _logger.LogWarning(ServerLogEvents.AbuseDisconnect, "ConnectionRejected tick={Tick} endpoint={Endpoint} reason={Reason}", _world.Tick, endpoint.EndpointKey, DisconnectReason.DenyListed);
+            SendDisconnectAndCloseEndpoint(endpoint, DisconnectReason.DenyListed);
+            denyReason = DisconnectReason.DenyListed;
+            sessionId = default;
+            return false;
+        }
+
+        if (_sessions.Count >= _serverConfig.MaxConcurrentSessions ||
+            CountActiveSessionsForEndpoint(endpoint.EndpointKey) >= _serverConfig.MaxConnectionsPerIp)
+        {
+            _logger.LogWarning(ServerLogEvents.AbuseDisconnect, "ConnectionRejected tick={Tick} endpoint={Endpoint} reason={Reason}", _world.Tick, endpoint.EndpointKey, DisconnectReason.ConnLimitExceeded);
+            SendDisconnectAndCloseEndpoint(endpoint, DisconnectReason.ConnLimitExceeded);
+            denyReason = DisconnectReason.ConnLimitExceeded;
+            sessionId = default;
+            return false;
+        }
+
+        sessionId = new SessionId(_nextSessionId++);
         SessionState session = new(sessionId, endpoint);
         _sessions[sessionId.Value] = session;
         Metrics.SetPlayersConnected(_sessions.Count);
 
         _logger.LogInformation(ServerLogEvents.SessionConnected, "SessionConnected sessionId={SessionId}", sessionId.Value);
+        denyReason = null;
+        return true;
+    }
+
+    public SessionId Connect(IServerEndpoint endpoint)
+    {
+        if (!TryConnect(endpoint, out SessionId sessionId, out DisconnectReason? reason))
+        {
+            throw new InvalidOperationException($"Connection rejected: {reason}");
+        }
+
         return sessionId;
     }
 
@@ -123,6 +156,7 @@ public sealed class ServerHost
     public void ProcessInboundOnce()
     {
         int targetTick = _world.Tick + 1;
+        _denyList.CleanupExpired(_world.Tick);
 
         foreach (SessionState session in OrderedSessions().ToArray())
         {
@@ -272,12 +306,19 @@ public sealed class ServerHost
     {
         while (session.Endpoint.TryDequeueToServer(out byte[] payload))
         {
+            ResetSessionRateCountersForTick(session, targetTick);
+            session.MsgsThisTick++;
+            session.BytesThisTick += payload.Length;
+            if (session.MsgsThisTick > _serverConfig.MaxMsgsPerTick || session.BytesThisTick > _serverConfig.MaxBytesPerTick)
+            {
+                DisconnectWithReason(session, DisconnectReason.RateLimitExceeded);
+                break;
+            }
+
             if (payload.Length > _serverConfig.MaxPayloadBytes)
             {
                 _logger.LogWarning(ServerLogEvents.OversizedMessage, "OversizedMessage sessionId={SessionId} payloadBytes={PayloadBytes}", session.SessionId.Value, payload.Length);
-                EnqueueToClient(session, ProtocolCodec.Encode(new Disconnect(DisconnectReason.PayloadTooLarge)));
-                Metrics.IncrementMessagesOut();
-                DisconnectSession(session, "payload_too_large");
+                DisconnectWithReason(session, DisconnectReason.PayloadTooLarge);
                 break;
             }
 
@@ -292,9 +333,7 @@ public sealed class ServerHost
             {
                 Metrics.IncrementProtocolDecodeErrors();
                 _logger.LogWarning(ServerLogEvents.ProtocolDecodeFailed, ex, "ProtocolDecodeFailed sessionId={SessionId} error={Error}", session.SessionId.Value, "exception");
-                EnqueueToClient(session, ProtocolCodec.Encode(new Disconnect(DisconnectReason.DecodeError)));
-                Metrics.IncrementMessagesOut();
-                DisconnectSession(session, "decode_exception");
+                DisconnectWithReason(session, DisconnectReason.DecodeError);
                 break;
             }
 
@@ -314,9 +353,7 @@ public sealed class ServerHost
                 _logger.LogWarning(ServerLogEvents.ProtocolDecodeFailed, "ProtocolDecodeFailed sessionId={SessionId} error={Error}", session.SessionId.Value, error);
                 if (error is ProtocolErrorCode.Truncated or ProtocolErrorCode.InvalidLength)
                 {
-                    EnqueueToClient(session, ProtocolCodec.Encode(new Disconnect(DisconnectReason.DecodeError)));
-                    Metrics.IncrementMessagesOut();
-                    DisconnectSession(session, "decode_error");
+                    DisconnectWithReason(session, DisconnectReason.DecodeError);
                     break;
                 }
 
@@ -425,9 +462,7 @@ public sealed class ServerHost
     {
         if (request.ProtocolVersion != ProtocolConstants.CurrentProtocolVersion)
         {
-            EnqueueToClient(session, ProtocolCodec.Encode(new Disconnect(DisconnectReason.VersionMismatch)));
-            Metrics.IncrementMessagesOut();
-            DisconnectSession(session, "version_mismatch");
+            DisconnectWithReason(session, DisconnectReason.VersionMismatch);
             return;
         }
 
@@ -882,6 +917,25 @@ public sealed class ServerHost
 
     public PerfSnapshot SnapshotAndResetPerfWindow() => Perf.SnapshotAndResetWindow();
 
+    private int CountActiveSessionsForEndpoint(string endpointKey)
+    {
+        return _sessions.Values.Count(s => string.Equals(s.Endpoint.EndpointKey, endpointKey, StringComparison.Ordinal));
+    }
+
+    private void SendDisconnectAndCloseEndpoint(IServerEndpoint endpoint, DisconnectReason reason)
+    {
+        try
+        {
+            endpoint.EnqueueToClient(ProtocolCodec.Encode(new Disconnect(reason)));
+            Metrics.IncrementMessagesOut();
+        }
+        catch
+        {
+        }
+
+        endpoint.Close();
+    }
+
     private void EnqueueToClient(SessionState session, byte[] payload)
     {
         session.Endpoint.EnqueueToClient(payload);
@@ -890,6 +944,64 @@ public sealed class ServerHost
     }
 
     private int NextAuditSeq() => ++_auditSeq;
+
+    private void ResetSessionRateCountersForTick(SessionState session, int tick)
+    {
+        if (session.LastTick != tick)
+        {
+            session.LastTick = tick;
+            session.MsgsThisTick = 0;
+            session.BytesThisTick = 0;
+        }
+    }
+
+    private void DisconnectWithReason(SessionState session, DisconnectReason reason)
+    {
+        EnqueueToClient(session, ProtocolCodec.Encode(new Disconnect(reason)));
+        Metrics.IncrementMessagesOut();
+        LogAbuseDisconnect(session, reason);
+
+        if (reason is DisconnectReason.RateLimitExceeded or DisconnectReason.PayloadTooLarge or DisconnectReason.DecodeError or DisconnectReason.ProtocolViolation)
+        {
+            RegisterAbuseStrike(session.Endpoint.EndpointKey);
+        }
+
+        DisconnectSession(session, reason.ToString());
+    }
+
+    private void RegisterAbuseStrike(string endpointKey)
+    {
+        if (!_abuseDisconnectTicksByEndpoint.TryGetValue(endpointKey, out Queue<int>? strikes))
+        {
+            strikes = new Queue<int>();
+            _abuseDisconnectTicksByEndpoint[endpointKey] = strikes;
+        }
+
+        strikes.Enqueue(_world.Tick);
+        int minTick = _world.Tick - _serverConfig.AbuseWindowTicks;
+        while (strikes.Count > 0 && strikes.Peek() < minTick)
+        {
+            strikes.Dequeue();
+        }
+
+        if (strikes.Count >= _serverConfig.AbuseStrikesToDeny)
+        {
+            _denyList.Deny(endpointKey, _world.Tick + _serverConfig.DenyTicks);
+        }
+    }
+
+    private void LogAbuseDisconnect(SessionState session, DisconnectReason reason)
+    {
+        _logger.LogWarning(
+            ServerLogEvents.AbuseDisconnect,
+            "AbuseDisconnect tick={Tick} sessionId={SessionId} endpoint={Endpoint} reason={Reason} msgsThisTick={MsgsThisTick} bytesThisTick={BytesThisTick}",
+            _world.Tick,
+            session.SessionId.Value,
+            session.Endpoint.EndpointKey,
+            reason,
+            session.MsgsThisTick,
+            session.BytesThisTick);
+    }
 
     private void DisconnectSession(SessionState session, string reason)
     {
@@ -951,6 +1063,12 @@ public sealed class ServerHost
         public int LastTickSeen { get; set; } = -1;
 
         public int InputsAcceptedThisTick { get; set; }
+
+        public int LastTick { get; set; } = -1;
+
+        public int MsgsThisTick { get; set; }
+
+        public int BytesThisTick { get; set; }
 
         public int LastSnapshotTick { get; set; } = -1;
 

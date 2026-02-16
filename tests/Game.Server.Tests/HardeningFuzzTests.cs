@@ -259,7 +259,13 @@ public sealed class HardeningFuzzTests
     [Fact]
     public void InputRateLimit_PerTick_OnlyAcceptsConfiguredMax()
     {
-        ServerConfig config = ServerConfig.Default(seed: 809) with { SnapshotEveryTicks = 1, MaxInputsPerTickPerSession = 8 };
+        ServerConfig config = ServerConfig.Default(seed: 809) with
+        {
+            SnapshotEveryTicks = 1,
+            MaxInputsPerTickPerSession = 8,
+            MaxMsgsPerTick = 256,
+            MaxBytesPerTick = 256_000
+        };
         ServerHost host = new(config);
         InMemoryEndpoint endpoint = new();
         host.Connect(endpoint);
