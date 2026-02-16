@@ -17,7 +17,9 @@ public readonly record struct ServerConfig(
     int MaxInputsPerTickPerSession,
     Fix32 MaxMoveSpeed,
     Fix32 MaxMoveVectorLen,
-    InvariantOptions Invariants)
+    InvariantOptions Invariants,
+    bool EnableStructuredLogs,
+    bool EnableMetrics)
 {
     public SimulationConfig ToSimulationConfig()
     {
@@ -50,5 +52,7 @@ public readonly record struct ServerConfig(
         MaxInputsPerTickPerSession: 8,
         MaxMoveSpeed: Fix32.FromInt(4),
         MaxMoveVectorLen: Fix32.One,
-        Invariants: InvariantOptions.Enabled);
+        Invariants: InvariantOptions.Enabled,
+        EnableStructuredLogs: false,
+        EnableMetrics: true);
 }

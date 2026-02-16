@@ -1,31 +1,29 @@
-using System.Diagnostics;
-
 namespace Game.Server;
 
 public sealed class ServerMetrics
 {
     private readonly object _gate = new();
     private readonly double[] _tickWindowMs;
+    private readonly bool _enabled;
+
     private int _tickWindowCount;
     private int _tickWindowWriteIndex;
-
     private int _playersConnected;
+
+    private int _tickCount;
     private long _messagesIn;
     private long _messagesOut;
     private long _protocolDecodeErrors;
     private long _transportErrors;
 
-    private int _lastSnapshotTick;
-    private long _lastSnapshotMessagesIn;
-    private long _lastSnapshotMessagesOut;
-
-    public ServerMetrics(int tickWindowSize = 512)
+    public ServerMetrics(bool enabled = true, int tickWindowSize = 1024)
     {
         if (tickWindowSize <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(tickWindowSize));
         }
 
+        _enabled = enabled;
         _tickWindowMs = new double[tickWindowSize];
     }
 
@@ -49,12 +47,22 @@ public sealed class ServerMetrics
 
     public void SetPlayersConnected(int count) => Volatile.Write(ref _playersConnected, Math.Max(0, count));
 
-    public void RecordTick(long elapsedStopwatchTicks)
+    public void OnTickCompleted(int tick, double simStepMs, int messagesIn, int messagesOut, int sessionCount)
     {
-        double elapsedMs = elapsedStopwatchTicks * 1000d / Stopwatch.Frequency;
+        if (!_enabled)
+        {
+            return;
+        }
+
+        _ = tick;
+        _ = messagesIn;
+        _ = messagesOut;
+
         lock (_gate)
         {
-            _tickWindowMs[_tickWindowWriteIndex] = elapsedMs;
+            _tickCount++;
+            _playersConnected = Math.Max(0, sessionCount);
+            _tickWindowMs[_tickWindowWriteIndex] = simStepMs;
             _tickWindowWriteIndex = (_tickWindowWriteIndex + 1) % _tickWindowMs.Length;
             if (_tickWindowCount < _tickWindowMs.Length)
             {
@@ -63,75 +71,70 @@ public sealed class ServerMetrics
         }
     }
 
-    public ServerMetricsSnapshot Snapshot(int tick, int tickHz)
+    public MetricsSnapshot Snapshot() => Snapshot(tickHz: 20);
+
+    public MetricsSnapshot SnapshotAndReset() => SnapshotAndReset(tickHz: 20);
+
+    public MetricsSnapshot SnapshotAndReset(int tickHz)
+    {
+        MetricsSnapshot snapshot = Snapshot(tickHz);
+        lock (_gate)
+        {
+            _tickCount = 0;
+            _tickWindowCount = 0;
+            _tickWindowWriteIndex = 0;
+        }
+
+        return snapshot;
+    }
+
+    public MetricsSnapshot Snapshot(int tickHz)
     {
         if (tickHz <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(tickHz));
         }
 
-        double tickAvg;
-        double tickP95;
-        int windowCount;
-
         lock (_gate)
         {
-            windowCount = _tickWindowCount;
-            if (windowCount == 0)
+            if (!_enabled)
             {
-                tickAvg = 0;
-                tickP95 = 0;
+                return new MetricsSnapshot(0, 0, 0, 0, 0);
             }
-            else
+
+            int sampleCount = _tickWindowCount;
+            double[] samples = new double[sampleCount];
+            for (int i = 0; i < sampleCount; i++)
             {
-                double[] samples = new double[windowCount];
-                Array.Copy(_tickWindowMs, samples, windowCount);
-                tickAvg = samples.Average();
+                int idx = (_tickWindowWriteIndex - sampleCount + i + _tickWindowMs.Length) % _tickWindowMs.Length;
+                samples[i] = _tickWindowMs[idx];
+            }
+
+            if (sampleCount > 0)
+            {
                 Array.Sort(samples);
-                int p95Index = (int)Math.Ceiling(windowCount * 0.95) - 1;
-                p95Index = Math.Clamp(p95Index, 0, windowCount - 1);
-                tickP95 = samples[p95Index];
             }
+
+            double p50 = sampleCount > 0 ? Percentile(samples, 0.5) : 0;
+            double p95 = sampleCount > 0 ? Percentile(samples, 0.95) : 0;
+            double elapsedSeconds = _tickCount > 0 ? _tickCount / (double)tickHz : 0;
+
+            double inPerSec = elapsedSeconds > 0 ? MessagesIn / elapsedSeconds : 0;
+            double outPerSec = elapsedSeconds > 0 ? MessagesOut / elapsedSeconds : 0;
+
+            return new MetricsSnapshot(_tickCount, p50, p95, inPerSec, outPerSec);
         }
+    }
 
-        long inTotal = MessagesIn;
-        long outTotal = MessagesOut;
-
-        int deltaTicks = tick - _lastSnapshotTick;
-        long deltaIn = inTotal - _lastSnapshotMessagesIn;
-        long deltaOut = outTotal - _lastSnapshotMessagesOut;
-
-        double inPerSec = 0;
-        double outPerSec = 0;
-        if (deltaTicks > 0)
+    private static double Percentile(double[] sorted, double percentile)
+    {
+        if (sorted.Length == 0)
         {
-            double deltaSeconds = deltaTicks / (double)tickHz;
-            inPerSec = deltaIn / deltaSeconds;
-            outPerSec = deltaOut / deltaSeconds;
+            return 0;
         }
 
-        _lastSnapshotTick = tick;
-        _lastSnapshotMessagesIn = inTotal;
-        _lastSnapshotMessagesOut = outTotal;
-
-        return new ServerMetricsSnapshot(
-            Tick: tick,
-            PlayersConnected: PlayersConnected,
-            MessagesInTotal: inTotal,
-            MessagesOutTotal: outTotal,
-            TickAvgMsWindow: tickAvg,
-            TickP95MsWindow: tickP95,
-            MessagesInPerSecApprox: inPerSec,
-            MessagesOutPerSecApprox: outPerSec);
+        int index = (int)Math.Ceiling(sorted.Length * percentile) - 1;
+        index = Math.Clamp(index, 0, sorted.Length - 1);
+        return sorted[index];
     }
 }
-
-public sealed record ServerMetricsSnapshot(
-    int Tick,
-    int PlayersConnected,
-    long MessagesInTotal,
-    long MessagesOutTotal,
-    double TickAvgMsWindow,
-    double TickP95MsWindow,
-    double MessagesInPerSecApprox,
-    double MessagesOutPerSecApprox);
