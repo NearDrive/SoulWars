@@ -15,6 +15,7 @@ public sealed class SnapshotSequencingTests
 
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("v", "seq-user")));
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(1)));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
         host.AdvanceTicks(5);
 
         List<int> seqs = DrainSnapshotV2(endpoint).Select(s => s.SnapshotSeq).Distinct().Take(3).ToList();
@@ -31,6 +32,7 @@ public sealed class SnapshotSequencingTests
 
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("v", "ack-user")));
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(1)));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 999_999)));
 
         Exception? ex = Record.Exception(() => host.AdvanceTicks(2));
@@ -49,6 +51,7 @@ public sealed class SnapshotSequencingTests
 
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("v", "resend-user")));
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(1)));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
 
         host.StepOnce();
         SnapshotV2 first = Assert.Single(DrainSnapshotV2(endpoint));
@@ -77,9 +80,13 @@ public sealed class SnapshotSequencingTests
 
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("v", "retry-user")));
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(1)));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
 
         host.StepOnce();
         _ = DrainSnapshotV2(endpoint).ToArray();
+
+        host.StepOnce();
+        Assert.False(endpoint.IsClosed);
 
         host.StepOnce();
         Assert.True(endpoint.IsClosed);
