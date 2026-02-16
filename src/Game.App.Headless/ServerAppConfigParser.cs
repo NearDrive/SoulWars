@@ -18,35 +18,45 @@ public static class ServerAppConfigParser
             return false;
         }
 
-        Dictionary<string, Action<string>> handlers = new(StringComparer.Ordinal)
-        {
-            ["--seed"] = value => config = config with { Seed = ParseInt(value, "--seed") },
-            ["--port"] = value => config = config with { Port = ParseInt(value, "--port") },
-            ["--ports"] = value => config = config with { Port = ParseInt(value, "--ports") },
-            ["--sqlite"] = value => config = config with { SqlitePath = string.IsNullOrWhiteSpace(value) ? null : value },
-            ["--zone-count"] = value => config = config with { ZoneCount = ParseInt(value, "--zone-count") },
-            ["--zones"] = value => config = config with { ZoneCount = ParseInt(value, "--zones") },
-            ["--bot-count"] = value => config = config with { BotCount = ParseInt(value, "--bot-count") }
-        };
-
         try
         {
             for (int i = 0; i < args.Length; i++)
             {
                 string key = args[i];
-                if (!handlers.TryGetValue(key, out Action<string>? handler))
-                {
-                    error = $"Unknown argument '{key}'.";
-                    return false;
-                }
-
                 if (i + 1 >= args.Length)
                 {
                     error = $"Argument '{key}' requires a value.";
                     return false;
                 }
 
-                handler(args[++i]);
+                string value = args[++i];
+                switch (key)
+                {
+                    case "--seed":
+                        config = config with { Seed = ParseInt(value, "--seed") };
+                        break;
+                    case "--port":
+                        config = config with { Port = ParseInt(value, "--port") };
+                        break;
+                    case "--ports":
+                        config = config with { Port = ParseInt(value, "--ports") };
+                        break;
+                    case "--sqlite":
+                        config = config with { SqlitePath = string.IsNullOrWhiteSpace(value) ? null : value };
+                        break;
+                    case "--zone-count":
+                        config = config with { ZoneCount = ParseInt(value, "--zone-count") };
+                        break;
+                    case "--zones":
+                        config = config with { ZoneCount = ParseInt(value, "--zones") };
+                        break;
+                    case "--bot-count":
+                        config = config with { BotCount = ParseInt(value, "--bot-count") };
+                        break;
+                    default:
+                        error = $"Unknown argument '{key}'.";
+                        return false;
+                }
             }
         }
         catch (FormatException ex)
