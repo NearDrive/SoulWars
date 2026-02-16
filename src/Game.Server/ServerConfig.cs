@@ -13,6 +13,10 @@ public readonly record struct ServerConfig(
     int MapHeight,
     int NpcCountPerZone,
     int DisconnectGraceTicks,
+    int MaxPayloadBytes,
+    int MaxInputsPerTickPerSession,
+    Fix32 MaxMoveSpeed,
+    Fix32 MaxMoveVectorLen,
     InvariantOptions Invariants)
 {
     public SimulationConfig ToSimulationConfig()
@@ -42,5 +46,9 @@ public readonly record struct ServerConfig(
         MapHeight: 32,
         NpcCountPerZone: 0,
         DisconnectGraceTicks: 300,
+        MaxPayloadBytes: 64 * 1024,
+        MaxInputsPerTickPerSession: 8,
+        MaxMoveSpeed: Fix32.FromInt(4),
+        MaxMoveVectorLen: Fix32.One,
         Invariants: InvariantOptions.Enabled);
 }

@@ -237,6 +237,83 @@ public sealed class HardeningFuzzTests
 
 
     [Fact]
+    public void OversizedPayload_DisconnectsWithPayloadTooLarge()
+    {
+        ServerConfig config = ServerConfig.Default(seed: 808) with { MaxPayloadBytes = 32 };
+        ServerHost host = new(config);
+        InMemoryEndpoint endpoint = new();
+        host.Connect(endpoint);
+
+        endpoint.EnqueueToServer(new byte[config.MaxPayloadBytes + 1]);
+
+        host.ProcessInboundOnce();
+
+        Assert.True(endpoint.IsClosed);
+        Assert.True(endpoint.TryDequeueFromServer(out byte[] disconnectPayload));
+        Assert.True(ProtocolCodec.TryDecodeServer(disconnectPayload, out IServerMessage? msg, out ProtocolErrorCode error));
+        Assert.Equal(ProtocolErrorCode.None, error);
+        Disconnect disconnect = Assert.IsType<Disconnect>(msg);
+        Assert.Equal(DisconnectReason.PayloadTooLarge, disconnect.Reason);
+    }
+
+    [Fact]
+    public void InputRateLimit_PerTick_OnlyAcceptsConfiguredMax()
+    {
+        ServerConfig config = ServerConfig.Default(seed: 809) with { SnapshotEveryTicks = 1, MaxInputsPerTickPerSession = 8 };
+        ServerHost host = new(config);
+        InMemoryEndpoint endpoint = new();
+        host.Connect(endpoint);
+
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("limit", "limit")));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
+        host.AdvanceTicks(2);
+
+        Snapshot before = ReadLastSnapshot(endpoint);
+        int tick = before.Tick + 1;
+
+        for (int i = 0; i < 100; i++)
+        {
+            endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(tick, 1, 0)));
+        }
+
+        host.AdvanceTicks(1);
+        Snapshot after = ReadLastSnapshot(endpoint);
+
+        SnapshotEntity beforeEntity = before.Entities.OrderBy(e => e.EntityId).First();
+        SnapshotEntity afterEntity = after.Entities.Single(e => e.EntityId == beforeEntity.EntityId);
+        int deltaRaw = afterEntity.PosXRaw - beforeEntity.PosXRaw;
+
+        int expectedPerInputRaw = (Fix32.FromInt(4) * new Fix32(3277)).Raw;
+        Assert.Equal(config.MaxInputsPerTickPerSession * expectedPerInputRaw, deltaRaw);
+    }
+
+    [Fact]
+    public void InputClamp_MaxMoveVectorLenZero_ClampsMovementToZero()
+    {
+        ServerConfig config = ServerConfig.Default(seed: 810) with { SnapshotEveryTicks = 1, MaxMoveVectorLen = Fix32.Zero };
+        ServerHost host = new(config);
+        InMemoryEndpoint endpoint = new();
+        host.Connect(endpoint);
+
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("clamp", "clamp")));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
+        host.AdvanceTicks(2);
+
+        Snapshot before = ReadLastSnapshot(endpoint);
+        int tick = before.Tick + 1;
+
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(tick, 1, 1)));
+        host.AdvanceTicks(1);
+
+        Snapshot after = ReadLastSnapshot(endpoint);
+        SnapshotEntity beforeEntity = before.Entities.OrderBy(e => e.EntityId).First();
+        SnapshotEntity afterEntity = after.Entities.Single(e => e.EntityId == beforeEntity.EntityId);
+
+        Assert.Equal(beforeEntity.PosXRaw, afterEntity.PosXRaw);
+        Assert.Equal(beforeEntity.PosYRaw, afterEntity.PosYRaw);
+    }
+
+    [Fact]
     public void ProtocolCodec_DecodeSnapshot_InvalidEntityKind_ReturnsErrorWithoutThrowing()
     {
         byte[] payload = ProtocolCodec.Encode(new Snapshot(
