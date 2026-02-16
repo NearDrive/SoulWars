@@ -75,7 +75,7 @@ public sealed class AoiProviderTests
 
         Snapshot snapshot = ReadLastSnapshot(endpoint);
         string actualJson = SerializeSnapshot(snapshot);
-        string expectedJson = File.ReadAllText(Path.Combine("tests", "Fixtures", "snapshot_partial_aoi_golden.json")).Trim();
+        string expectedJson = File.ReadAllText(ResolveFixturePath("snapshot_partial_aoi_golden.json")).Trim();
 
         Assert.Equal(new[] { 1, 2 }, snapshot.Entities.Select(e => e.EntityId).OrderBy(id => id));
         Assert.Equal(expectedJson, actualJson);
@@ -166,6 +166,29 @@ public sealed class AoiProviderTests
                     $"{{\"entityId\":{entity.EntityId},\"posXRaw\":{entity.PosXRaw},\"posYRaw\":{entity.PosYRaw},\"velXRaw\":{entity.VelXRaw},\"velYRaw\":{entity.VelYRaw},\"hp\":{entity.Hp},\"kind\":\"{entity.Kind}\"}}"));
 
         return $"{{\"tick\":{snapshot.Tick},\"zoneId\":{snapshot.ZoneId},\"entities\":[{entities}]}}";
+    }
+
+    private static string ResolveFixturePath(string fileName)
+    {
+        DirectoryInfo? dir = new(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            string solutionPath = Path.Combine(dir.FullName, "Game.sln");
+            if (File.Exists(solutionPath))
+            {
+                string fixturePath = Path.Combine(dir.FullName, "tests", "Fixtures", fileName);
+                if (!File.Exists(fixturePath))
+                {
+                    throw new FileNotFoundException($"Fixture not found at '{fixturePath}'.", fixturePath);
+                }
+
+                return fixturePath;
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new DirectoryNotFoundException($"Could not resolve repository root from '{AppContext.BaseDirectory}'.");
     }
 
     private static Snapshot ReadLastSnapshot(InMemoryEndpoint endpoint)
