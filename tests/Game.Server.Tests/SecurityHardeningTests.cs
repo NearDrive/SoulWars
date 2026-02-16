@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Game.Server.Tests;
 
+[Trait("Category", "Security")]
 public sealed class SecurityHardeningTests
 {
     [Fact]

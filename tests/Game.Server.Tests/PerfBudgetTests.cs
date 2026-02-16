@@ -8,6 +8,7 @@ namespace Game.Server.Tests;
 public sealed class PerfBudgetTests
 {
     [Fact]
+    [Trait("Category", "Perf")]
     public void PerfBudgets_ReferenceScenario_WithinLimits()
     {
         ScenarioConfig config = new(
@@ -29,6 +30,7 @@ public sealed class PerfBudgetTests
     }
 
     [Fact]
+    [Trait("Category", "Perf")]
     public void PerfInstrumentation_DoesNotChangeChecksum()
     {
         ServerConfig serverConfig = ServerConfig.Default(777) with
