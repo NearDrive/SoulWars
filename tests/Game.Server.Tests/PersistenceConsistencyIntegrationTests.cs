@@ -29,6 +29,7 @@ public sealed class PersistenceConsistencyIntegrationTests
         RunTicks(first, firstEndpoints, 1, splitTick);
         AssertExtendedState(first, splitTick, expectedEntityCount: first.WorldEntityCountTotal);
 
+        Snapshot[] firstHalfSnapshots = firstEndpoints.SelectMany(DrainSnapshots).ToArray();
         int[] idsAtSave = CollectEntityIds(first.CurrentWorld);
         byte[] bytes = WorldStateSerializer.SaveToBytes(first.CurrentWorld);
 
@@ -49,7 +50,8 @@ public sealed class PersistenceConsistencyIntegrationTests
         AssertExtendedState(second, totalTicks, expectedEntityCount: baseline.EntityCount);
 
         string continuedChecksum = StateChecksum.Compute(second.CurrentWorld);
-        string continuedSnapshotHash = SnapshotHash.ComputeHex(secondEndpoints.SelectMany(DrainSnapshots));
+        Snapshot[] secondHalfSnapshots = secondEndpoints.SelectMany(DrainSnapshots).ToArray();
+        string continuedSnapshotHash = SnapshotHash.ComputeHex(firstHalfSnapshots.Concat(secondHalfSnapshots));
 
         Assert.Equal(baseline.WorldChecksum, continuedChecksum);
         Assert.Equal(baseline.SnapshotHash, continuedSnapshotHash);
@@ -76,6 +78,7 @@ public sealed class PersistenceConsistencyIntegrationTests
 
             RunTicks(first, firstEndpoints, 1, splitTick);
             AssertExtendedState(first, splitTick, expectedEntityCount: first.WorldEntityCountTotal);
+            Snapshot[] firstHalfSnapshots = firstEndpoints.SelectMany(DrainSnapshots).ToArray();
             int[] idsAtSave = CollectEntityIds(first.CurrentWorld);
 
             first.SaveToSqlite(dbPath);
@@ -89,7 +92,8 @@ public sealed class PersistenceConsistencyIntegrationTests
             AssertExtendedState(second, totalTicks, expectedEntityCount: baseline.EntityCount);
 
             string continuedChecksum = StateChecksum.Compute(second.CurrentWorld);
-            string continuedSnapshotHash = SnapshotHash.ComputeHex(secondEndpoints.SelectMany(DrainSnapshots));
+            Snapshot[] secondHalfSnapshots = secondEndpoints.SelectMany(DrainSnapshots).ToArray();
+            string continuedSnapshotHash = SnapshotHash.ComputeHex(firstHalfSnapshots.Concat(secondHalfSnapshots));
 
             Assert.Equal(baseline.WorldChecksum, continuedChecksum);
             Assert.Equal(baseline.SnapshotHash, continuedSnapshotHash);

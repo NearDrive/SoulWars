@@ -35,10 +35,10 @@ public sealed class ServerHost
         _serverConfig = config;
         _simulationConfig = config.ToSimulationConfig();
         _world = bootstrap?.World ?? Simulation.CreateInitialState(_simulationConfig);
+        _nextEntityId = Math.Max(_nextEntityId, ComputeNextEntityId(_world));
         if (bootstrap is not null)
         {
             _playerRegistry.LoadFromRecords(bootstrap.Players);
-            _nextEntityId = Math.Max(_nextEntityId, ComputeNextEntityId(_world));
         }
         ILoggerFactory factory = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = factory.CreateLogger<ServerHost>();
