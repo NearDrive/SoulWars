@@ -44,9 +44,11 @@ internal static class DoDRunner
 
         PerfSnapshot perfSnapshot = host.SnapshotAndResetPerfWindow();
         string checksum = StateChecksum.Compute(host.CurrentWorld);
+        int auditEventCount = auditSink?.Events.Count ?? 0;
+        int auditLastTick = auditEventCount > 0 ? auditSink!.Events[auditEventCount - 1].Header.Tick : 0;
         AuditSummary auditSummary = new(
-            Events: auditSink?.Events.Count ?? 0,
-            LastTick: auditSink?.Events.LastOrDefault()?.Header.Tick ?? 0);
+            Events: auditEventCount,
+            LastTick: auditLastTick);
 
         return new DoDRunResult(
             Checksum: checksum,

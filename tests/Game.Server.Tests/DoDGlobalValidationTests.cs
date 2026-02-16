@@ -164,8 +164,8 @@ public sealed class DoDGlobalValidationTests
             BotCount: 20);
 
         ServerAppConfig before = cfg;
-        RunResult run1 = Program.RunOnce(cfg, ticks: 1000);
-        RunResult run2 = Program.RunOnce(cfg, ticks: 1000);
+        RunResult run1 = Game.App.Headless.Program.RunOnce(cfg, ticks: 1000);
+        RunResult run2 = Game.App.Headless.Program.RunOnce(cfg, ticks: 1000);
 
         Assert.Equal(TestChecksum.NormalizeFullHex(run1.Checksum), TestChecksum.NormalizeFullHex(run2.Checksum));
         Assert.Equal(before, cfg);
