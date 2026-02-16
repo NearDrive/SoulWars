@@ -20,12 +20,15 @@ public sealed class MultiZoneRoutingTests
 
         host.AdvanceTicks(2);
 
-        EnterZoneAck[] enterAcks = DrainMessages(endpoint).OfType<EnterZoneAck>().ToArray();
+        IServerMessage[] initialMessages = DrainMessages(endpoint);
+        Welcome welcome = Assert.IsType<Welcome>(initialMessages.First(message => message is Welcome));
+        EnterZoneAck[] enterAcks = initialMessages.OfType<EnterZoneAck>().ToArray();
         Assert.True(enterAcks.Length >= 1);
 
-        Assert.True(host.TryGetPlayerState(new PlayerId(1), out PlayerState state));
+        PlayerId playerId = welcome.PlayerId;
+        Assert.True(host.TryGetPlayerState(playerId, out PlayerState state));
         Assert.NotNull(state.EntityId);
-        Assert.Equal(1, host.CountWorldEntitiesForPlayer(new PlayerId(1)));
+        Assert.Equal(1, host.CountWorldEntitiesForPlayer(playerId));
 
         int entityId = state.EntityId!.Value;
 
@@ -33,9 +36,9 @@ public sealed class MultiZoneRoutingTests
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(2)));
         host.AdvanceTicks(2);
 
-        Assert.True(host.TryGetPlayerState(new PlayerId(1), out state));
+        Assert.True(host.TryGetPlayerState(playerId, out state));
         Assert.Equal(entityId, state.EntityId);
-        Assert.Equal(1, host.CountWorldEntitiesForPlayer(new PlayerId(1)));
+        Assert.Equal(1, host.CountWorldEntitiesForPlayer(playerId));
     }
 
     [Fact]
