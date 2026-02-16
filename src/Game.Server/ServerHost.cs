@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Game.Audit;
 using Game.Core;
 using Game.Protocol;
 using Microsoft.Extensions.Logging;
@@ -13,6 +14,7 @@ public sealed class ServerHost
     private readonly Dictionary<int, SessionState> _sessions = new();
     private readonly ILogger<ServerHost> _logger;
     private readonly PlayerRegistry _playerRegistry = new();
+    private readonly IAuditSink _auditSink;
 
     private int _nextSessionId = 1;
     private int _nextEntityId = 1;
@@ -21,8 +23,9 @@ public sealed class ServerHost
     private readonly List<Snapshot> _recentSnapshots = new();
     private WorldState _world;
     private int _lastTick;
+    private int _auditSeq;
 
-    public ServerHost(ServerConfig config, ILoggerFactory? loggerFactory = null, ServerMetrics? metrics = null, ServerBootstrap? bootstrap = null)
+    public ServerHost(ServerConfig config, ILoggerFactory? loggerFactory = null, ServerMetrics? metrics = null, ServerBootstrap? bootstrap = null, IAuditSink? auditSink = null)
     {
         if (config.SnapshotEveryTicks <= 0)
         {
@@ -40,6 +43,7 @@ public sealed class ServerHost
         ILoggerFactory factory = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = factory.CreateLogger<ServerHost>();
         Metrics = metrics ?? new ServerMetrics();
+        _auditSink = auditSink ?? NullAuditSink.Instance;
         _lastTick = _world.Tick;
     }
 
@@ -114,6 +118,10 @@ public sealed class ServerHost
         int targetTick = _world.Tick + 1;
         List<WorldCommand> worldCommands = _pendingWorldCommands.ToList();
         _pendingWorldCommands.Clear();
+        HashSet<int> beforeEntityIds = _world.Zones
+            .SelectMany(zone => zone.Entities)
+            .Select(entity => entity.Id.Value)
+            .ToHashSet();
 
         foreach (PendingInput pending in OrderedPendingInputs(targetTick))
         {
@@ -156,6 +164,26 @@ public sealed class ServerHost
         }
 
         _world = Simulation.Step(_simulationConfig, _world, new Inputs(worldCommands.ToImmutableArray()));
+        HashSet<int> afterSimEntityIds = _world.Zones
+            .SelectMany(zone => zone.Entities)
+            .Select(entity => entity.Id.Value)
+            .ToHashSet();
+
+        HashSet<int> leaveEntityIds = worldCommands
+            .Where(command => command.Kind == WorldCommandKind.LeaveZone)
+            .Select(command => command.EntityId.Value)
+            .ToHashSet();
+
+        foreach (int removedEntityId in beforeEntityIds.Except(afterSimEntityIds).OrderBy(id => id))
+        {
+            if (leaveEntityIds.Contains(removedEntityId))
+            {
+                continue;
+            }
+
+            _auditSink.Emit(AuditEvent.Death(_world.Tick, NextAuditSeq(), removedEntityId, killerEntityId: null));
+        }
+
         ProcessDisconnectedPlayerCleanup(_world.Tick);
         if (_serverConfig.Invariants.EnableCoreInvariants)
         {
@@ -287,6 +315,8 @@ public sealed class ServerHost
 
         session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Welcome(session.SessionId, playerId)));
         Metrics.IncrementMessagesOut();
+
+        _auditSink.Emit(AuditEvent.PlayerConnected(_world.Tick, NextAuditSeq(), normalizedAccountId, playerId.Value));
     }
 
     private void HandleEnterZone(SessionState session, EnterZoneRequest request, List<WorldCommand> worldCommands)
@@ -333,6 +363,8 @@ public sealed class ServerHost
             session.PlayerId.Value.Value,
             zoneId,
             entityId);
+
+        _auditSink.Emit(AuditEvent.EnterZone(_world.Tick + 1, NextAuditSeq(), session.PlayerId.Value.Value, zoneId, entityId));
     }
 
 
@@ -354,6 +386,11 @@ public sealed class ServerHost
             EntityId: new EntityId(session.EntityId.Value),
             ZoneId: new ZoneId(fromZoneId),
             ToZoneId: new ZoneId(request.ToZoneId)));
+
+        if (session.PlayerId is PlayerId playerId)
+        {
+            _auditSink.Emit(AuditEvent.Teleport(_world.Tick + 1, NextAuditSeq(), playerId.Value, fromZoneId, request.ToZoneId, session.EntityId.Value));
+        }
     }
 
     private void HandleLeaveZone(SessionState session, LeaveZoneRequest request, List<WorldCommand> worldCommands)
@@ -494,6 +531,8 @@ public sealed class ServerHost
                 attachedSessionId: null,
                 disconnectedAtTick: playerState.DisconnectedAtTick,
                 despawnAtTick: null);
+
+            _auditSink.Emit(AuditEvent.DespawnDisconnected(tick, NextAuditSeq(), playerState.PlayerId.Value, entityId.Value));
         }
     }
 
@@ -574,6 +613,8 @@ public sealed class ServerHost
         Fix32 distSq = delta.LengthSq();
         return distSq <= _serverConfig.VisionRadiusSq;
     }
+
+    private int NextAuditSeq() => ++_auditSeq;
 
     private void DisconnectSession(SessionState session, string reason)
     {
