@@ -5,7 +5,7 @@ namespace Game.Server;
 
 public interface IAoiProvider
 {
-    VisibleSet ComputeVisible(in WorldState world, ZoneId zoneId, EntityId viewerEntityId);
+    VisibleSet ComputeVisible(in WorldState world, ZoneId zoneId, EntityId viewerEntityId, PerfCounters? perfCounters = null);
 }
 
 public readonly record struct VisibleSet(ZoneId ZoneId, ImmutableArray<EntityId> EntityIds)

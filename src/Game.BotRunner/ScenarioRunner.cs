@@ -180,6 +180,7 @@ public sealed class ScenarioRunner
             }
 
             MetricsSnapshot metrics = host.SnapshotMetrics();
+            PerfSnapshot perfSnapshot = host.SnapshotAndResetPerfWindow();
             double tickAvgMs = metrics.TickP50Ms > 0 ? metrics.TickP50Ms : double.Epsilon;
             double tickP95Ms = metrics.TickP95Ms >= tickAvgMs ? metrics.TickP95Ms : tickAvgMs;
 
@@ -196,6 +197,7 @@ public sealed class ScenarioRunner
                 PlayersConnectedMax: host.Metrics.PlayersConnected,
                 BotStats: stats,
                 InvariantFailures: invariantFailures,
+                PerfSnapshot: perfSnapshot,
                 GuardSnapshot: guards.Snapshot,
                 ActiveSessions: host.ActiveSessionCount,
                 WorldEntityCount: host.WorldEntityCountTotal);

@@ -12,7 +12,7 @@ public sealed class RadiusAoiProvider : IAoiProvider
         _radiusSq = radiusSq;
     }
 
-    public VisibleSet ComputeVisible(in WorldState world, ZoneId zoneId, EntityId viewerEntityId)
+    public VisibleSet ComputeVisible(in WorldState world, ZoneId zoneId, EntityId viewerEntityId, PerfCounters? perfCounters = null)
     {
         if (!world.TryGetZone(zoneId, out ZoneState zone))
         {
@@ -27,7 +27,11 @@ public sealed class RadiusAoiProvider : IAoiProvider
 
         Vec2Fix viewerPos = viewer.Pos;
         ImmutableArray<EntityId> visible = zone.Entities
-            .Where(entity => entity.Id.Value == viewerEntityId.Value || IsWithinRadius(viewerPos, entity.Pos))
+            .Where(entity =>
+            {
+                perfCounters?.CountAoiChecks(1);
+                return entity.Id.Value == viewerEntityId.Value || IsWithinRadius(viewerPos, entity.Pos);
+            })
             .Select(entity => entity.Id)
             .OrderBy(id => id.Value)
             .ToImmutableArray();

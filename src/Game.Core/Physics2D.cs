@@ -10,12 +10,13 @@ public static class Physics2D
         TileMap map,
         Fix32 dt,
         Fix32 moveSpeed,
-        Fix32 radius)
+        Fix32 radius,
+        Action<int>? countCollisionChecks = null)
     {
         Vec2Fix desiredVelocity = ComputeDesiredVelocity(input, moveSpeed);
         Vec2Fix targetPosition = entity.Pos + new Vec2Fix(desiredVelocity.X * dt, desiredVelocity.Y * dt);
 
-        Vec2Fix resolvedPosition = ResolveAxisSeparated(entity.Pos, targetPosition, radius, map);
+        Vec2Fix resolvedPosition = ResolveAxisSeparated(entity.Pos, targetPosition, radius, map, countCollisionChecks);
 
         Vec2Fix resolvedVelocity = new(
             dt.Raw == 0 ? Fix32.Zero : (resolvedPosition.X - entity.Pos.X) / dt,
@@ -28,8 +29,9 @@ public static class Physics2D
         };
     }
 
-    public static bool OverlapsSolidTile(Vec2Fix position, Fix32 radius, TileMap map)
+    public static bool OverlapsSolidTile(Vec2Fix position, Fix32 radius, TileMap map, Action<int>? countCollisionChecks = null)
     {
+        countCollisionChecks?.Invoke(1);
         Fix32 minX = position.X - radius;
         Fix32 maxX = position.X + radius;
         Fix32 minY = position.Y - radius;
@@ -73,16 +75,16 @@ public static class Physics2D
         return new Vec2Fix(vx, vy);
     }
 
-    private static Vec2Fix ResolveAxisSeparated(Vec2Fix current, Vec2Fix target, Fix32 radius, TileMap map)
+    private static Vec2Fix ResolveAxisSeparated(Vec2Fix current, Vec2Fix target, Fix32 radius, TileMap map, Action<int>? countCollisionChecks)
     {
         Vec2Fix afterX = new(target.X, current.Y);
-        if (OverlapsSolidTile(afterX, radius, map))
+        if (OverlapsSolidTile(afterX, radius, map, countCollisionChecks))
         {
             afterX = current;
         }
 
         Vec2Fix afterY = new(afterX.X, target.Y);
-        if (OverlapsSolidTile(afterY, radius, map))
+        if (OverlapsSolidTile(afterY, radius, map, countCollisionChecks))
         {
             afterY = afterX;
         }

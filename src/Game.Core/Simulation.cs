@@ -43,7 +43,7 @@ public static class Simulation
             EntityLocations: BuildEntityLocations(initialZones));
     }
 
-    public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs)
+    public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs, SimulationInstrumentation? instrumentation = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(inputs);
@@ -83,14 +83,14 @@ public static class Simulation
                 continue;
             }
 
-            ZoneState nextZone = ProcessZoneCommands(config, updated.Tick, zone, zoneCommands);
+            ZoneState nextZone = ProcessZoneCommands(config, updated.Tick, zone, zoneCommands, instrumentation);
             updated = updated.WithZoneUpdated(nextZone);
             updated = RebuildEntityLocations(updated);
         }
 
         foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
         {
-            ZoneState nextZone = RunNpcAiAndApply(config, updated.Tick, zone);
+            ZoneState nextZone = RunNpcAiAndApply(config, updated.Tick, zone, instrumentation);
             updated = updated.WithZoneUpdated(nextZone);
         }
 
@@ -105,7 +105,7 @@ public static class Simulation
         return updated;
     }
 
-    private static ZoneState RunNpcAiAndApply(SimulationConfig config, int tick, ZoneState zone)
+    private static ZoneState RunNpcAiAndApply(SimulationConfig config, int tick, ZoneState zone, SimulationInstrumentation? instrumentation)
     {
         List<WorldCommand> npcCommands = new();
         ImmutableArray<EntityState> ordered = zone.Entities
@@ -145,6 +145,7 @@ public static class Simulation
 
             foreach (EntityState candidate in ordered)
             {
+                instrumentation?.CountEntitiesVisited?.Invoke(1);
                 if (candidate.Kind != EntityKind.Player || !candidate.IsAlive)
                 {
                     continue;
@@ -199,7 +200,7 @@ public static class Simulation
 
         foreach (WorldCommand move in npcCommands.Where(c => c.Kind == WorldCommandKind.MoveIntent).OrderBy(c => c.EntityId.Value))
         {
-            updatedZone = ApplyMoveIntent(config, updatedZone, move);
+            updatedZone = ApplyMoveIntent(config, updatedZone, move, instrumentation);
         }
 
         foreach (WorldCommand attack in npcCommands.Where(c => c.Kind == WorldCommandKind.AttackIntent).OrderBy(c => c.EntityId.Value))
@@ -379,7 +380,7 @@ public static class Simulation
             .ToImmutableArray();
     }
 
-    private static ZoneState ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<WorldCommand> zoneCommands)
+    private static ZoneState ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<WorldCommand> zoneCommands, SimulationInstrumentation? instrumentation)
     {
         ZoneState current = zone;
 
@@ -400,7 +401,7 @@ public static class Simulation
                 continue;
             }
 
-            current = ApplyMoveIntent(config, current, command);
+            current = ApplyMoveIntent(config, current, command, instrumentation);
         }
 
         foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.AttackIntent))
@@ -489,7 +490,7 @@ public static class Simulation
             .ToImmutableArray());
     }
 
-    private static ZoneState ApplyMoveIntent(SimulationConfig config, ZoneState zone, WorldCommand command)
+    private static ZoneState ApplyMoveIntent(SimulationConfig config, ZoneState zone, WorldCommand command, SimulationInstrumentation? instrumentation = null)
     {
         ImmutableArray<EntityState> entities = zone.Entities;
         int entityIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.EntityId);
@@ -498,6 +499,8 @@ public static class Simulation
         {
             return zone;
         }
+
+        instrumentation?.CountEntitiesVisited?.Invoke(1);
 
         EntityState entity = entities[entityIndex];
         if (!entity.IsAlive)
@@ -513,7 +516,8 @@ public static class Simulation
             zone.Map,
             config.DtFix,
             config.MoveSpeed,
-            config.Radius);
+            config.Radius,
+            instrumentation?.CountCollisionChecks);
 
         ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
 
