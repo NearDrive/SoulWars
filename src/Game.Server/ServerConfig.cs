@@ -31,8 +31,6 @@ public readonly record struct ServerConfig(
             MapWidth = MapWidth,
             MapHeight = MapHeight,
             NpcCountPerZone = NpcCountPerZone,
-            MoveSpeed = MaxMoveSpeed < Fix32.Zero ? Fix32.Zero : MaxMoveSpeed,
-            MaxSpeed = MaxMoveSpeed < Fix32.Zero ? Fix32.Zero : MaxMoveSpeed,
             Invariants = Invariants
         };
     }

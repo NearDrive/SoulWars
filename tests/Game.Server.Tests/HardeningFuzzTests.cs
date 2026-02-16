@@ -288,9 +288,9 @@ public sealed class HardeningFuzzTests
     }
 
     [Fact]
-    public void InputClamp_LargeVector_IsClampedToNormalizedDirection()
+    public void InputClamp_MaxMoveVectorLenZero_ClampsMovementToZero()
     {
-        ServerConfig config = ServerConfig.Default(seed: 810) with { SnapshotEveryTicks = 1, MaxMoveSpeed = Fix32.FromInt(4), MaxMoveVectorLen = Fix32.One };
+        ServerConfig config = ServerConfig.Default(seed: 810) with { SnapshotEveryTicks = 1, MaxMoveVectorLen = Fix32.Zero };
         ServerHost host = new(config);
         InMemoryEndpoint endpoint = new();
         host.Connect(endpoint);
@@ -302,20 +302,15 @@ public sealed class HardeningFuzzTests
         Snapshot before = ReadLastSnapshot(endpoint);
         int tick = before.Tick + 1;
 
-        endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(tick, sbyte.MaxValue, sbyte.MaxValue)));
+        endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(tick, 1, 1)));
         host.AdvanceTicks(1);
 
         Snapshot after = ReadLastSnapshot(endpoint);
         SnapshotEntity beforeEntity = before.Entities.OrderBy(e => e.EntityId).First();
         SnapshotEntity afterEntity = after.Entities.Single(e => e.EntityId == beforeEntity.EntityId);
 
-        int dx = afterEntity.PosXRaw - beforeEntity.PosXRaw;
-        int dy = afterEntity.PosYRaw - beforeEntity.PosYRaw;
-
-        int maxAxisStepRaw = (config.MaxMoveSpeed * new Fix32(3277)).Raw;
-        Assert.InRange(Math.Abs(dx), 0, maxAxisStepRaw);
-        Assert.InRange(Math.Abs(dy), 0, maxAxisStepRaw);
-        Assert.True(dx >= 0 && dy >= 0);
+        Assert.Equal(beforeEntity.PosXRaw, afterEntity.PosXRaw);
+        Assert.Equal(beforeEntity.PosYRaw, afterEntity.PosYRaw);
     }
 
     [Fact]

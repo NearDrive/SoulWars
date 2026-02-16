@@ -357,32 +357,9 @@ public sealed class ServerHost
 
     private PendingInput ClampMoveInput(int tick, SessionId sessionId, sbyte moveX, sbyte moveY)
     {
-        long x = moveX;
-        long y = moveY;
-        long lenSq = (x * x) + (y * y);
-
-        int clampedX = moveX;
-        int clampedY = moveY;
-
-        if (lenSq > 0)
-        {
-            Fix32 len = Fix32.FromFloat(MathF.Sqrt(lenSq));
-            if (len > _serverConfig.MaxMoveVectorLen && _serverConfig.MaxMoveVectorLen > Fix32.Zero)
-            {
-                Fix32 scale = _serverConfig.MaxMoveVectorLen / len;
-                clampedX = Fix32.FloorToInt(Fix32.FromInt(moveX) * scale);
-                clampedY = Fix32.FloorToInt(Fix32.FromInt(moveY) * scale);
-            }
-        }
-
-        clampedX = Math.Clamp(clampedX, sbyte.MinValue, sbyte.MaxValue);
-        clampedY = Math.Clamp(clampedY, sbyte.MinValue, sbyte.MaxValue);
-
-        if (Math.Abs(clampedX) > 1 || Math.Abs(clampedY) > 1)
-        {
-            clampedX = Math.Sign(clampedX);
-            clampedY = Math.Sign(clampedY);
-        }
+        int maxAxis = Math.Clamp(Fix32.FloorToInt(_serverConfig.MaxMoveVectorLen), 0, 1);
+        int clampedX = Math.Clamp(moveX, -maxAxis, maxAxis);
+        int clampedY = Math.Clamp(moveY, -maxAxis, maxAxis);
 
         return new PendingInput(tick, sessionId, (sbyte)clampedX, (sbyte)clampedY);
     }
