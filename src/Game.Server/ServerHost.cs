@@ -452,6 +452,18 @@ public sealed class ServerHost
             return;
         }
 
+        if (session.EntityId is int pendingLeaveEntityId &&
+            HasPendingLeaveCommand(worldCommands, pendingLeaveEntityId) &&
+            _world.TryGetEntityZone(new EntityId(pendingLeaveEntityId), out ZoneId pendingLeaveZoneId))
+        {
+            RemovePendingLeaveCommandsForEntity(worldCommands, pendingLeaveEntityId);
+            session.CurrentZoneId = pendingLeaveZoneId.Value;
+            _playerRegistry.UpdateWorldState(session.PlayerId.Value, pendingLeaveEntityId, pendingLeaveZoneId.Value, isAlive: true);
+            session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new EnterZoneAck(pendingLeaveZoneId.Value, pendingLeaveEntityId)));
+            Metrics.IncrementMessagesOut();
+            return;
+        }
+
         if (session.CurrentZoneId == requestedZoneId &&
             session.EntityId is int currentEntityId &&
             !HasPendingLeaveCommand(worldCommands, currentEntityId) &&
@@ -503,6 +515,13 @@ public sealed class ServerHost
     private static bool HasPendingLeaveCommand(List<WorldCommand> worldCommands, int entityId)
     {
         return worldCommands.Any(command =>
+            command.Kind == WorldCommandKind.LeaveZone &&
+            command.EntityId.Value == entityId);
+    }
+
+    private static void RemovePendingLeaveCommandsForEntity(List<WorldCommand> worldCommands, int entityId)
+    {
+        worldCommands.RemoveAll(command =>
             command.Kind == WorldCommandKind.LeaveZone &&
             command.EntityId.Value == entityId);
     }
