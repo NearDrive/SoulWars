@@ -60,6 +60,11 @@ public sealed class HeadlessClient : IAsyncDisposable
             try
             {
                 message = ProtocolCodec.DecodeServer(payload);
+                if (message is SnapshotV2 snapshotV2)
+                {
+                    Send(new ClientAckV2(snapshotV2.ZoneId, snapshotV2.SnapshotSeq));
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -78,7 +83,11 @@ public sealed class HeadlessClient : IAsyncDisposable
         Send(new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, accountId));
     }
 
-    public void EnterZone(int zoneId) => Send(new EnterZoneRequestV2(zoneId));
+    public void EnterZone(int zoneId)
+    {
+        Send(new EnterZoneRequestV2(zoneId));
+        Send(new ClientAckV2(zoneId, 0));
+    }
 
     public void SendInput(int tick, sbyte mx, sbyte my) => Send(new InputCommand(tick, mx, my));
 

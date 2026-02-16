@@ -352,6 +352,9 @@ public sealed class ServerHost
                 case TeleportRequest teleportRequest:
                     HandleTeleport(session, teleportRequest, worldCommands);
                     break;
+                case ClientAckV2 ack:
+                    HandleClientAck(session, ack);
+                    break;
             }
         }
     }
@@ -528,6 +531,41 @@ public sealed class ServerHost
             command.EntityId.Value == entityId);
     }
 
+
+
+    private void HandleClientAck(SessionState session, ClientAckV2 ack)
+    {
+        if (ack.ZoneId <= 0 || ack.LastSnapshotSeqReceived < 0)
+        {
+            return;
+        }
+
+        session.SupportsSnapshotAckV2 = true;
+
+        if (ack.LastSnapshotSeqReceived <= session.LastAckedSnapshotSeq)
+        {
+            return;
+        }
+
+        int latestSentSeq = session.NextSnapshotSeq - 1;
+        if (ack.LastSnapshotSeqReceived > latestSentSeq)
+        {
+            _logger.LogWarning(
+                ServerLogEvents.InvalidClientAck,
+                "InvalidClientAck sessionId={SessionId} zoneId={ZoneId} ackSeq={AckSeq} latestSentSeq={LatestSentSeq}",
+                session.SessionId.Value,
+                ack.ZoneId,
+                ack.LastSnapshotSeqReceived,
+                latestSentSeq);
+            return;
+        }
+
+        session.LastAckedSnapshotSeq = ack.LastSnapshotSeqReceived;
+        if (session.LastFullSnapshot is { } last && last.SnapshotSeq == ack.LastSnapshotSeqReceived)
+        {
+            session.LastSnapshotRetryCount = 0;
+        }
+    }
 
     private void HandleTeleport(SessionState session, TeleportRequest request, List<WorldCommand> worldCommands)
     {
@@ -750,21 +788,73 @@ public sealed class ServerHost
                     .ToArray();
             }
 
-            Snapshot snapshot = new(
+            if (session.SupportsSnapshotAckV2 &&
+                session.LastFullSnapshot is { } lastSnapshot &&
+                lastSnapshot.ZoneId == zone.Id.Value &&
+                session.LastAckedSnapshotSeq < lastSnapshot.SnapshotSeq)
+            {
+                session.Endpoint.EnqueueToClient(lastSnapshot.EncodedPayload);
+                Metrics.IncrementMessagesOut();
+                emittedCount++;
+                session.LastSnapshotRetryCount++;
+
+                if (session.LastSnapshotRetryCount > _serverConfig.SnapshotRetryLimit)
+                {
+                    DisconnectSession(session, "snapshot_retry_limit_exceeded");
+                    continue;
+                }
+
+                _logger.LogInformation(
+                    ServerLogEvents.SnapshotResent,
+                    "SnapshotResent tick={Tick} sessionId={SessionId} zoneId={ZoneId} snapshotSeq={SnapshotSeq} retry={RetryCount}",
+                    _world.Tick,
+                    session.SessionId.Value,
+                    zone.Id.Value,
+                    lastSnapshot.SnapshotSeq,
+                    session.LastSnapshotRetryCount);
+            }
+
+            if (session.SupportsSnapshotAckV2)
+            {
+                int snapshotSeq = session.NextSnapshotSeq++;
+                SnapshotV2 snapshot = new(
+                    Tick: _world.Tick,
+                    ZoneId: zone.Id.Value,
+                    SnapshotSeq: snapshotSeq,
+                    IsFull: true,
+                    Entities: entities);
+
+                if (self is not null && !snapshot.Entities.Any(e => e.EntityId == self.Id.Value))
+                {
+                    throw new InvariantViolationException($"invariant=SnapshotIncludesSelf tick={_world.Tick} zoneId={zone.Id.Value} sessionId={session.SessionId.Value} entityId={self.Id.Value}");
+                }
+
+                byte[] encodedV2 = ProtocolCodec.Encode(snapshot);
+                session.LastFullSnapshot = new SessionSnapshotCache(zone.Id.Value, snapshotSeq, encodedV2);
+
+                session.LastSnapshotTick = _world.Tick;
+                session.Endpoint.EnqueueToClient(encodedV2);
+                Metrics.IncrementMessagesOut();
+                emittedCount++;
+                _recentSnapshots.Add(new Snapshot(snapshot.Tick, snapshot.ZoneId, snapshot.Entities));
+                continue;
+            }
+
+            Snapshot legacySnapshot = new(
                 Tick: _world.Tick,
                 ZoneId: zone.Id.Value,
                 Entities: entities);
 
-            if (self is not null && !snapshot.Entities.Any(e => e.EntityId == self.Id.Value))
+            if (self is not null && !legacySnapshot.Entities.Any(e => e.EntityId == self.Id.Value))
             {
                 throw new InvariantViolationException($"invariant=SnapshotIncludesSelf tick={_world.Tick} zoneId={zone.Id.Value} sessionId={session.SessionId.Value} entityId={self.Id.Value}");
             }
 
             session.LastSnapshotTick = _world.Tick;
-            session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(snapshot));
+            session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(legacySnapshot));
             Metrics.IncrementMessagesOut();
             emittedCount++;
-            _recentSnapshots.Add(snapshot);
+            _recentSnapshots.Add(legacySnapshot);
         }
 
         if (emittedCount > 0)
@@ -837,7 +927,19 @@ public sealed class ServerHost
         public int InputsAcceptedThisTick { get; set; }
 
         public int LastSnapshotTick { get; set; } = -1;
+
+        public bool SupportsSnapshotAckV2 { get; set; }
+
+        public int NextSnapshotSeq { get; set; } = 1;
+
+        public int LastAckedSnapshotSeq { get; set; }
+
+        public SessionSnapshotCache? LastFullSnapshot { get; set; }
+
+        public int LastSnapshotRetryCount { get; set; }
     }
+
+    private readonly record struct SessionSnapshotCache(int ZoneId, int SnapshotSeq, byte[] EncodedPayload);
 
     private readonly record struct PendingInput(int Tick, int EntityId, int ZoneId, sbyte MoveX, sbyte MoveY);
 

@@ -15,6 +15,7 @@ public static class ProtocolCodec
     private const byte ClientHandshakeRequest = 8;
     private const byte ClientEnterZoneRequestV2 = 9;
     private const byte ClientLeaveZoneRequestV2 = 10;
+    private const byte ClientAckV2 = 11;
 
     private const byte ServerWelcome = 101;
     private const byte ServerEnterZoneAck = 102;
@@ -38,6 +39,7 @@ public static class ProtocolCodec
             AttackIntent attack => EncodeAttackIntent(attack),
             LeaveZoneRequest request => EncodeIntMessage(ClientLeaveZoneRequest, request.ZoneId),
             LeaveZoneRequestV2 request => EncodeIntMessage(ClientLeaveZoneRequestV2, request.ZoneId),
+            ClientAckV2 ack => EncodeClientAckV2(ack),
             TeleportRequest request => EncodeIntMessage(ClientTeleportRequest, request.ToZoneId),
             _ => throw new InvalidOperationException($"Unsupported client message type: {msg.GetType().Name}")
         };
@@ -110,6 +112,22 @@ public static class ProtocolCodec
                     : new LeaveZoneRequest(leaveZoneId);
                 error = ProtocolErrorCode.None;
                 return true;
+            case ClientAckV2:
+                if (!TryReadInt32(data, 1, out int ackZoneId, out error) ||
+                    !TryReadInt32(data, 5, out int lastSeq, out error))
+                {
+                    return false;
+                }
+
+                if (ackZoneId <= 0 || lastSeq < 0)
+                {
+                    error = ProtocolErrorCode.ValueOutOfRange;
+                    return false;
+                }
+
+                msg = new ClientAckV2(ackZoneId, lastSeq);
+                error = ProtocolErrorCode.None;
+                return true;
             case ClientTeleportRequest:
                 if (!TryReadInt32(data, 1, out int toZoneId, out error))
                 {
@@ -139,8 +157,8 @@ public static class ProtocolCodec
         {
             Welcome welcome => EncodeWelcome(welcome),
             EnterZoneAck ack => EncodeEnterZoneAck(ack),
+            SnapshotV2 snapshot => EncodeSnapshotV2(snapshot),
             Snapshot snapshot => EncodeSnapshot(snapshot, ServerSnapshot),
-            SnapshotV2 snapshot => EncodeSnapshot(new Snapshot(snapshot.Tick, snapshot.ZoneId, snapshot.Entities), ServerSnapshotV2),
             Error error => EncodeError(error),
             Disconnect disconnect => EncodeDisconnect(disconnect),
             _ => throw new InvalidOperationException($"Unsupported server message type: {msg.GetType().Name}")
@@ -237,6 +255,16 @@ public static class ProtocolCodec
         msg = new HandshakeRequest(protocolVersion, accountId);
         error = ProtocolErrorCode.None;
         return true;
+    }
+
+
+    private static byte[] EncodeClientAckV2(ClientAckV2 ack)
+    {
+        byte[] data = new byte[1 + 4 + 4];
+        data[0] = ClientAckV2;
+        WriteInt32(data, 1, ack.ZoneId);
+        WriteInt32(data, 5, ack.LastSnapshotSeqReceived);
+        return data;
     }
 
     private static byte[] EncodeHello(Hello hello)
@@ -588,17 +616,80 @@ public static class ProtocolCodec
         return data;
     }
 
+
+    private static byte[] EncodeSnapshotV2(SnapshotV2 snapshot)
+    {
+        SnapshotEntity[] entities = snapshot.Entities ?? Array.Empty<SnapshotEntity>();
+        byte[] data = new byte[1 + 4 + 4 + 4 + 1 + 4 + (entities.Length * ((6 * 4) + 1))];
+        data[0] = ServerSnapshotV2;
+        WriteInt32(data, 1, snapshot.Tick);
+        WriteInt32(data, 5, snapshot.ZoneId);
+        WriteInt32(data, 9, snapshot.SnapshotSeq);
+        data[13] = snapshot.IsFull ? (byte)1 : (byte)0;
+        WriteInt32(data, 14, entities.Length);
+
+        int offset = 18;
+        for (int i = 0; i < entities.Length; i++)
+        {
+            SnapshotEntity entity = entities[i];
+            WriteInt32(data, offset, entity.EntityId);
+            WriteInt32(data, offset + 4, entity.PosXRaw);
+            WriteInt32(data, offset + 8, entity.PosYRaw);
+            WriteInt32(data, offset + 12, entity.VelXRaw);
+            WriteInt32(data, offset + 16, entity.VelYRaw);
+            WriteInt32(data, offset + 20, entity.Hp);
+            data[offset + 24] = (byte)entity.Kind;
+            offset += 25;
+        }
+
+        return data;
+    }
+
     private static bool TryDecodeSnapshot(ReadOnlySpan<byte> data, out IServerMessage? msg, out ProtocolErrorCode error, bool isV2)
     {
         msg = null;
-        if (!TryReadInt32(data, 1, out int tick, out error) ||
-            !TryReadInt32(data, 5, out int zoneId, out error) ||
-            !TryReadInt32(data, 9, out int entityCount, out error))
+
+        int entityCountOffset;
+        int tick;
+        int zoneId;
+        int snapshotSeq = 0;
+        bool isFull = true;
+
+        if (isV2)
+        {
+            if (!TryReadInt32(data, 1, out tick, out error) ||
+                !TryReadInt32(data, 5, out zoneId, out error) ||
+                !TryReadInt32(data, 9, out snapshotSeq, out error))
+            {
+                return false;
+            }
+
+            if (data.Length < 14)
+            {
+                error = ProtocolErrorCode.Truncated;
+                return false;
+            }
+
+            isFull = data[13] != 0;
+            entityCountOffset = 14;
+        }
+        else
+        {
+            if (!TryReadInt32(data, 1, out tick, out error) ||
+                !TryReadInt32(data, 5, out zoneId, out error))
+            {
+                return false;
+            }
+
+            entityCountOffset = 9;
+        }
+
+        if (!TryReadInt32(data, entityCountOffset, out int entityCount, out error))
         {
             return false;
         }
 
-        if (tick < 0 || zoneId <= 0 || entityCount < 0)
+        if (tick < 0 || zoneId <= 0 || entityCount < 0 || (isV2 && snapshotSeq <= 0))
         {
             error = ProtocolErrorCode.ValueOutOfRange;
             return false;
@@ -609,7 +700,7 @@ public static class ProtocolCodec
         {
             checked
             {
-                requiredLength = 13 + (entityCount * 25);
+                requiredLength = (entityCountOffset + 4) + (entityCount * 25);
             }
         }
         catch (OverflowException)
@@ -625,7 +716,7 @@ public static class ProtocolCodec
         }
 
         SnapshotEntity[] entities = new SnapshotEntity[entityCount];
-        int offset = 13;
+        int offset = entityCountOffset + 4;
 
         for (int i = 0; i < entityCount; i++)
         {
@@ -647,7 +738,7 @@ public static class ProtocolCodec
         }
 
         msg = isV2
-            ? new SnapshotV2(tick, zoneId, entities)
+            ? new SnapshotV2(tick, zoneId, snapshotSeq, isFull, entities)
             : new Snapshot(tick, zoneId, entities);
         error = ProtocolErrorCode.None;
         return true;
