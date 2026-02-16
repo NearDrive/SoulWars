@@ -97,6 +97,47 @@ public static class ServerInvariants
     }
 
     private static bool IsFinite(Fix32 value) => value.Raw != int.MinValue && value.Raw != int.MaxValue;
+
+    public static void ValidateManualZoneDefinitions(WorldState world, ZoneDefinitions definitions, int tick)
+    {
+        HashSet<int> zoneIds = definitions.Zones.Select(z => z.ZoneId.Value).ToHashSet();
+        foreach (ZoneState zone in world.Zones)
+        {
+            if (!zoneIds.Contains(zone.Id.Value))
+            {
+                throw new InvariantViolationException($"invariant=ZoneWithoutDefinition tick={tick} zoneId={zone.Id.Value}");
+            }
+        }
+
+        foreach (ZoneDefinition definition in definitions.Zones)
+        {
+            if (!world.TryGetZone(definition.ZoneId, out ZoneState zone))
+            {
+                throw new InvariantViolationException($"invariant=MissingZoneFromWorld tick={tick} zoneId={definition.ZoneId.Value}");
+            }
+
+            foreach (ZoneAabb obstacle in definition.StaticObstacles)
+            {
+                if (obstacle.HalfExtents.X.Raw <= 0 || obstacle.HalfExtents.Y.Raw <= 0)
+                {
+                    throw new InvariantViolationException($"invariant=ObstacleHalfExtentPositive tick={tick} zoneId={definition.ZoneId.Value}");
+                }
+            }
+
+            HashSet<(int X, int Y)> allowedPoints = definition.NpcSpawns
+                .SelectMany(s => s.SpawnPoints.Take(s.Count))
+                .Select(p => (p.X.Raw, p.Y.Raw))
+                .ToHashSet();
+
+            foreach (EntityState npc in zone.Entities.Where(e => e.Kind == EntityKind.Npc))
+            {
+                if (!allowedPoints.Contains((npc.Pos.X.Raw, npc.Pos.Y.Raw)))
+                {
+                    throw new InvariantViolationException($"invariant=NpcOutsideDefinedSpawn tick={tick} zoneId={zone.Id.Value} entityId={npc.Id.Value}");
+                }
+            }
+        }
+    }
 }
 
 public sealed record ServerHostDebugView(

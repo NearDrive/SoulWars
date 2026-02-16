@@ -1,0 +1,19 @@
+{
+  "ZoneId": 1,
+  "StaticObstacles": [
+    { "CenterX": 10.0, "CenterY": 10.0, "HalfExtentX": 1.0, "HalfExtentY": 2.0 },
+    { "CenterX": 20.0, "CenterY": 6.0, "HalfExtentX": 2.0, "HalfExtentY": 1.0 }
+  ],
+  "NpcSpawns": [
+    {
+      "NpcArchetypeId": "wolf",
+      "Count": 2,
+      "Level": 3,
+      "SpawnPoints": [
+        { "X": 4.5, "Y": 4.5 },
+        { "X": 5.5, "Y": 4.5 }
+      ]
+    }
+  ],
+  "LootRules": null
+}
