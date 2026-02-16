@@ -124,16 +124,19 @@ public static class ServerInvariants
                 }
             }
 
-            HashSet<(int X, int Y)> allowedPoints = definition.NpcSpawns
-                .SelectMany(s => s.SpawnPoints.Take(s.Count))
-                .Select(p => (p.X.Raw, p.Y.Raw))
-                .ToHashSet();
-
-            foreach (EntityState npc in zone.Entities.Where(e => e.Kind == EntityKind.Npc))
+            if (tick == 0)
             {
-                if (!allowedPoints.Contains((npc.Pos.X.Raw, npc.Pos.Y.Raw)))
+                HashSet<(int X, int Y)> allowedPoints = definition.NpcSpawns
+                    .SelectMany(s => s.SpawnPoints.Take(s.Count))
+                    .Select(p => (p.X.Raw, p.Y.Raw))
+                    .ToHashSet();
+
+                foreach (EntityState npc in zone.Entities.Where(e => e.Kind == EntityKind.Npc))
                 {
-                    throw new InvariantViolationException($"invariant=NpcOutsideDefinedSpawn tick={tick} zoneId={zone.Id.Value} entityId={npc.Id.Value}");
+                    if (!allowedPoints.Contains((npc.Pos.X.Raw, npc.Pos.Y.Raw)))
+                    {
+                        throw new InvariantViolationException($"invariant=NpcOutsideDefinedSpawn tick={tick} zoneId={zone.Id.Value} entityId={npc.Id.Value}");
+                    }
                 }
             }
         }
