@@ -382,7 +382,15 @@ VALUES (1, $tick, $worldBlob, $checksum);
 INSERT INTO players(account_id, player_id, entity_id, zone_id)
 VALUES ('seed-player', 1, NULL, NULL);
 INSERT INTO meta(key, value)
-VALUES ('server_seed', $serverSeed);";
+VALUES ('server_seed', $serverSeed);
+INSERT INTO meta(key, value)
+VALUES ('format_version', '1');
+INSERT INTO meta(key, value)
+VALUES ('world_id', 'default');
+INSERT INTO meta(key, value)
+VALUES ('created_at_tick', $tick);
+INSERT INTO meta(key, value)
+VALUES ('saved_at_tick', $tick);";
         command.Parameters.AddWithValue("$tick", tick);
         command.Parameters.AddWithValue("$worldBlob", worldBlob);
         command.Parameters.AddWithValue("$checksum", checksum);
