@@ -35,10 +35,10 @@ public sealed class ServerHost
         _serverConfig = config;
         _simulationConfig = config.ToSimulationConfig();
         _world = bootstrap?.World ?? Simulation.CreateInitialState(_simulationConfig);
+        _nextEntityId = Math.Max(_nextEntityId, ComputeNextEntityId(_world));
         if (bootstrap is not null)
         {
             _playerRegistry.LoadFromRecords(bootstrap.Players);
-            _nextEntityId = Math.Max(_nextEntityId, ComputeNextEntityId(_world));
         }
         ILoggerFactory factory = loggerFactory ?? NullLoggerFactory.Instance;
         _logger = factory.CreateLogger<ServerHost>();
@@ -218,7 +218,10 @@ public sealed class ServerHost
             ServerInvariants.Validate(new ServerHostDebugView(
                 LastTick: _lastTick,
                 CurrentTick: _world.Tick,
+                NextSessionId: _nextSessionId,
+                NextEntityId: _nextEntityId,
                 Sessions: OrderedSessions().Select(s => new ServerSessionDebugView(s.SessionId.Value, s.EntityId, s.LastSnapshotTick, s.ActiveZoneId)).ToArray(),
+                Players: _playerRegistry.OrderedStates().ToArray(),
                 Snapshots: _recentSnapshots.ToArray(),
                 World: _world));
         }

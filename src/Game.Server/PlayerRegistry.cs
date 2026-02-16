@@ -60,6 +60,8 @@ public sealed class PlayerRegistry
 
     public IEnumerable<PlayerState> OrderedStates() => _byPlayerId.Values.OrderBy(s => s.PlayerId.Value);
 
+    public int MaxPlayerId => _byPlayerId.Count == 0 ? 0 : _byPlayerId.Keys.Max();
+
     public void LoadFromRecords(IEnumerable<BootstrapPlayerRecord> players)
     {
         ArgumentNullException.ThrowIfNull(players);

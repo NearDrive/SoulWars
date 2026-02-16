@@ -6,12 +6,24 @@ public static class CoreInvariants
 
     public static void Validate(WorldState world, int tick)
     {
+        ArgumentNullException.ThrowIfNull(world);
+
         HashSet<int> seenEntityIds = new();
         Dictionary<int, int> entityZones = new();
         int lastZoneId = int.MinValue;
 
         foreach (ZoneState zone in world.Zones)
         {
+            if (zone is null)
+            {
+                throw new InvariantViolationException($"invariant=ZoneNotNull tick={tick}");
+            }
+
+            if (zone.Map is null)
+            {
+                throw new InvariantViolationException($"invariant=ZoneMapNotNull tick={tick} zoneId={zone.Id.Value}");
+            }
+
             if (zone.Id.Value <= lastZoneId)
             {
                 throw new InvariantViolationException($"invariant=ZonesOrdered tick={tick} zoneId={zone.Id.Value} lastZoneId={lastZoneId}");
@@ -52,6 +64,16 @@ public static class CoreInvariants
                 if (expectsAi != hasAi)
                 {
                     throw new InvariantViolationException($"invariant=AiMaskMatchesKind tick={tick} zoneId={zone.Id.Value} entityId={id} kind={zone.EntitiesData.Kinds[i]} hasAi={hasAi}");
+                }
+
+                if (mask.Has(ComponentMask.CombatBit) && !mask.Has(ComponentMask.PositionBit))
+                {
+                    throw new InvariantViolationException($"invariant=CombatRequiresPosition tick={tick} zoneId={zone.Id.Value} entityId={id}");
+                }
+
+                if (mask.Has(ComponentMask.AiBit) && !mask.Has(ComponentMask.PositionBit))
+                {
+                    throw new InvariantViolationException($"invariant=AiRequiresPosition tick={tick} zoneId={zone.Id.Value} entityId={id}");
                 }
             }
 

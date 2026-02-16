@@ -53,6 +53,14 @@ public static class ServerInvariants
             }
         }
 
+        PersistenceInvariants.Validate(
+            view.World,
+            view.Players,
+            view.CurrentTick,
+            view.NextEntityId,
+            view.NextSessionId,
+            maxSeenSessionId: lastSessionId);
+
         if (view.CurrentTick < view.LastTick)
         {
             throw new InvariantViolationException($"invariant=ServerTickMonotonic currentTick={view.CurrentTick} lastTick={view.LastTick}");
@@ -91,6 +99,14 @@ public static class ServerInvariants
     private static bool IsFinite(Fix32 value) => value.Raw != int.MinValue && value.Raw != int.MaxValue;
 }
 
-public sealed record ServerHostDebugView(int LastTick, int CurrentTick, IReadOnlyList<ServerSessionDebugView> Sessions, IReadOnlyList<Snapshot> Snapshots, WorldState World);
+public sealed record ServerHostDebugView(
+    int LastTick,
+    int CurrentTick,
+    int NextSessionId,
+    int NextEntityId,
+    IReadOnlyList<ServerSessionDebugView> Sessions,
+    IReadOnlyList<PlayerState> Players,
+    IReadOnlyList<Snapshot> Snapshots,
+    WorldState World);
 
 public sealed record ServerSessionDebugView(int SessionId, int? EntityId, int LastSnapshotTick, int? ActiveZoneId);
