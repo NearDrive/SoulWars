@@ -36,11 +36,15 @@ public sealed record HelloV2(string ClientVersion, string AccountId) : IClientMe
 
 public sealed record EnterZoneRequest(int ZoneId) : IClientMessage;
 
+public sealed record EnterZoneRequestV2(int ZoneId) : IClientMessage;
+
 public sealed record InputCommand(int Tick, sbyte MoveX, sbyte MoveY) : IClientMessage;
 
 public sealed record AttackIntent(int Tick, int AttackerId, int TargetId, int ZoneId) : IClientMessage;
 
 public sealed record LeaveZoneRequest(int ZoneId) : IClientMessage;
+
+public sealed record LeaveZoneRequestV2(int ZoneId) : IClientMessage;
 
 public sealed record TeleportRequest(int ToZoneId) : IClientMessage;
 
@@ -55,6 +59,8 @@ public sealed record Disconnect(DisconnectReason Reason) : IServerMessage;
 public sealed record EnterZoneAck(int ZoneId, int EntityId) : IServerMessage;
 
 public sealed record Snapshot(int Tick, int ZoneId, SnapshotEntity[] Entities) : IServerMessage;
+
+public sealed record SnapshotV2(int Tick, int ZoneId, SnapshotEntity[] Entities) : IServerMessage;
 
 public sealed record Error(string Code, string Message) : IServerMessage;
 

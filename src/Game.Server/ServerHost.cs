@@ -142,40 +142,19 @@ public sealed class ServerHost
 
         foreach (PendingInput pending in OrderedPendingInputs(targetTick))
         {
-            SessionState session = _sessions[pending.SessionId.Value];
-            if (session.ActiveZoneId is null || session.EntityId is null)
-            {
-                continue;
-            }
-
             worldCommands.Add(new WorldCommand(
                 Kind: WorldCommandKind.MoveIntent,
-                EntityId: new EntityId(session.EntityId.Value),
-                ZoneId: new ZoneId(session.ActiveZoneId.Value),
+                EntityId: new EntityId(pending.EntityId),
+                ZoneId: new ZoneId(pending.ZoneId),
                 MoveX: pending.MoveX,
                 MoveY: pending.MoveY));
         }
 
         foreach (PendingAttackIntent pending in OrderedPendingAttackIntents(targetTick))
         {
-            if (!_sessions.TryGetValue(pending.SessionId.Value, out SessionState? session))
-            {
-                continue;
-            }
-
-            if (session.ActiveZoneId is null || session.EntityId is null)
-            {
-                continue;
-            }
-
-            if (session.ActiveZoneId.Value != pending.ZoneId)
-            {
-                continue;
-            }
-
             worldCommands.Add(new WorldCommand(
                 Kind: WorldCommandKind.AttackIntent,
-                EntityId: new EntityId(session.EntityId.Value),
+                EntityId: new EntityId(pending.EntityId),
                 ZoneId: new ZoneId(pending.ZoneId),
                 TargetEntityId: new EntityId(pending.TargetEntityId)));
         }
@@ -220,7 +199,7 @@ public sealed class ServerHost
                 CurrentTick: _world.Tick,
                 NextSessionId: _nextSessionId,
                 NextEntityId: _nextEntityId,
-                Sessions: OrderedSessions().Select(s => new ServerSessionDebugView(s.SessionId.Value, s.EntityId, s.LastSnapshotTick, s.ActiveZoneId)).ToArray(),
+                Sessions: OrderedSessions().Select(s => new ServerSessionDebugView(s.SessionId.Value, s.EntityId, s.LastSnapshotTick, s.CurrentZoneId)).ToArray(),
                 Players: _playerRegistry.OrderedStates().ToArray(),
                 Snapshots: _recentSnapshots.ToArray(),
                 World: _world));
@@ -343,7 +322,10 @@ public sealed class ServerHost
                     _logger.LogWarning(ServerLogEvents.UnknownClientMessageType, "UnknownClientMessageType sessionId={SessionId} reason={Reason}", session.SessionId.Value, "legacy_hello_unexpected_after_decode");
                     break;
                 case EnterZoneRequest enterZoneRequest:
-                    HandleEnterZone(session, enterZoneRequest, worldCommands);
+                    HandleEnterZone(session, enterZoneRequest.ZoneId, worldCommands);
+                    break;
+                case EnterZoneRequestV2 enterZoneRequestV2:
+                    HandleEnterZone(session, enterZoneRequestV2.ZoneId, worldCommands);
                     break;
                 case InputCommand inputCommand:
                     if (!TryEnqueueInputForTick(session, targetTick, inputCommand))
@@ -353,10 +335,17 @@ public sealed class ServerHost
 
                     break;
                 case AttackIntent attackIntent:
-                    _pendingAttackIntents.Add(new PendingAttackIntent(targetTick, session.SessionId, attackIntent.ZoneId, attackIntent.TargetId));
+                    PendingAttackIntent? pendingAttack = CreatePendingAttackIntent(targetTick, session, attackIntent);
+                    if (pendingAttack is not null)
+                    {
+                        _pendingAttackIntents.Add(pendingAttack.Value);
+                    }
                     break;
                 case LeaveZoneRequest leaveZoneRequest:
-                    HandleLeaveZone(session, leaveZoneRequest, worldCommands);
+                    HandleLeaveZone(session, leaveZoneRequest.ZoneId, worldCommands);
+                    break;
+                case LeaveZoneRequestV2 leaveZoneRequestV2:
+                    HandleLeaveZone(session, leaveZoneRequestV2.ZoneId, worldCommands);
                     break;
                 case TeleportRequest teleportRequest:
                     HandleTeleport(session, teleportRequest, worldCommands);
@@ -378,19 +367,39 @@ public sealed class ServerHost
             return false;
         }
 
-        PendingInput pending = ClampMoveInput(targetTick, session.SessionId, inputCommand.MoveX, inputCommand.MoveY);
+        if (session.EntityId is null || session.CurrentZoneId is null)
+        {
+            return false;
+        }
+
+        PendingInput pending = ClampMoveInput(targetTick, session.EntityId.Value, session.CurrentZoneId.Value, inputCommand.MoveX, inputCommand.MoveY);
         session.PendingInputs.Add(pending);
         session.InputsAcceptedThisTick++;
         return true;
     }
 
-    private PendingInput ClampMoveInput(int tick, SessionId sessionId, sbyte moveX, sbyte moveY)
+    private PendingAttackIntent? CreatePendingAttackIntent(int targetTick, SessionState session, AttackIntent attackIntent)
+    {
+        if (session.EntityId is null || session.CurrentZoneId is null)
+        {
+            return null;
+        }
+
+        if (session.CurrentZoneId.Value != attackIntent.ZoneId)
+        {
+            return null;
+        }
+
+        return new PendingAttackIntent(targetTick, session.EntityId.Value, session.CurrentZoneId.Value, attackIntent.TargetId);
+    }
+
+    private PendingInput ClampMoveInput(int tick, int entityId, int zoneId, sbyte moveX, sbyte moveY)
     {
         int maxAxis = Math.Clamp(Fix32.FloorToInt(_serverConfig.MaxMoveVectorLen), 0, 1);
         int clampedX = Math.Clamp(moveX, -maxAxis, maxAxis);
         int clampedY = Math.Clamp(moveY, -maxAxis, maxAxis);
 
-        return new PendingInput(tick, sessionId, (sbyte)clampedX, (sbyte)clampedY);
+        return new PendingInput(tick, entityId, zoneId, (sbyte)clampedX, (sbyte)clampedY);
     }
 
     private void HandleHandshake(SessionState session, HandshakeRequest request)
@@ -422,7 +431,7 @@ public sealed class ServerHost
         if (_playerRegistry.TryGetState(playerId, out PlayerState state))
         {
             session.EntityId = state.EntityId;
-            session.ActiveZoneId = state.ZoneId;
+            session.CurrentZoneId = state.ZoneId;
         }
 
         session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Welcome(session.SessionId, playerId, ProtocolConstants.CurrentProtocolVersion, ProtocolConstants.ServerCapabilities)));
@@ -431,7 +440,7 @@ public sealed class ServerHost
         _auditSink.Emit(AuditEvent.PlayerConnected(_world.Tick, NextAuditSeq(), normalizedAccountId, playerId.Value));
     }
 
-    private void HandleEnterZone(SessionState session, EnterZoneRequest request, List<WorldCommand> worldCommands)
+    private void HandleEnterZone(SessionState session, int requestedZoneId, List<WorldCommand> worldCommands)
     {
         if (session.PlayerId is null)
         {
@@ -443,7 +452,17 @@ public sealed class ServerHost
             return;
         }
 
-        int zoneId = playerState.ZoneId ?? request.ZoneId;
+        if (session.CurrentZoneId == requestedZoneId &&
+            session.EntityId is int currentEntityId &&
+            _world.TryGetEntityZone(new EntityId(currentEntityId), out ZoneId currentZoneId) &&
+            currentZoneId.Value == requestedZoneId)
+        {
+            session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new EnterZoneAck(requestedZoneId, currentEntityId)));
+            Metrics.IncrementMessagesOut();
+            return;
+        }
+
+        int zoneId = playerState.ZoneId ?? requestedZoneId;
         int entityId;
 
         if (playerState.EntityId is int existingEntityId &&
@@ -462,7 +481,7 @@ public sealed class ServerHost
         }
 
         session.EntityId = entityId;
-        session.ActiveZoneId = zoneId;
+        session.CurrentZoneId = zoneId;
         _playerRegistry.UpdateWorldState(session.PlayerId.Value, entityId, zoneId, isAlive: true);
 
         session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new EnterZoneAck(zoneId, entityId)));
@@ -482,12 +501,12 @@ public sealed class ServerHost
 
     private void HandleTeleport(SessionState session, TeleportRequest request, List<WorldCommand> worldCommands)
     {
-        if (session.EntityId is null || session.ActiveZoneId is null)
+        if (session.EntityId is null || session.CurrentZoneId is null)
         {
             return;
         }
 
-        int fromZoneId = session.ActiveZoneId.Value;
+        int fromZoneId = session.CurrentZoneId.Value;
         if (request.ToZoneId <= 0 || request.ToZoneId > _simulationConfig.ZoneCount || request.ToZoneId == fromZoneId)
         {
             return;
@@ -505,9 +524,14 @@ public sealed class ServerHost
         }
     }
 
-    private void HandleLeaveZone(SessionState session, LeaveZoneRequest request, List<WorldCommand> worldCommands)
+    private void HandleLeaveZone(SessionState session, int requestedZoneId, List<WorldCommand> worldCommands)
     {
-        if (session.EntityId is null)
+        if (session.EntityId is null || session.CurrentZoneId is null)
+        {
+            return;
+        }
+
+        if (requestedZoneId != session.CurrentZoneId.Value)
         {
             return;
         }
@@ -515,12 +539,9 @@ public sealed class ServerHost
         worldCommands.Add(new WorldCommand(
             Kind: WorldCommandKind.LeaveZone,
             EntityId: new EntityId(session.EntityId.Value),
-            ZoneId: new ZoneId(request.ZoneId)));
+            ZoneId: new ZoneId(requestedZoneId)));
 
-        if (session.ActiveZoneId == request.ZoneId)
-        {
-            session.ActiveZoneId = null;
-        }
+        session.CurrentZoneId = null;
     }
 
     private IEnumerable<SessionState> OrderedSessions() => _sessions.Values.OrderBy(s => s.SessionId.Value);
@@ -551,7 +572,8 @@ public sealed class ServerHost
 
         return due
             .OrderBy(input => input.Tick)
-            .ThenBy(input => input.SessionId.Value)
+            .ThenBy(input => input.ZoneId)
+            .ThenBy(input => input.EntityId)
             .ToArray();
     }
 
@@ -561,7 +583,8 @@ public sealed class ServerHost
         PendingAttackIntent[] due = _pendingAttackIntents
             .Where(p => p.Tick <= targetTick)
             .OrderBy(p => p.Tick)
-            .ThenBy(p => p.SessionId.Value)
+            .ThenBy(p => p.ZoneId)
+            .ThenBy(p => p.EntityId)
             .ThenBy(p => p.TargetEntityId)
             .ToArray();
 
@@ -581,7 +604,7 @@ public sealed class ServerHost
 
             if (_world.TryGetEntityZone(new EntityId(session.EntityId.Value), out ZoneId zoneId))
             {
-                session.ActiveZoneId = zoneId.Value;
+                session.CurrentZoneId = zoneId.Value;
                 if (session.PlayerId is PlayerId playerId)
                 {
                     _playerRegistry.UpdateWorldState(playerId, session.EntityId.Value, zoneId.Value, isAlive: true);
@@ -589,7 +612,7 @@ public sealed class ServerHost
             }
             else if (session.PlayerId is PlayerId playerId)
             {
-                _playerRegistry.UpdateWorldState(playerId, null, session.ActiveZoneId, isAlive: false);
+                _playerRegistry.UpdateWorldState(playerId, null, session.CurrentZoneId, isAlive: false);
                 session.EntityId = null;
             }
         }
@@ -654,12 +677,12 @@ public sealed class ServerHost
 
         foreach (SessionState session in OrderedSessions())
         {
-            if (session.ActiveZoneId is null)
+            if (session.CurrentZoneId is null)
             {
                 continue;
             }
 
-            ZoneId zoneId = new(session.ActiveZoneId.Value);
+            ZoneId zoneId = new(session.CurrentZoneId.Value);
             if (!_world.TryGetZone(zoneId, out ZoneState zone))
             {
                 continue;
@@ -781,7 +804,7 @@ public sealed class ServerHost
 
         public int? EntityId { get; set; }
 
-        public int? ActiveZoneId { get; set; }
+        public int? CurrentZoneId { get; set; }
 
         public List<PendingInput> PendingInputs { get; } = new();
 
@@ -792,7 +815,7 @@ public sealed class ServerHost
         public int LastSnapshotTick { get; set; } = -1;
     }
 
-    private readonly record struct PendingInput(int Tick, SessionId SessionId, sbyte MoveX, sbyte MoveY);
+    private readonly record struct PendingInput(int Tick, int EntityId, int ZoneId, sbyte MoveX, sbyte MoveY);
 
-    private readonly record struct PendingAttackIntent(int Tick, SessionId SessionId, int ZoneId, int TargetEntityId);
+    private readonly record struct PendingAttackIntent(int Tick, int EntityId, int ZoneId, int TargetEntityId);
 }

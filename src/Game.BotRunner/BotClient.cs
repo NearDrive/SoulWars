@@ -139,6 +139,21 @@ public sealed class BotClient : IAsyncDisposable
                     }
 
                     break;
+                case SnapshotV2 snapshotV2:
+                    Snapshot snapshot = new(snapshotV2.Tick, snapshotV2.ZoneId, snapshotV2.Entities);
+                    SnapshotsReceived++;
+                    LastSnapshotTick = Math.Max(LastSnapshotTick, snapshot.Tick);
+                    LastSnapshot = snapshot;
+                    if (EntityId is int selfId)
+                    {
+                        SnapshotEntity? self = snapshot.Entities.FirstOrDefault(entity => entity.EntityId == selfId);
+                        if (self is not null)
+                        {
+                            SelfHp = self.Hp;
+                        }
+                    }
+
+                    break;
             }
 
             onMsg(message);

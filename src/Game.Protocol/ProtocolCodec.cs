@@ -13,12 +13,15 @@ public static class ProtocolCodec
     private const byte ClientTeleportRequest = 6;
     private const byte ClientHelloV2 = 7;
     private const byte ClientHandshakeRequest = 8;
+    private const byte ClientEnterZoneRequestV2 = 9;
+    private const byte ClientLeaveZoneRequestV2 = 10;
 
     private const byte ServerWelcome = 101;
     private const byte ServerEnterZoneAck = 102;
     private const byte ServerSnapshot = 103;
     private const byte ServerError = 104;
     private const byte ServerDisconnect = 105;
+    private const byte ServerSnapshotV2 = 106;
 
     public static byte[] Encode(IClientMessage msg)
     {
@@ -30,9 +33,11 @@ public static class ProtocolCodec
             Hello hello => EncodeHello(hello),
             HelloV2 helloV2 => EncodeHelloV2(helloV2),
             EnterZoneRequest request => EncodeIntMessage(ClientEnterZoneRequest, request.ZoneId),
+            EnterZoneRequestV2 request => EncodeIntMessage(ClientEnterZoneRequestV2, request.ZoneId),
             InputCommand input => EncodeInputCommand(input),
             AttackIntent attack => EncodeAttackIntent(attack),
             LeaveZoneRequest request => EncodeIntMessage(ClientLeaveZoneRequest, request.ZoneId),
+            LeaveZoneRequestV2 request => EncodeIntMessage(ClientLeaveZoneRequestV2, request.ZoneId),
             TeleportRequest request => EncodeIntMessage(ClientTeleportRequest, request.ToZoneId),
             _ => throw new InvalidOperationException($"Unsupported client message type: {msg.GetType().Name}")
         };
@@ -66,6 +71,7 @@ public static class ProtocolCodec
             case ClientHandshakeRequest:
                 return TryDecodeHandshakeRequest(data, out msg, out error);
             case ClientEnterZoneRequest:
+            case ClientEnterZoneRequestV2:
                 if (!TryReadInt32(data, 1, out int enterZoneId, out error))
                 {
                     return false;
@@ -77,7 +83,9 @@ public static class ProtocolCodec
                     return false;
                 }
 
-                msg = new EnterZoneRequest(enterZoneId);
+                msg = data[0] == ClientEnterZoneRequestV2
+                    ? new EnterZoneRequestV2(enterZoneId)
+                    : new EnterZoneRequest(enterZoneId);
                 error = ProtocolErrorCode.None;
                 return true;
             case ClientInputCommand:
@@ -85,6 +93,7 @@ public static class ProtocolCodec
             case ClientAttackIntent:
                 return TryDecodeAttackIntent(data, out msg, out error);
             case ClientLeaveZoneRequest:
+            case ClientLeaveZoneRequestV2:
                 if (!TryReadInt32(data, 1, out int leaveZoneId, out error))
                 {
                     return false;
@@ -96,7 +105,9 @@ public static class ProtocolCodec
                     return false;
                 }
 
-                msg = new LeaveZoneRequest(leaveZoneId);
+                msg = data[0] == ClientLeaveZoneRequestV2
+                    ? new LeaveZoneRequestV2(leaveZoneId)
+                    : new LeaveZoneRequest(leaveZoneId);
                 error = ProtocolErrorCode.None;
                 return true;
             case ClientTeleportRequest:
@@ -128,7 +139,8 @@ public static class ProtocolCodec
         {
             Welcome welcome => EncodeWelcome(welcome),
             EnterZoneAck ack => EncodeEnterZoneAck(ack),
-            Snapshot snapshot => EncodeSnapshot(snapshot),
+            Snapshot snapshot => EncodeSnapshot(snapshot, ServerSnapshot),
+            SnapshotV2 snapshot => EncodeSnapshot(new Snapshot(snapshot.Tick, snapshot.ZoneId, snapshot.Entities), ServerSnapshotV2),
             Error error => EncodeError(error),
             Disconnect disconnect => EncodeDisconnect(disconnect),
             _ => throw new InvalidOperationException($"Unsupported server message type: {msg.GetType().Name}")
@@ -174,7 +186,9 @@ public static class ProtocolCodec
                 error = ProtocolErrorCode.None;
                 return true;
             case ServerSnapshot:
-                return TryDecodeSnapshot(data, out msg, out error);
+                return TryDecodeSnapshot(data, out msg, out error, isV2: false);
+            case ServerSnapshotV2:
+                return TryDecodeSnapshot(data, out msg, out error, isV2: true);
             case ServerError:
                 return TryDecodeError(data, out msg, out error);
             case ServerDisconnect:
@@ -548,11 +562,11 @@ public static class ProtocolCodec
         return data;
     }
 
-    private static byte[] EncodeSnapshot(Snapshot snapshot)
+    private static byte[] EncodeSnapshot(Snapshot snapshot, byte type)
     {
         SnapshotEntity[] entities = snapshot.Entities ?? Array.Empty<SnapshotEntity>();
         byte[] data = new byte[1 + 4 + 4 + 4 + (entities.Length * ((6 * 4) + 1))];
-        data[0] = ServerSnapshot;
+        data[0] = type;
         WriteInt32(data, 1, snapshot.Tick);
         WriteInt32(data, 5, snapshot.ZoneId);
         WriteInt32(data, 9, entities.Length);
@@ -574,7 +588,7 @@ public static class ProtocolCodec
         return data;
     }
 
-    private static bool TryDecodeSnapshot(ReadOnlySpan<byte> data, out IServerMessage? msg, out ProtocolErrorCode error)
+    private static bool TryDecodeSnapshot(ReadOnlySpan<byte> data, out IServerMessage? msg, out ProtocolErrorCode error, bool isV2)
     {
         msg = null;
         if (!TryReadInt32(data, 1, out int tick, out error) ||
@@ -632,7 +646,9 @@ public static class ProtocolCodec
             offset += 25;
         }
 
-        msg = new Snapshot(tick, zoneId, entities);
+        msg = isV2
+            ? new SnapshotV2(tick, zoneId, entities)
+            : new Snapshot(tick, zoneId, entities);
         error = ProtocolErrorCode.None;
         return true;
     }
