@@ -82,7 +82,9 @@ public static class WorldStateSerializer
             ImmutableArray<ZoneState> immutableZones = zones.MoveToImmutable();
             ImmutableArray<EntityLocation> locations = BuildEntityLocations(immutableZones);
 
-            return new WorldState(tick, immutableZones, locations);
+            WorldState loaded = new(tick, immutableZones, locations);
+            CoreInvariants.Validate(loaded, tick);
+            return loaded;
         }
         catch (EndOfStreamException ex)
         {

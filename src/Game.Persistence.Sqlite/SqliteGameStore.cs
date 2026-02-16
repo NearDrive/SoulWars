@@ -153,9 +153,11 @@ VALUES ($accountId, $playerId, $entityId, $zoneId);",
         }
 
         ImmutableArray<PlayerRecord> players = ReadPlayers(connection, transaction);
+        ImmutableArray<PlayerRecord> reconciledPlayers = ReconcilePlayers(world, players);
+
         transaction.Commit();
 
-        return new LoadResult(world, serverSeed, players, snapshot.Checksum);
+        return new LoadResult(world, serverSeed, reconciledPlayers, snapshot.Checksum);
     }
 
     private SqliteConnection OpenConnection()
@@ -191,23 +193,70 @@ VALUES ($accountId, $playerId, $entityId, $zoneId);",
 
     private static ImmutableArray<PlayerRecord> ReadPlayers(SqliteConnection connection, SqliteTransaction transaction)
     {
-        using SqliteCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT account_id, player_id, entity_id, zone_id FROM players ORDER BY player_id ASC;";
-
-        using SqliteDataReader reader = command.ExecuteReader();
-        ImmutableArray<PlayerRecord>.Builder players = ImmutableArray.CreateBuilder<PlayerRecord>();
-
-        while (reader.Read())
+        try
         {
-            string accountId = reader.GetString(0);
-            int playerId = reader.GetInt32(1);
-            int? entityId = reader.IsDBNull(2) ? null : reader.GetInt32(2);
-            int? zoneId = reader.IsDBNull(3) ? null : reader.GetInt32(3);
-            players.Add(new PlayerRecord(accountId, playerId, entityId, zoneId));
+            using SqliteCommand command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "SELECT account_id, player_id, entity_id, zone_id FROM players ORDER BY player_id ASC;";
+
+            using SqliteDataReader reader = command.ExecuteReader();
+            ImmutableArray<PlayerRecord>.Builder players = ImmutableArray.CreateBuilder<PlayerRecord>();
+
+            while (reader.Read())
+            {
+                string accountId = reader.GetString(0);
+                int playerId = reader.GetInt32(1);
+                int? entityId = reader.IsDBNull(2) ? null : reader.GetInt32(2);
+                int? zoneId = reader.IsDBNull(3) ? null : reader.GetInt32(3);
+                players.Add(new PlayerRecord(accountId, playerId, entityId, zoneId));
+            }
+
+            return players.ToImmutable();
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 1 && ex.Message.Contains("no such table: players", StringComparison.OrdinalIgnoreCase))
+        {
+            return ImmutableArray<PlayerRecord>.Empty;
+        }
+    }
+
+    private static ImmutableArray<PlayerRecord> ReconcilePlayers(WorldState world, ImmutableArray<PlayerRecord> players)
+    {
+        HashSet<int> seenPlayerIds = new();
+        HashSet<string> seenAccounts = new(StringComparer.Ordinal);
+        ImmutableArray<PlayerRecord>.Builder reconciled = ImmutableArray.CreateBuilder<PlayerRecord>(players.Length);
+
+        foreach (PlayerRecord player in players.OrderBy(p => p.PlayerId))
+        {
+            if (!seenPlayerIds.Add(player.PlayerId))
+            {
+                throw new InvalidDataException($"Duplicate player_id '{player.PlayerId}' in SQLite players table.");
+            }
+
+            if (!seenAccounts.Add(player.AccountId))
+            {
+                throw new InvalidDataException($"Duplicate account_id '{player.AccountId}' in SQLite players table.");
+            }
+
+            int? entityId = player.EntityId;
+            int? zoneId = player.ZoneId;
+
+            if (entityId is int id)
+            {
+                if (!world.TryGetEntityZone(new EntityId(id), out ZoneId worldZoneId))
+                {
+                    entityId = null;
+                    zoneId = null;
+                }
+                else
+                {
+                    zoneId = worldZoneId.Value;
+                }
+            }
+
+            reconciled.Add(new PlayerRecord(player.AccountId, player.PlayerId, entityId, zoneId));
         }
 
-        return players.ToImmutable();
+        return reconciled.ToImmutable();
     }
 
     private static string? ReadMetaValue(SqliteConnection connection, SqliteTransaction transaction, string key)

@@ -55,6 +55,9 @@ jobs:
       - name: Test
         run: dotnet test -c Release --no-build --filter "Category!=Soak" --logger "console;verbosity=detailed" --blame --blame-hang-timeout 2m
 
+      - name: Persistence consistency gate
+        run: dotnet test -c Release --no-build --filter "Category=Persistence" --logger "console;verbosity=normal"
+
       - name: MVP1 verify gate (headless)
         run: dotnet run -c Release --project src/Game.App.Headless -- --verify-mvp1
 
