@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -26,7 +27,7 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
     {
         _client = client;
         _stream = client.GetStream();
-        EndpointKey = client.Client.RemoteEndPoint?.ToString() ?? $"tcp-{Guid.NewGuid():N}";
+        EndpointKey = (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? $"tcp-{Guid.NewGuid():N}";
         _logger = logger ?? NullLogger<TcpEndpoint>.Instance;
         _readerTask = Task.Run(ReadLoopAsync);
         _writerTask = Task.Run(WriteLoopAsync);

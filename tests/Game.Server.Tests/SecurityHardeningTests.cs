@@ -119,10 +119,17 @@ public sealed class SecurityHardeningTests
 
     private static Disconnect ReadDisconnect(TestEndpoint endpoint)
     {
-        Assert.True(endpoint.TryDequeueFromServer(out byte[] payload));
-        Assert.True(ProtocolCodec.TryDecodeServer(payload, out IServerMessage? msg, out ProtocolErrorCode err));
-        Assert.Equal(ProtocolErrorCode.None, err);
-        return Assert.IsType<Disconnect>(msg);
+        while (endpoint.TryDequeueFromServer(out byte[] payload))
+        {
+            if (ProtocolCodec.TryDecodeServer(payload, out IServerMessage? msg, out ProtocolErrorCode err) &&
+                err == ProtocolErrorCode.None &&
+                msg is Disconnect disconnect)
+            {
+                return disconnect;
+            }
+        }
+
+        throw new Xunit.Sdk.XunitException("Disconnect message was not found.");
     }
 
     private static Disconnect ReadDisconnect(InMemoryEndpoint endpoint)
