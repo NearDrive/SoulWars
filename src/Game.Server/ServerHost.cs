@@ -15,6 +15,7 @@ public sealed class ServerHost
     private readonly ILogger<ServerHost> _logger;
     private readonly PlayerRegistry _playerRegistry = new();
     private readonly IAuditSink _auditSink;
+    private readonly IAoiProvider _aoiProvider;
 
     private int _nextSessionId = 1;
     private int _nextEntityId = 1;
@@ -45,6 +46,7 @@ public sealed class ServerHost
         bool enableMetrics = config.EnableMetrics;
         Metrics = metrics ?? new ServerMetrics(enableMetrics);
         _auditSink = auditSink ?? NullAuditSink.Instance;
+        _aoiProvider = new RadiusAoiProvider(_serverConfig.AoiRadiusSq);
         _lastTick = _world.Tick;
     }
 
@@ -727,10 +729,11 @@ public sealed class ServerHost
             }
             else
             {
-                Vec2Fix selfPos = self.Pos;
+                VisibleSet visibleSet = _aoiProvider.ComputeVisible(_world, zoneId, self.Id);
+                HashSet<int> visibleIds = visibleSet.EntityIds.Select(entityId => entityId.Value).ToHashSet();
                 entities = zone.Entities
+                    .Where(entity => visibleIds.Contains(entity.Id.Value))
                     .OrderBy(entity => entity.Id.Value)
-                    .Where(entity => entity.Id == self.Id || IsVisible(selfPos, entity.Pos))
                     .Select(entity => new SnapshotEntity(
                         EntityId: entity.Id.Value,
                         PosXRaw: entity.Pos.X.Raw,
@@ -768,13 +771,6 @@ public sealed class ServerHost
         {
             _logger.LogInformation(ServerLogEvents.SnapshotEmitted, "SnapshotEmitted tick={Tick} sessions={Sessions}", _world.Tick, emittedCount);
         }
-    }
-
-    private bool IsVisible(Vec2Fix observerPos, Vec2Fix targetPos)
-    {
-        Vec2Fix delta = targetPos - observerPos;
-        Fix32 distSq = delta.LengthSq();
-        return distSq <= _serverConfig.VisionRadiusSq;
     }
 
     private int NextAuditSeq() => ++_auditSeq;

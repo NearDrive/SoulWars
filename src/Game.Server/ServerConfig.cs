@@ -21,6 +21,10 @@ public readonly record struct ServerConfig(
     bool EnableStructuredLogs,
     bool EnableMetrics)
 {
+    public Fix32 AoiRadius => VisionRadius;
+
+    public Fix32 AoiRadiusSq => VisionRadiusSq;
+
     public SimulationConfig ToSimulationConfig()
     {
         SimulationConfig baseline = SimulationConfig.Default(Seed);
