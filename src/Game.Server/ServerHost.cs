@@ -219,7 +219,8 @@ public sealed class ServerHost
                 LastTick: _lastTick,
                 CurrentTick: _world.Tick,
                 Sessions: OrderedSessions().Select(s => new ServerSessionDebugView(s.SessionId.Value, s.EntityId, s.LastSnapshotTick, s.ActiveZoneId)).ToArray(),
-                Snapshots: _recentSnapshots.ToArray()));
+                Snapshots: _recentSnapshots.ToArray(),
+                World: _world));
         }
         _lastTick = _world.Tick;
         _recentSnapshots.Clear();
@@ -263,6 +264,14 @@ public sealed class ServerHost
     }
 
     public bool TryGetPlayerState(PlayerId playerId, out PlayerState state) => _playerRegistry.TryGetState(playerId, out state);
+
+    public int ActiveSessionCount => _sessions.Count;
+
+    public int PendingWorldCommandCount => _pendingWorldCommands.Count;
+
+    public int PendingAttackIntentCount => _pendingAttackIntents.Count;
+
+    public int WorldEntityCountTotal => _world.Zones.Sum(zone => zone.Entities.Length);
 
     private void DrainSessionMessages(SessionState session, int targetTick, List<WorldCommand> worldCommands)
     {

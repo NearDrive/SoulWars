@@ -15,4 +15,15 @@ public sealed record ScenarioResult(
     double TickP95Ms,
     int PlayersConnectedMax,
     BotStats[] BotStats,
-    int InvariantFailures);
+    int InvariantFailures,
+    SoakGuardSnapshot? GuardSnapshot = null,
+    int ActiveSessions = 0,
+    int WorldEntityCount = 0);
+
+public sealed record SoakGuardSnapshot(
+    int MaxInboundQueueLen,
+    int MaxOutboundQueueLen,
+    int MaxEntityCount,
+    int MaxPendingWorldCommands,
+    int MaxPendingAttackIntents,
+    int Failures);

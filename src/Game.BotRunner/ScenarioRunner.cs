@@ -53,9 +53,11 @@ public sealed class ScenarioRunner
 
         using ScenarioChecksumBuilder checksum = new();
         List<BotClient> clients = new(cfg.BotCount);
+        List<InMemoryEndpoint> endpoints = new(cfg.BotCount);
         Dictionary<(int BotIndex, int Tick), Snapshot> committedSnapshots = new();
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot = new();
         ServerHost host = new(serverConfig, LoggerFactory);
+        SoakGuards guards = new(cfg.BotCount, expectedSessions: cfg.BotCount, expectedEntityFloor: cfg.BotCount, entityMargin: Math.Max(8, cfg.BotCount));
         int invariantFailures = 0;
 
         try
@@ -69,6 +71,7 @@ public sealed class ScenarioRunner
                     ZoneId: cfg.ZoneId);
 
                 InMemoryEndpoint endpoint = new();
+                endpoints.Add(endpoint);
                 host.Connect(endpoint);
 
                 BotClient client = new(i, botConfig.ZoneId, endpoint);
@@ -112,6 +115,8 @@ public sealed class ScenarioRunner
 
                 host.StepOnce();
                 DrainSnapshotsForTests(clients, pendingSnapshotsByBot);
+
+                guards.Observe(host, endpoints);
 
                 if (tick % cfg.SnapshotEveryTicks != 0)
                 {
@@ -168,6 +173,12 @@ public sealed class ScenarioRunner
                 _logger.LogInformation(BotRunnerLogEvents.BotSummary, "BotSummary botIndex={BotIndex} snapshots={Snapshots} errors={Errors}", stat.BotIndex, stat.SnapshotsReceived, stat.Errors);
             }
 
+            int guardFailures = guards.Evaluate(host.ActiveSessionCount);
+            if (guardFailures > 0)
+            {
+                invariantFailures += guardFailures;
+            }
+
             MetricsSnapshot metrics = host.SnapshotMetrics();
             double tickAvgMs = metrics.TickP50Ms > 0 ? metrics.TickP50Ms : double.Epsilon;
             double tickP95Ms = metrics.TickP95Ms >= tickAvgMs ? metrics.TickP95Ms : tickAvgMs;
@@ -184,7 +195,10 @@ public sealed class ScenarioRunner
                 TickP95Ms: tickP95Ms,
                 PlayersConnectedMax: host.Metrics.PlayersConnected,
                 BotStats: stats,
-                InvariantFailures: invariantFailures);
+                InvariantFailures: invariantFailures,
+                GuardSnapshot: guards.Snapshot,
+                ActiveSessions: host.ActiveSessionCount,
+                WorldEntityCount: host.WorldEntityCountTotal);
         }
         finally
         {
@@ -361,6 +375,87 @@ public sealed class ScenarioRunner
         if (cfg.VisionRadiusTiles < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(cfg), "VisionRadiusTiles must be >= 0.");
+        }
+    }
+
+    private sealed class SoakGuards
+    {
+        private readonly int _bots;
+        private readonly int _expectedSessions;
+        private readonly int _expectedEntityFloor;
+        private readonly int _entityMargin;
+
+        public SoakGuards(int bots, int expectedSessions, int expectedEntityFloor, int entityMargin)
+        {
+            _bots = bots;
+            _expectedSessions = expectedSessions;
+            _expectedEntityFloor = expectedEntityFloor;
+            _entityMargin = entityMargin;
+        }
+
+        public SoakGuardSnapshot Snapshot { get; private set; } = new(0, 0, 0, 0, 0, 0);
+
+        public void Observe(ServerHost host, IReadOnlyList<InMemoryEndpoint> endpoints)
+        {
+            int inbound = 0;
+            int outbound = 0;
+            foreach (InMemoryEndpoint endpoint in endpoints)
+            {
+                inbound += endpoint.PendingToServerCount;
+                outbound += endpoint.PendingToClientCount;
+            }
+
+            Snapshot = Snapshot with
+            {
+                MaxInboundQueueLen = Math.Max(Snapshot.MaxInboundQueueLen, inbound),
+                MaxOutboundQueueLen = Math.Max(Snapshot.MaxOutboundQueueLen, outbound),
+                MaxEntityCount = Math.Max(Snapshot.MaxEntityCount, host.WorldEntityCountTotal),
+                MaxPendingWorldCommands = Math.Max(Snapshot.MaxPendingWorldCommands, host.PendingWorldCommandCount),
+                MaxPendingAttackIntents = Math.Max(Snapshot.MaxPendingAttackIntents, host.PendingAttackIntentCount)
+            };
+        }
+
+        public int Evaluate(int activeSessions)
+        {
+            int failures = 0;
+            int inboundLimit = _bots * 20;
+            int outboundLimit = _bots * 20;
+            int entityLimit = _expectedEntityFloor + _entityMargin;
+            int pendingWorldLimit = _bots * 20;
+            int pendingAttackLimit = _bots * 10;
+
+            if (activeSessions < _expectedSessions || activeSessions > _expectedSessions + 2)
+            {
+                failures++;
+            }
+
+            if (Snapshot.MaxInboundQueueLen > inboundLimit)
+            {
+                failures++;
+            }
+
+            if (Snapshot.MaxOutboundQueueLen > outboundLimit)
+            {
+                failures++;
+            }
+
+            if (Snapshot.MaxEntityCount > entityLimit)
+            {
+                failures++;
+            }
+
+            if (Snapshot.MaxPendingWorldCommands > pendingWorldLimit)
+            {
+                failures++;
+            }
+
+            if (Snapshot.MaxPendingAttackIntents > pendingAttackLimit)
+            {
+                failures++;
+            }
+
+            Snapshot = Snapshot with { Failures = failures };
+            return failures;
         }
     }
 }
