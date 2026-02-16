@@ -16,6 +16,7 @@ public sealed record ScenarioResult(
     int PlayersConnectedMax,
     BotStats[] BotStats,
     int InvariantFailures,
+    Game.Server.PerfSnapshot? PerfSnapshot = null,
     SoakGuardSnapshot? GuardSnapshot = null,
     int ActiveSessions = 0,
     int WorldEntityCount = 0);

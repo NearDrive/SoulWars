@@ -1,4 +1,5 @@
 using Game.BotRunner;
+using Game.Server;
 using Microsoft.Extensions.Logging;
 
 namespace Game.App.Headless;
@@ -10,6 +11,7 @@ public static class Program
     private const int ExitFixtureNotFound = 4;
     private const int ExitStressInvariantFail = 5;
     private const int ExitSoakFail = 6;
+    private const int ExitPerfBudgetFail = 7;
 
     public static int Main(string[] args)
     {
@@ -25,6 +27,7 @@ public static class Program
             "--run-scenario" => RunScenario(),
             "--stress-mvp2" => RunStressMvp2(),
             "--soak" => RunSoak(),
+            "--perf-budgets" => RunPerfBudgets(),
             _ => UnknownMode(args[0])
         };
     }
@@ -155,6 +158,69 @@ public static class Program
         return result.InvariantFailures == 0 ? ExitSuccess : ExitSoakFail;
     }
 
+    private static int RunPerfBudgets()
+    {
+        using ILoggerFactory loggerFactory = LoggerFactory.Create(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Warning);
+            builder.AddSimpleConsole(options =>
+            {
+                options.SingleLine = true;
+                options.TimestampFormat = "HH:mm:ss ";
+            });
+        });
+
+        PerfBudgetConfig budget = PerfBudgetConfig.Default;
+        ScenarioConfig config = new(
+            ServerSeed: 2025,
+            TickCount: 2000,
+            SnapshotEveryTicks: 1,
+            BotCount: 50,
+            ZoneId: 1,
+            BaseBotSeed: 7000,
+            ZoneCount: 3,
+            NpcCount: 0,
+            VisionRadiusTiles: 12);
+
+        ScenarioResult result = ScenarioRunner.RunDetailed(config, loggerFactory);
+        if (result.PerfSnapshot is null)
+        {
+            Console.Error.WriteLine("Perf snapshot missing from scenario result.");
+            return ExitPerfBudgetFail;
+        }
+
+        PerfSnapshot snapshot = result.PerfSnapshot.Value;
+        BudgetResult budgetResult = PerfBudgetEvaluator.Evaluate(snapshot, budget);
+        string reportJson = PerfReportWriter.ToJson(snapshot, budget, budgetResult);
+        string reportPath = Path.Combine(Environment.CurrentDirectory, "PerfReport.json");
+        File.WriteAllText(reportPath, reportJson);
+
+        Console.WriteLine("MVP5 PERF BUDGETS");
+        Console.WriteLine($"bots={config.BotCount} ticks={config.TickCount} zones={config.ZoneCount}");
+        Console.WriteLine($"checksum={NormalizeChecksum(result.Checksum)}");
+        Console.WriteLine($"maxAoiChecksPerTick={snapshot.MaxAoiDistanceChecksPerTick}");
+        Console.WriteLine($"maxCollisionChecksPerTick={snapshot.MaxCollisionChecksPerTick}");
+        Console.WriteLine($"maxSnapshotsEncodedEntitiesPerTick={snapshot.MaxSnapshotsEncodedEntitiesPerTick}");
+        Console.WriteLine($"maxOutboundBytesPerTick={snapshot.MaxOutboundBytesPerTick}");
+        Console.WriteLine($"maxInboundBytesPerTick={snapshot.MaxInboundBytesPerTick}");
+        Console.WriteLine($"maxCommandsProcessedPerTick={snapshot.MaxCommandsProcessedPerTick}");
+        Console.WriteLine($"maxOutboundMessagesPerTick={snapshot.MaxOutboundMessagesPerTick}");
+        Console.WriteLine($"maxInboundMessagesPerTick={snapshot.MaxInboundMessagesPerTick}");
+        Console.WriteLine($"report={NormalizeDisplayPath(reportPath)}");
+
+        if (!budgetResult.Ok)
+        {
+            foreach (string violation in budgetResult.Violations)
+            {
+                Console.WriteLine($"violation={violation}");
+            }
+        }
+
+        Console.WriteLine($"result={(budgetResult.Ok ? "PASS" : "FAIL")}");
+        return budgetResult.Ok ? ExitSuccess : ExitPerfBudgetFail;
+    }
+
+
     private static int UnknownMode(string mode)
     {
         Console.Error.WriteLine($"Unknown mode: {mode}");
@@ -164,7 +230,7 @@ public static class Program
 
     private static void PrintUsage()
     {
-        Console.WriteLine("Usage: Game.App.Headless --verify-mvp1 | --run-scenario | --stress-mvp2 | --soak");
+        Console.WriteLine("Usage: Game.App.Headless --verify-mvp1 | --run-scenario | --stress-mvp2 | --soak | --perf-budgets");
     }
 
     private static FixtureInput LoadReplayFixture()

@@ -16,6 +16,7 @@ public sealed class ServerHost
     private readonly PlayerRegistry _playerRegistry = new();
     private readonly IAuditSink _auditSink;
     private readonly IAoiProvider _aoiProvider;
+    private readonly SimulationInstrumentation _simulationInstrumentation;
 
     private int _nextSessionId = 1;
     private int _nextEntityId = 1;
@@ -47,6 +48,12 @@ public sealed class ServerHost
         Metrics = metrics ?? new ServerMetrics(enableMetrics);
         _auditSink = auditSink ?? NullAuditSink.Instance;
         _aoiProvider = new RadiusAoiProvider(_serverConfig.AoiRadiusSq);
+        Perf = new PerfCounters();
+        _simulationInstrumentation = new SimulationInstrumentation
+        {
+            CountEntitiesVisited = Perf.CountEntitiesVisited,
+            CountCollisionChecks = Perf.CountCollisionChecks
+        };
         _lastTick = _world.Tick;
     }
 
@@ -57,6 +64,8 @@ public sealed class ServerHost
 
     public IReadOnlyList<PlayerState> GetPlayersSnapshot() => _playerRegistry.OrderedStates().ToArray();
     public ServerMetrics Metrics { get; }
+
+    public PerfCounters Perf { get; }
 
     public SessionId Connect(IServerEndpoint endpoint)
     {
@@ -87,6 +96,7 @@ public sealed class ServerHost
     }
     public void StepOnce()
     {
+        Perf.ResetTick();
         long start = System.Diagnostics.Stopwatch.GetTimestamp();
         long messagesInBefore = Metrics.MessagesIn;
         long messagesOutBefore = Metrics.MessagesOut;
@@ -102,6 +112,7 @@ public sealed class ServerHost
         int sessionCount = _sessions.Count;
 
         Metrics.OnTickCompleted(_world.Tick, simStepMs, messagesIn, messagesOut, sessionCount);
+        Perf.CompleteTick();
         if (_serverConfig.EnableStructuredLogs)
         {
             string json = LogJson.TickEntry(_world.Tick, sessionCount, messagesIn, messagesOut, simStepMs);
@@ -161,7 +172,7 @@ public sealed class ServerHost
                 TargetEntityId: new EntityId(pending.TargetEntityId)));
         }
 
-        _world = Simulation.Step(_simulationConfig, _world, new Inputs(worldCommands.ToImmutableArray()));
+        _world = Simulation.Step(_simulationConfig, _world, new Inputs(worldCommands.ToImmutableArray()), _simulationInstrumentation);
         HashSet<int> afterSimEntityIds = _world.Zones
             .SelectMany(zone => zone.Entities)
             .Select(entity => entity.Id.Value)
@@ -264,7 +275,7 @@ public sealed class ServerHost
             if (payload.Length > _serverConfig.MaxPayloadBytes)
             {
                 _logger.LogWarning(ServerLogEvents.OversizedMessage, "OversizedMessage sessionId={SessionId} payloadBytes={PayloadBytes}", session.SessionId.Value, payload.Length);
-                session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Disconnect(DisconnectReason.PayloadTooLarge)));
+                EnqueueToClient(session, ProtocolCodec.Encode(new Disconnect(DisconnectReason.PayloadTooLarge)));
                 Metrics.IncrementMessagesOut();
                 DisconnectSession(session, "payload_too_large");
                 break;
@@ -281,7 +292,7 @@ public sealed class ServerHost
             {
                 Metrics.IncrementProtocolDecodeErrors();
                 _logger.LogWarning(ServerLogEvents.ProtocolDecodeFailed, ex, "ProtocolDecodeFailed sessionId={SessionId} error={Error}", session.SessionId.Value, "exception");
-                session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Disconnect(DisconnectReason.DecodeError)));
+                EnqueueToClient(session, ProtocolCodec.Encode(new Disconnect(DisconnectReason.DecodeError)));
                 Metrics.IncrementMessagesOut();
                 DisconnectSession(session, "decode_exception");
                 break;
@@ -303,7 +314,7 @@ public sealed class ServerHost
                 _logger.LogWarning(ServerLogEvents.ProtocolDecodeFailed, "ProtocolDecodeFailed sessionId={SessionId} error={Error}", session.SessionId.Value, error);
                 if (error is ProtocolErrorCode.Truncated or ProtocolErrorCode.InvalidLength)
                 {
-                    session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Disconnect(DisconnectReason.DecodeError)));
+                    EnqueueToClient(session, ProtocolCodec.Encode(new Disconnect(DisconnectReason.DecodeError)));
                     Metrics.IncrementMessagesOut();
                     DisconnectSession(session, "decode_error");
                     break;
@@ -313,6 +324,9 @@ public sealed class ServerHost
             }
 
             Metrics.IncrementMessagesIn();
+            Perf.AddInboundMessages(1);
+            Perf.AddInboundBytes(payload.Length);
+            Perf.CountCommandsProcessed(1);
 
             switch (message)
             {
@@ -411,7 +425,7 @@ public sealed class ServerHost
     {
         if (request.ProtocolVersion != ProtocolConstants.CurrentProtocolVersion)
         {
-            session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Disconnect(DisconnectReason.VersionMismatch)));
+            EnqueueToClient(session, ProtocolCodec.Encode(new Disconnect(DisconnectReason.VersionMismatch)));
             Metrics.IncrementMessagesOut();
             DisconnectSession(session, "version_mismatch");
             return;
@@ -439,7 +453,7 @@ public sealed class ServerHost
             session.CurrentZoneId = state.ZoneId;
         }
 
-        session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new Welcome(session.SessionId, playerId, ProtocolConstants.CurrentProtocolVersion, ProtocolConstants.ServerCapabilities)));
+        EnqueueToClient(session, ProtocolCodec.Encode(new Welcome(session.SessionId, playerId, ProtocolConstants.CurrentProtocolVersion, ProtocolConstants.ServerCapabilities)));
         Metrics.IncrementMessagesOut();
 
         _auditSink.Emit(AuditEvent.PlayerConnected(_world.Tick, NextAuditSeq(), normalizedAccountId, playerId.Value));
@@ -464,7 +478,7 @@ public sealed class ServerHost
             RemovePendingLeaveCommandsForEntity(worldCommands, pendingLeaveEntityId);
             session.CurrentZoneId = pendingLeaveZoneId.Value;
             _playerRegistry.UpdateWorldState(session.PlayerId.Value, pendingLeaveEntityId, pendingLeaveZoneId.Value, isAlive: true);
-            session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new EnterZoneAck(pendingLeaveZoneId.Value, pendingLeaveEntityId)));
+            EnqueueToClient(session, ProtocolCodec.Encode(new EnterZoneAck(pendingLeaveZoneId.Value, pendingLeaveEntityId)));
             Metrics.IncrementMessagesOut();
             return;
         }
@@ -475,7 +489,7 @@ public sealed class ServerHost
             _world.TryGetEntityZone(new EntityId(currentEntityId), out ZoneId currentZoneId) &&
             currentZoneId.Value == requestedZoneId)
         {
-            session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new EnterZoneAck(requestedZoneId, currentEntityId)));
+            EnqueueToClient(session, ProtocolCodec.Encode(new EnterZoneAck(requestedZoneId, currentEntityId)));
             Metrics.IncrementMessagesOut();
             return;
         }
@@ -503,7 +517,7 @@ public sealed class ServerHost
         session.CurrentZoneId = zoneId;
         _playerRegistry.UpdateWorldState(session.PlayerId.Value, entityId, zoneId, isAlive: true);
 
-        session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(new EnterZoneAck(zoneId, entityId)));
+        EnqueueToClient(session, ProtocolCodec.Encode(new EnterZoneAck(zoneId, entityId)));
         Metrics.IncrementMessagesOut();
 
         _logger.LogInformation(
@@ -767,7 +781,7 @@ public sealed class ServerHost
             }
             else
             {
-                VisibleSet visibleSet = _aoiProvider.ComputeVisible(_world, zoneId, self.Id);
+                VisibleSet visibleSet = _aoiProvider.ComputeVisible(_world, zoneId, self.Id, Perf);
                 HashSet<int> visibleIds = visibleSet.EntityIds.Select(entityId => entityId.Value).ToHashSet();
                 entities = zone.Entities
                     .Where(entity => visibleIds.Contains(entity.Id.Value))
@@ -793,7 +807,7 @@ public sealed class ServerHost
                 lastSnapshot.ZoneId == zone.Id.Value &&
                 session.LastAckedSnapshotSeq < lastSnapshot.SnapshotSeq)
             {
-                session.Endpoint.EnqueueToClient(lastSnapshot.EncodedPayload);
+                EnqueueToClient(session, lastSnapshot.EncodedPayload);
                 Metrics.IncrementMessagesOut();
                 emittedCount++;
                 session.LastSnapshotRetryCount++;
@@ -829,11 +843,12 @@ public sealed class ServerHost
                     throw new InvariantViolationException($"invariant=SnapshotIncludesSelf tick={_world.Tick} zoneId={zone.Id.Value} sessionId={session.SessionId.Value} entityId={self.Id.Value}");
                 }
 
+                Perf.CountSnapshotsEncodedEntities(snapshot.Entities.Length);
                 byte[] encodedV2 = ProtocolCodec.Encode(snapshot);
                 session.LastFullSnapshot = new SessionSnapshotCache(zone.Id.Value, snapshotSeq, encodedV2);
 
                 session.LastSnapshotTick = _world.Tick;
-                session.Endpoint.EnqueueToClient(encodedV2);
+                EnqueueToClient(session, encodedV2);
                 Metrics.IncrementMessagesOut();
                 emittedCount++;
                 _recentSnapshots.Add(new Snapshot(snapshot.Tick, snapshot.ZoneId, snapshot.Entities));
@@ -851,7 +866,8 @@ public sealed class ServerHost
             }
 
             session.LastSnapshotTick = _world.Tick;
-            session.Endpoint.EnqueueToClient(ProtocolCodec.Encode(legacySnapshot));
+            Perf.CountSnapshotsEncodedEntities(legacySnapshot.Entities.Length);
+            EnqueueToClient(session, ProtocolCodec.Encode(legacySnapshot));
             Metrics.IncrementMessagesOut();
             emittedCount++;
             _recentSnapshots.Add(legacySnapshot);
@@ -861,6 +877,16 @@ public sealed class ServerHost
         {
             _logger.LogInformation(ServerLogEvents.SnapshotEmitted, "SnapshotEmitted tick={Tick} sessions={Sessions}", _world.Tick, emittedCount);
         }
+    }
+
+
+    public PerfSnapshot SnapshotAndResetPerfWindow() => Perf.SnapshotAndResetWindow();
+
+    private void EnqueueToClient(SessionState session, byte[] payload)
+    {
+        session.Endpoint.EnqueueToClient(payload);
+        Perf.AddOutboundMessages(1);
+        Perf.AddOutboundBytes(payload.Length);
     }
 
     private int NextAuditSeq() => ++_auditSeq;
