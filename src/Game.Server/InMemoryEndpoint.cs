@@ -4,8 +4,17 @@ namespace Game.Server;
 
 public sealed class InMemoryEndpoint : IServerEndpoint, IClientEndpoint
 {
+    private static int _nextId = 0;
+
     private readonly ConcurrentQueue<byte[]> _toServer = new();
     private readonly ConcurrentQueue<byte[]> _toClient = new();
+
+    public InMemoryEndpoint()
+    {
+        EndpointKey = $"mem-{Interlocked.Increment(ref _nextId)}";
+    }
+
+    public string EndpointKey { get; }
 
     public bool IsClosed { get; private set; }
 

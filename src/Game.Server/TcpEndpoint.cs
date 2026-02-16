@@ -20,10 +20,13 @@ public sealed class TcpEndpoint : IServerEndpoint, IAsyncDisposable
     private readonly ILogger<TcpEndpoint> _logger;
     private readonly FrameDecoder _frameDecoder = new(MaxFrameBytes);
 
+    public string EndpointKey { get; }
+
     public TcpEndpoint(TcpClient client, ILogger<TcpEndpoint>? logger = null)
     {
         _client = client;
         _stream = client.GetStream();
+        EndpointKey = client.Client.RemoteEndPoint?.ToString() ?? $"tcp-{Guid.NewGuid():N}";
         _logger = logger ?? NullLogger<TcpEndpoint>.Instance;
         _readerTask = Task.Run(ReadLoopAsync);
         _writerTask = Task.Run(WriteLoopAsync);
