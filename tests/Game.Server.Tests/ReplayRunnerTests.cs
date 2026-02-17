@@ -38,6 +38,73 @@ public sealed class ReplayRunnerTests
         Assert.StartsWith(BaselineChecksums.ReplayBaselinePrefix, replayChecksumSecond, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ReplayVerify_Mismatch_EmitsArtifacts()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "soulwars-pr44-tests", nameof(ReplayVerify_Mismatch_EmitsArtifacts));
+        if (Directory.Exists(tempRoot))
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+
+        Directory.CreateDirectory(tempRoot);
+
+        using Stream replayStream = CreateReplayWithWrongExpectedChecksum();
+        ReplayVerificationException ex = Assert.Throws<ReplayVerificationException>(() =>
+            ReplayRunner.RunReplayWithExpected(replayStream, verifyOptions: new ReplayVerifyOptions(tempRoot)));
+
+        string expectedChecksumPath = Path.Combine(tempRoot, "expected_checksum.txt");
+        string actualChecksumPath = Path.Combine(tempRoot, "actual_checksum.txt");
+        string expectedTickReportPath = Path.Combine(tempRoot, "tickreport_expected.jsonl");
+        string actualTickReportPath = Path.Combine(tempRoot, "tickreport_actual.jsonl");
+
+        Assert.True(File.Exists(expectedChecksumPath));
+        Assert.True(File.Exists(actualChecksumPath));
+        Assert.True(File.Exists(expectedTickReportPath));
+        Assert.True(File.Exists(actualTickReportPath));
+
+        string expectedChecksum = File.ReadAllText(expectedChecksumPath).Trim();
+        string actualChecksum = File.ReadAllText(actualChecksumPath).Trim();
+        Assert.NotEqual(expectedChecksum, actualChecksum);
+
+        string[] expectedLines = File.ReadAllLines(expectedTickReportPath);
+        string[] actualLines = File.ReadAllLines(actualTickReportPath);
+
+        Assert.NotEmpty(expectedLines);
+        Assert.Equal(expectedLines.Length, actualLines.Length);
+
+        using ReplayReader reader = new(OpenFixtureStream());
+        Assert.Equal(reader.Header.TickCount, expectedLines.Length);
+
+        Assert.Contains("\"Tick\":0", expectedLines[0], StringComparison.Ordinal);
+        Assert.Contains("tick=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("artifacts=", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(tempRoot, ex.ArtifactsDirectory);
+    }
+
+    private static Stream CreateReplayWithWrongExpectedChecksum()
+    {
+        using Stream source = OpenFixtureStream();
+        using ReplayReader reader = new(source);
+        MemoryStream output = new();
+        using ReplayWriter writer = new(output, reader.Header);
+
+        string wrongExpected = "0000000000000000000000000000000000000000000000000000000000000000";
+        while (reader.TryReadNext(out ReplayEvent evt))
+        {
+            if (evt.RecordType == ReplayRecordType.TickInputs)
+            {
+                writer.WriteTickInputs(evt.Tick, evt.Moves.AsSpan());
+                continue;
+            }
+
+            writer.WriteFinalChecksum(wrongExpected);
+        }
+
+        output.Position = 0;
+        return output;
+    }
+
     private static Stream OpenFixtureStream()
     {
         DirectoryInfo? current = new(AppContext.BaseDirectory);
