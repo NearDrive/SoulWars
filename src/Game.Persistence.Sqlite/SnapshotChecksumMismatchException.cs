@@ -2,7 +2,7 @@ using System.IO;
 
 namespace Game.Persistence.Sqlite;
 
-public sealed class SnapshotChecksumMismatchException : InvalidDataException
+public sealed class SnapshotChecksumMismatchException : IOException
 {
     public SnapshotChecksumMismatchException(string expected, string actual, string snapshotPathOrId, SnapshotMeta snapshotMeta)
         : base($"Snapshot checksum mismatch for '{snapshotPathOrId}'. expected={expected} actual={actual} serializerVersion={snapshotMeta.SerializerVersion} zoneDefinitionsHash={snapshotMeta.ZoneDefinitionsHash} configHash={snapshotMeta.ConfigHash} buildHash={(snapshotMeta.BuildHash ?? "null")}")
