@@ -132,11 +132,20 @@ public static class ZoneDefinitionsLoader
                 SpawnPoints: points.ToImmutableArray()));
         }
 
+        Vec2Fix? respawnPoint = null;
+        if (file.RespawnPoint is not null)
+        {
+            ValidateFinite(file.RespawnPoint.X, nameof(file.RespawnPoint.X), path);
+            ValidateFinite(file.RespawnPoint.Y, nameof(file.RespawnPoint.Y), path);
+            respawnPoint = new Vec2Fix(Fix32.FromFloat(file.RespawnPoint.X), Fix32.FromFloat(file.RespawnPoint.Y));
+        }
+
         return new ZoneDefinition(
             ZoneId: new ZoneId(file.ZoneId),
             StaticObstacles: obstacles.ToImmutableArray(),
             NpcSpawns: spawns.ToImmutableArray(),
-            LootRules: file.LootRules is null ? null : new LootRulesDefinition());
+            LootRules: file.LootRules is null ? null : new LootRulesDefinition(),
+            RespawnPoint: respawnPoint);
     }
 
     private static void ValidateFinite(float value, string field, string path)
@@ -153,6 +162,7 @@ public static class ZoneDefinitionsLoader
         public List<ZoneAabbFile>? StaticObstacles { get; set; }
         public List<NpcSpawnFile>? NpcSpawns { get; set; }
         public object? LootRules { get; set; }
+        public Vec2File? RespawnPoint { get; set; }
     }
 
     private sealed class ZoneAabbFile
