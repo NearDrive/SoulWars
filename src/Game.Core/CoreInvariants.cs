@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace Game.Core;
 
 public static class CoreInvariants
@@ -145,6 +147,45 @@ public static class CoreInvariants
                 {
                     throw new InvariantViolationException($"invariant=EntityNotOnSolidTile tick={tick} zoneId={zone.Id.Value} entityId={entity.Id.Value} tileX={tileX} tileY={tileY}");
                 }
+            }
+        }
+
+
+        int lastLootId = int.MinValue;
+        foreach (LootEntityState loot in (world.LootEntities.IsDefault ? ImmutableArray<LootEntityState>.Empty : world.LootEntities))
+        {
+            if (loot.Id.Value <= lastLootId)
+            {
+                throw new InvariantViolationException($"invariant=LootEntitiesOrdered tick={tick} lootEntityId={loot.Id.Value} lastLootEntityId={lastLootId}");
+            }
+
+            lastLootId = loot.Id.Value;
+
+            if (!world.Zones.Any(z => z.Id.Value == loot.ZoneId.Value))
+            {
+                throw new InvariantViolationException($"invariant=LootZoneExists tick={tick} lootEntityId={loot.Id.Value} zoneId={loot.ZoneId.Value}");
+            }
+
+            if (loot.Items.IsDefaultOrEmpty)
+            {
+                throw new InvariantViolationException($"invariant=LootItemsNonEmpty tick={tick} lootEntityId={loot.Id.Value}");
+            }
+
+            string lastItemId = string.Empty;
+            for (int i = 0; i < loot.Items.Length; i++)
+            {
+                ItemStack item = loot.Items[i];
+                if (string.CompareOrdinal(item.ItemId, lastItemId) < 0)
+                {
+                    throw new InvariantViolationException($"invariant=LootItemsOrdered tick={tick} lootEntityId={loot.Id.Value} itemId={item.ItemId} lastItemId={lastItemId}");
+                }
+
+                if (item.Quantity <= 0)
+                {
+                    throw new InvariantViolationException($"invariant=LootItemQuantityPositive tick={tick} lootEntityId={loot.Id.Value} itemId={item.ItemId} quantity={item.Quantity}");
+                }
+
+                lastItemId = item.ItemId;
             }
         }
 

@@ -8,6 +8,8 @@ public static class Simulation
     private const int DefaultAttackDamage = 10;
     private const int DefaultAttackCooldownTicks = 10;
     private const int NpcSpawnMaxAttempts = 64;
+    private static readonly Fix32 LootPickupRange = Fix32.FromInt(3) / Fix32.FromInt(2);
+    private const string DefaultNpcArchetypeId = "npc.default";
 
     public static WorldState CreateInitialState(SimulationConfig config, ZoneDefinitions? zoneDefinitions = null)
     {
@@ -45,7 +47,8 @@ public static class Simulation
         return new WorldState(
             Tick: 0,
             Zones: initialZones,
-            EntityLocations: BuildEntityLocations(initialZones));
+            EntityLocations: BuildEntityLocations(initialZones),
+            LootEntities: ImmutableArray<LootEntityState>.Empty);
     }
 
     private static WorldState CreateInitialStateFromManualDefinitions(SimulationConfig config, ZoneDefinitions definitions)
@@ -66,7 +69,8 @@ public static class Simulation
         return new WorldState(
             Tick: 0,
             Zones: zones,
-            EntityLocations: BuildEntityLocations(zones));
+            EntityLocations: BuildEntityLocations(zones),
+            LootEntities: ImmutableArray<LootEntityState>.Empty);
     }
 
     public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs, SimulationInstrumentation? instrumentation = null)
@@ -99,7 +103,7 @@ public static class Simulation
         }
 
         foreach ((ZoneId zoneId, ImmutableArray<WorldCommand> zoneCommands) in orderedCommands
-                     .Where(x => x.Command.Kind is WorldCommandKind.EnterZone or WorldCommandKind.MoveIntent or WorldCommandKind.AttackIntent or WorldCommandKind.LeaveZone)
+                     .Where(x => x.Command.Kind is WorldCommandKind.EnterZone or WorldCommandKind.MoveIntent or WorldCommandKind.AttackIntent or WorldCommandKind.LeaveZone or WorldCommandKind.LootIntent)
                      .GroupBy(x => x.Command.ZoneId.Value)
                      .OrderBy(g => g.Key)
                      .Select(g => (new ZoneId(g.Key), g.Select(v => v.Command).ToImmutableArray())))
@@ -121,6 +125,8 @@ public static class Simulation
         }
 
         updated = RebuildEntityLocations(updated);
+        updated = SpawnLootForNpcDeaths(state, updated);
+        updated = ProcessLootIntents(updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
 
         if (config.Invariants.EnableCoreInvariants)
         {
@@ -235,6 +241,140 @@ public static class Simulation
         }
 
         return updatedZone;
+    }
+
+
+    private static WorldState SpawnLootForNpcDeaths(WorldState before, WorldState after)
+    {
+        List<LootEntityState> nextLoot = after.LootEntities.IsDefault
+            ? new List<LootEntityState>()
+            : after.LootEntities.OrderBy(l => l.Id.Value).ToList();
+
+        Dictionary<int, EntityState> beforeNpcs = before.Zones
+            .SelectMany(zone => zone.Entities.Select(entity => (zone.Id, entity)))
+            .Where(x => x.entity.Kind == EntityKind.Npc)
+            .ToDictionary(x => x.entity.Id.Value, x => x.entity);
+
+        HashSet<int> afterEntityIds = after.Zones
+            .SelectMany(zone => zone.Entities.Select(entity => entity.Id.Value))
+            .ToHashSet();
+
+        foreach (KeyValuePair<int, EntityState> pair in beforeNpcs.OrderBy(p => p.Key))
+        {
+            if (afterEntityIds.Contains(pair.Key))
+            {
+                continue;
+            }
+
+            ImmutableArray<ItemStack> items = ResolveLootTable(DefaultNpcArchetypeId);
+            if (items.IsDefaultOrEmpty)
+            {
+                continue;
+            }
+
+            EntityState deadNpc = pair.Value;
+            ZoneId zoneId = FindEntityZone(before, deadNpc.Id);
+            LootEntityState loot = new(
+                Id: DeriveLootEntityId(deadNpc.Id),
+                ZoneId: zoneId,
+                Pos: deadNpc.Pos,
+                Items: items);
+
+            if (nextLoot.Any(existing => existing.Id.Value == loot.Id.Value))
+            {
+                throw new InvariantViolationException($"invariant=UniqueLootEntityId entityId={loot.Id.Value}");
+            }
+
+            nextLoot.Add(loot);
+        }
+
+        return after.WithLootEntities(nextLoot
+            .OrderBy(l => l.Id.Value)
+            .ToImmutableArray());
+    }
+
+    private static WorldState ProcessLootIntents(WorldState state, ImmutableArray<WorldCommand> commands)
+    {
+        if (state.LootEntities.IsDefaultOrEmpty)
+        {
+            return state;
+        }
+
+        List<LootEntityState> nextLoot = state.LootEntities.OrderBy(l => l.Id.Value).ToList();
+        foreach (WorldCommand command in commands
+                     .Where(c => c.Kind == WorldCommandKind.LootIntent && c.LootEntityId is not null)
+                     .OrderBy(c => c.ZoneId.Value)
+                     .ThenBy(c => c.EntityId.Value)
+                     .ThenBy(c => c.LootEntityId!.Value.Value))
+        {
+            int lootIndex = nextLoot.FindIndex(l => l.Id.Value == command.LootEntityId!.Value.Value);
+            if (lootIndex < 0)
+            {
+                continue;
+            }
+
+            LootEntityState loot = nextLoot[lootIndex];
+            if (loot.ZoneId.Value != command.ZoneId.Value)
+            {
+                continue;
+            }
+
+            if (!state.TryGetZone(command.ZoneId, out ZoneState zone))
+            {
+                continue;
+            }
+
+            int actorIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.EntityId);
+            if (actorIndex < 0)
+            {
+                continue;
+            }
+
+            EntityState actor = zone.Entities[actorIndex];
+            Fix32 dx = actor.Pos.X - loot.Pos.X;
+            Fix32 dy = actor.Pos.Y - loot.Pos.Y;
+            Fix32 distSq = (dx * dx) + (dy * dy);
+            Fix32 rangeSq = LootPickupRange * LootPickupRange;
+            if (distSq > rangeSq)
+            {
+                continue;
+            }
+
+            nextLoot.RemoveAt(lootIndex);
+        }
+
+        return state.WithLootEntities(nextLoot.ToImmutableArray());
+    }
+
+    private static EntityId DeriveLootEntityId(EntityId deadNpcId) => new(-deadNpcId.Value);
+
+    private static ZoneId FindEntityZone(WorldState state, EntityId entityId)
+    {
+        foreach (ZoneState zone in state.Zones.OrderBy(z => z.Id.Value))
+        {
+            if (zone.Entities.Any(e => e.Id.Value == entityId.Value))
+            {
+                return zone.Id;
+            }
+        }
+
+        throw new InvalidOperationException($"Entity {entityId.Value} zone not found.");
+    }
+
+    private static ImmutableArray<ItemStack> ResolveLootTable(string npcArchetypeId)
+    {
+        ImmutableArray<ItemStack> items = npcArchetypeId switch
+        {
+            DefaultNpcArchetypeId => ImmutableArray.Create(
+                new ItemStack("gold.coin", 3),
+                new ItemStack("potion.minor", 1)),
+            _ => ImmutableArray<ItemStack>.Empty
+        };
+
+        return items
+            .OrderBy(i => i.ItemId, StringComparer.Ordinal)
+            .ThenBy(i => i.Quantity)
+            .ToImmutableArray();
     }
 
     private static sbyte SignToSByte(Fix32 value)
@@ -570,6 +710,11 @@ public static class Simulation
         }
 
         if (command.Kind is WorldCommandKind.TeleportIntent && command.ToZoneId is null)
+        {
+            return false;
+        }
+
+        if (command.Kind is WorldCommandKind.LootIntent && command.LootEntityId is null)
         {
             return false;
         }

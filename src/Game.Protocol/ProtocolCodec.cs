@@ -16,6 +16,7 @@ public static class ProtocolCodec
     private const byte ClientEnterZoneRequestV2 = 9;
     private const byte ClientLeaveZoneRequestV2 = 10;
     private const byte ClientAckV2 = 11;
+    private const byte ClientLootIntent = 12;
 
     private const byte ServerWelcome = 101;
     private const byte ServerEnterZoneAck = 102;
@@ -41,6 +42,7 @@ public static class ProtocolCodec
             LeaveZoneRequestV2 request => EncodeIntMessage(ClientLeaveZoneRequestV2, request.ZoneId),
             ClientAckV2 ack => EncodeClientAckV2(ack),
             TeleportRequest request => EncodeIntMessage(ClientTeleportRequest, request.ToZoneId),
+            LootIntent loot => EncodeLootIntent(loot),
             _ => throw new InvalidOperationException($"Unsupported client message type: {msg.GetType().Name}")
         };
     }
@@ -141,6 +143,21 @@ public static class ProtocolCodec
                 }
 
                 msg = new TeleportRequest(toZoneId);
+                error = ProtocolErrorCode.None;
+                return true;
+            case ClientLootIntent:
+                if (!TryReadInt32(data, 1, out int lootEntityId, out error) || !TryReadInt32(data, 5, out int lootZoneId, out error))
+                {
+                    return false;
+                }
+
+                if (lootZoneId <= 0)
+                {
+                    error = ProtocolErrorCode.ValueOutOfRange;
+                    return false;
+                }
+
+                msg = new LootIntent(lootEntityId, lootZoneId);
                 error = ProtocolErrorCode.None;
                 return true;
             default:
@@ -257,6 +274,15 @@ public static class ProtocolCodec
         return true;
     }
 
+
+    private static byte[] EncodeLootIntent(LootIntent loot)
+    {
+        byte[] data = new byte[1 + 4 + 4];
+        data[0] = ClientLootIntent;
+        WriteInt32(data, 1, loot.LootEntityId);
+        WriteInt32(data, 5, loot.ZoneId);
+        return data;
+    }
 
     private static byte[] EncodeClientAckV2(ClientAckV2 ack)
     {

@@ -187,7 +187,19 @@ public sealed record ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData
 
 public readonly record struct EntityLocation(EntityId Id, ZoneId ZoneId);
 
-public sealed record WorldState(int Tick, ImmutableArray<ZoneState> Zones, ImmutableArray<EntityLocation> EntityLocations)
+public sealed record ItemStack(string ItemId, int Quantity);
+
+public sealed record LootEntityState(
+    EntityId Id,
+    ZoneId ZoneId,
+    Vec2Fix Pos,
+    ImmutableArray<ItemStack> Items);
+
+public sealed record WorldState(
+    int Tick,
+    ImmutableArray<ZoneState> Zones,
+    ImmutableArray<EntityLocation> EntityLocations,
+    ImmutableArray<LootEntityState> LootEntities = default)
 {
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
@@ -294,6 +306,16 @@ public sealed record WorldState(int Tick, ImmutableArray<ZoneState> Zones, Immut
                 .ToImmutableArray()
         };
     }
+
+    public WorldState WithLootEntities(ImmutableArray<LootEntityState> lootEntities)
+    {
+        return this with
+        {
+            LootEntities = lootEntities
+                .OrderBy(l => l.Id.Value)
+                .ToImmutableArray()
+        };
+    }
 }
 
 public enum WorldCommandKind : byte
@@ -302,7 +324,8 @@ public enum WorldCommandKind : byte
     LeaveZone = 2,
     MoveIntent = 3,
     AttackIntent = 4,
-    TeleportIntent = 5
+    TeleportIntent = 5,
+    LootIntent = 6
 }
 
 public sealed record WorldCommand(
@@ -313,7 +336,8 @@ public sealed record WorldCommand(
     sbyte MoveX = 0,
     sbyte MoveY = 0,
     Vec2Fix? SpawnPos = null,
-    EntityId? TargetEntityId = null);
+    EntityId? TargetEntityId = null,
+    EntityId? LootEntityId = null);
 
 public sealed record Inputs(ImmutableArray<WorldCommand> Commands);
 public sealed record PlayerInput(EntityId EntityId, sbyte MoveX, sbyte MoveY);

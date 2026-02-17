@@ -7,10 +7,12 @@ namespace Game.Persistence;
 public static class WorldStateSerializer
 {
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 1;
+    private const int CurrentVersion = 2;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
     private const int MaxEntityCountPerZone = 2_000_000;
+    private const int MaxLootEntityCount = 2_000_000;
+    private const int MaxLootItemsPerEntity = 4096;
 
     public static void Save(Stream stream, WorldState world)
     {
@@ -34,6 +36,8 @@ public static class WorldStateSerializer
             WriteMap(writer, zone.Map);
             WriteEntities(writer, zone.EntitiesData);
         }
+
+        WriteLootEntities(writer, world.LootEntities.IsDefault ? ImmutableArray<LootEntityState>.Empty : world.LootEntities);
     }
 
     public static WorldState Load(Stream stream)
@@ -51,7 +55,7 @@ public static class WorldStateSerializer
             }
 
             int version = reader.ReadInt32();
-            if (version != CurrentVersion)
+            if (version is not (1 or CurrentVersion))
             {
                 throw new InvalidDataException($"Unsupported world-state version '{version}'.");
             }
@@ -80,9 +84,12 @@ public static class WorldStateSerializer
             }
 
             ImmutableArray<ZoneState> immutableZones = zones.MoveToImmutable();
+            ImmutableArray<LootEntityState> lootEntities = version >= 2
+                ? ReadLootEntities(reader)
+                : ImmutableArray<LootEntityState>.Empty;
             ImmutableArray<EntityLocation> locations = BuildEntityLocations(immutableZones);
 
-            WorldState loaded = new(tick, immutableZones, locations);
+            WorldState loaded = new(tick, immutableZones, locations, lootEntities);
             CoreInvariants.Validate(loaded, tick);
             return loaded;
         }
@@ -307,6 +314,83 @@ public static class WorldStateSerializer
             health.MoveToImmutable(),
             combat.MoveToImmutable(),
             ai.MoveToImmutable());
+    }
+
+    private static void WriteLootEntities(BinaryWriter writer, ImmutableArray<LootEntityState> lootEntities)
+    {
+        ImmutableArray<LootEntityState> ordered = lootEntities
+            .OrderBy(l => l.Id.Value)
+            .ToImmutableArray();
+
+        writer.Write(ordered.Length);
+        foreach (LootEntityState loot in ordered)
+        {
+            writer.Write(loot.Id.Value);
+            writer.Write(loot.ZoneId.Value);
+            writer.Write(loot.Pos.X.Raw);
+            writer.Write(loot.Pos.Y.Raw);
+
+            ImmutableArray<ItemStack> orderedItems = loot.Items
+                .OrderBy(i => i.ItemId, StringComparer.Ordinal)
+                .ThenBy(i => i.Quantity)
+                .ToImmutableArray();
+
+            writer.Write(orderedItems.Length);
+            foreach (ItemStack item in orderedItems)
+            {
+                writer.Write(item.ItemId);
+                writer.Write(item.Quantity);
+            }
+        }
+    }
+
+    private static ImmutableArray<LootEntityState> ReadLootEntities(BinaryReader reader)
+    {
+        int lootCount = reader.ReadInt32();
+        ValidateCount(lootCount, MaxLootEntityCount, nameof(lootCount));
+
+        ImmutableArray<LootEntityState>.Builder loot = ImmutableArray.CreateBuilder<LootEntityState>(lootCount);
+        int previousLootId = int.MinValue;
+
+        for (int i = 0; i < lootCount; i++)
+        {
+            int lootEntityId = reader.ReadInt32();
+            if (lootEntityId <= previousLootId)
+            {
+                throw new InvalidDataException("Loot entities are not in strictly ascending EntityId order.");
+            }
+
+            previousLootId = lootEntityId;
+
+            ZoneId zoneId = new(reader.ReadInt32());
+            Vec2Fix pos = new(new Fix32(reader.ReadInt32()), new Fix32(reader.ReadInt32()));
+            int itemCount = reader.ReadInt32();
+            ValidateCount(itemCount, MaxLootItemsPerEntity, nameof(itemCount));
+
+            ImmutableArray<ItemStack>.Builder items = ImmutableArray.CreateBuilder<ItemStack>(itemCount);
+            string previousItemId = string.Empty;
+            for (int itemIndex = 0; itemIndex < itemCount; itemIndex++)
+            {
+                string itemId = reader.ReadString();
+                int quantity = reader.ReadInt32();
+                if (quantity <= 0)
+                {
+                    throw new InvalidDataException($"Loot item quantity must be positive: {quantity}.");
+                }
+
+                if (string.CompareOrdinal(itemId, previousItemId) < 0)
+                {
+                    throw new InvalidDataException("Loot items are not in ascending ItemId order.");
+                }
+
+                previousItemId = itemId;
+                items.Add(new ItemStack(itemId, quantity));
+            }
+
+            loot.Add(new LootEntityState(new EntityId(lootEntityId), zoneId, pos, items.MoveToImmutable()));
+        }
+
+        return loot.MoveToImmutable();
     }
 
     private static ImmutableArray<EntityLocation> BuildEntityLocations(ImmutableArray<ZoneState> zones)
