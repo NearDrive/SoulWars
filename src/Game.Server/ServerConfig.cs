@@ -29,7 +29,8 @@ public readonly record struct ServerConfig(
     bool EnableStructuredLogs,
     bool EnableMetrics,
     string? ZoneDefinitionsPath,
-    string? VendorDefinitionsPath)
+    string? VendorDefinitionsPath,
+    bool EnableTickReports)
 {
     public Fix32 AoiRadius => VisionRadius;
 
@@ -78,5 +79,6 @@ public readonly record struct ServerConfig(
         EnableStructuredLogs: false,
         EnableMetrics: true,
         ZoneDefinitionsPath: null,
-        VendorDefinitionsPath: null);
+        VendorDefinitionsPath: null,
+        EnableTickReports: false);
 }
