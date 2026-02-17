@@ -68,7 +68,15 @@ public sealed class LootServerTests
 
             Assert.True(restarted.TryGetPlayerState(player.PlayerId, out PlayerState restartedPlayer));
             PlayerInventoryState restartedInventory = Assert.Single(restarted.CurrentWorld.PlayerInventories);
-            Assert.Equal(inventory, restartedInventory);
+            Assert.Equal(inventory.EntityId, restartedInventory.EntityId);
+            Assert.Equal(inventory.Inventory.Capacity, restartedInventory.Inventory.Capacity);
+            Assert.Equal(inventory.Inventory.StackLimit, restartedInventory.Inventory.StackLimit);
+            Assert.Equal(inventory.Inventory.Slots.Length, restartedInventory.Inventory.Slots.Length);
+            for (int i = 0; i < inventory.Inventory.Slots.Length; i++)
+            {
+                Assert.Equal(inventory.Inventory.Slots[i].ItemId, restartedInventory.Inventory.Slots[i].ItemId);
+                Assert.Equal(inventory.Inventory.Slots[i].Quantity, restartedInventory.Inventory.Slots[i].Quantity);
+            }
 
         }
         finally

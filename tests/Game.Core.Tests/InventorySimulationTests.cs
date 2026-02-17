@@ -55,7 +55,18 @@ public sealed class InventorySimulationTests
         byte[] data = WorldStateSerializer.SaveToBytes(state);
         WorldState loaded = WorldStateSerializer.LoadFromBytes(data);
 
-        Assert.Equal(state.PlayerInventories, loaded.PlayerInventories);
+        PlayerInventoryState expected = Assert.Single(state.PlayerInventories);
+        PlayerInventoryState actual = Assert.Single(loaded.PlayerInventories);
+        Assert.Equal(expected.EntityId, actual.EntityId);
+        Assert.Equal(expected.Inventory.Capacity, actual.Inventory.Capacity);
+        Assert.Equal(expected.Inventory.StackLimit, actual.Inventory.StackLimit);
+        Assert.Equal(expected.Inventory.Slots.Length, actual.Inventory.Slots.Length);
+        for (int i = 0; i < expected.Inventory.Slots.Length; i++)
+        {
+            Assert.Equal(expected.Inventory.Slots[i].ItemId, actual.Inventory.Slots[i].ItemId);
+            Assert.Equal(expected.Inventory.Slots[i].Quantity, actual.Inventory.Slots[i].Quantity);
+        }
+
         CoreInvariants.Validate(loaded, loaded.Tick);
     }
 
