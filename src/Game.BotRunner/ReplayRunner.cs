@@ -235,7 +235,7 @@ public sealed record ReplayExecutionResult(string Checksum, string? ExpectedChec
 
 public sealed record ReplayVerifyOptions(string? OutputDir);
 
-public sealed class ReplayVerificationException : InvalidDataException
+public sealed class ReplayVerificationException : Exception
 {
     public ReplayVerificationException(string message, int divergentTick, string expectedChecksum, string actualChecksum, string artifactsDirectory)
         : base(message)
