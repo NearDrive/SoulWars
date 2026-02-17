@@ -3,6 +3,7 @@ using Game.Server;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.Json;
+using System.Collections.Immutable;
 using Game.Core;
 
 namespace Game.BotRunner;
@@ -155,9 +156,10 @@ public static class ReplayRunner
             {
                 IReadOnlyList<TickReport> expectedTickReports = actualTickReports.ToArray();
                 int divergentTick = FindFirstDivergentTick(expectedTickReports, actualTickReports) ?? header.TickCount;
-                string artifactsDirectory = WriteMismatchArtifacts(header, verifyOptions, expectedChecksum, finalChecksum, expectedTickReports, actualTickReports);
+                ReplayMismatchSummary summary = BuildSummary(expectedTickReports, actualTickReports, divergentTick, expectedChecksum, finalChecksum);
+                string artifactsDirectory = WriteMismatchArtifacts(header, verifyOptions, expectedChecksum, finalChecksum, expectedTickReports, actualTickReports, summary);
                 string message =
-                    $"Replay checksum mismatch at tick={divergentTick}. expected={expectedChecksum} actual={finalChecksum} artifacts={artifactsDirectory}";
+                    $"Replay checksum mismatch. {summary.ToSingleLine()} artifacts={artifactsDirectory}";
                 logger.LogError(BotRunnerLogEvents.ScenarioEnd, "{Message}", message);
                 throw new ReplayVerificationException(message, divergentTick, expectedChecksum, finalChecksum, artifactsDirectory);
             }
@@ -180,7 +182,8 @@ public static class ReplayRunner
         string expectedChecksum,
         string actualChecksum,
         IReadOnlyList<TickReport> expectedTickReports,
-        IReadOnlyList<TickReport> actualTickReports)
+        IReadOnlyList<TickReport> actualTickReports,
+        ReplayMismatchSummary summary)
     {
         string outputDir = verifyOptions?.OutputDir
             ?? Path.Combine("artifacts", "replay-mismatch", $"seed-{header.ServerSeed}_bots-{header.BotCount}_ticks-{header.TickCount}");
@@ -190,6 +193,7 @@ public static class ReplayRunner
         File.WriteAllText(Path.Combine(outputDir, "actual_checksum.txt"), actualChecksum + Environment.NewLine);
         WriteJsonl(Path.Combine(outputDir, "tickreport_expected.jsonl"), expectedTickReports);
         WriteJsonl(Path.Combine(outputDir, "tickreport_actual.jsonl"), actualTickReports);
+        File.WriteAllText(Path.Combine(outputDir, "mismatch_summary.txt"), summary.ToText());
 
         return outputDir;
     }
@@ -229,6 +233,120 @@ public static class ReplayRunner
             ? expectedReports[minCount].Tick
             : actualReports[minCount].Tick;
     }
+
+    internal static ReplayMismatchSummary BuildSummary(
+        IReadOnlyList<TickReport> expectedReports,
+        IReadOnlyList<TickReport> actualReports,
+        int firstTick,
+        string expectedFinalChecksum,
+        string actualFinalChecksum,
+        int topN = 10)
+    {
+        TickReport? expectedTickReport = expectedReports.FirstOrDefault(r => r.Tick == firstTick);
+        TickReport? actualTickReport = actualReports.FirstOrDefault(r => r.Tick == firstTick);
+
+        string expectedChecksumAtTick = expectedTickReport?.WorldChecksum ?? expectedFinalChecksum;
+        string actualChecksumAtTick = actualTickReport?.WorldChecksum ?? actualFinalChecksum;
+
+        return new ReplayMismatchSummary(
+            FirstDivergentTick: firstTick,
+            ExpectedChecksumAtTick: expectedChecksumAtTick,
+            ActualChecksumAtTick: actualChecksumAtTick,
+            EntityCountByTypeDiffs: BuildCountIntDiffs(expectedTickReport?.EntityCountByType ?? [], actualTickReport?.EntityCountByType ?? [], topN),
+            InventoryTotalsDiffs: BuildCountIntDiffs(expectedTickReport?.InventoryTotals ?? [], actualTickReport?.InventoryTotals ?? [], topN),
+            LootCountDiff: (actualTickReport?.LootCount ?? 0) - (expectedTickReport?.LootCount ?? 0),
+            WalletTotalsDiffs: BuildCountLongDiffs(expectedTickReport?.WalletTotals ?? [], actualTickReport?.WalletTotals ?? [], topN));
+    }
+
+    private static IReadOnlyList<ReplayMismatchDiffInt> BuildCountIntDiffs(
+        ImmutableArray<TickReportCountInt> expected,
+        ImmutableArray<TickReportCountInt> actual,
+        int topN)
+    {
+        Dictionary<string, int> expectedMap = expected.ToDictionary(c => c.Key, c => c.Value, StringComparer.Ordinal);
+        Dictionary<string, int> actualMap = actual.ToDictionary(c => c.Key, c => c.Value, StringComparer.Ordinal);
+        return expectedMap.Keys
+            .Concat(actualMap.Keys)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .Select(key => new ReplayMismatchDiffInt(
+                key,
+                expectedMap.TryGetValue(key, out int expectedValue) ? expectedValue : 0,
+                actualMap.TryGetValue(key, out int actualValue) ? actualValue : 0))
+            .Where(diff => diff.Delta != 0)
+            .Take(topN)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<ReplayMismatchDiffLong> BuildCountLongDiffs(
+        ImmutableArray<TickReportCountLong> expected,
+        ImmutableArray<TickReportCountLong> actual,
+        int topN)
+    {
+        Dictionary<string, long> expectedMap = expected.ToDictionary(c => c.Key, c => c.Value, StringComparer.Ordinal);
+        Dictionary<string, long> actualMap = actual.ToDictionary(c => c.Key, c => c.Value, StringComparer.Ordinal);
+        return expectedMap.Keys
+            .Concat(actualMap.Keys)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .Select(key => new ReplayMismatchDiffLong(
+                key,
+                expectedMap.TryGetValue(key, out long expectedValue) ? expectedValue : 0,
+                actualMap.TryGetValue(key, out long actualValue) ? actualValue : 0))
+            .Where(diff => diff.Delta != 0)
+            .Take(topN)
+            .ToArray();
+    }
+}
+
+public sealed record ReplayMismatchSummary(
+    int FirstDivergentTick,
+    string ExpectedChecksumAtTick,
+    string ActualChecksumAtTick,
+    IReadOnlyList<ReplayMismatchDiffInt> EntityCountByTypeDiffs,
+    IReadOnlyList<ReplayMismatchDiffInt> InventoryTotalsDiffs,
+    int LootCountDiff,
+    IReadOnlyList<ReplayMismatchDiffLong> WalletTotalsDiffs)
+{
+    public string ToSingleLine()
+    {
+        return $"FirstDivergentTick={FirstDivergentTick} ExpectedChecksumAtTick={ExpectedChecksumAtTick} ActualChecksumAtTick={ActualChecksumAtTick}";
+    }
+
+    public string ToText()
+    {
+        List<string> lines =
+        [
+            $"FirstDivergentTick={FirstDivergentTick}",
+            $"ExpectedChecksumAtTick={ExpectedChecksumAtTick}",
+            $"ActualChecksumAtTick={ActualChecksumAtTick}",
+            $"LootCountDiff={LootCountDiff}",
+            "EntityCountByTypeDiffs:",
+            .. EntityCountByTypeDiffs.Select(FormatDiff),
+            "InventoryTotalsDiffs:",
+            .. InventoryTotalsDiffs.Select(FormatDiff),
+            "WalletTotalsDiffs:",
+            .. WalletTotalsDiffs.Select(FormatDiff)
+        ];
+
+        return string.Join(Environment.NewLine, lines) + Environment.NewLine;
+    }
+
+    private static string FormatDiff(ReplayMismatchDiffInt diff) =>
+        $"- {diff.Key}: expected={diff.Expected} actual={diff.Actual} delta={diff.Delta}";
+
+    private static string FormatDiff(ReplayMismatchDiffLong diff) =>
+        $"- {diff.Key}: expected={diff.Expected} actual={diff.Actual} delta={diff.Delta}";
+}
+
+public sealed record ReplayMismatchDiffInt(string Key, int Expected, int Actual)
+{
+    public int Delta => Actual - Expected;
+}
+
+public sealed record ReplayMismatchDiffLong(string Key, long Expected, long Actual)
+{
+    public long Delta => Actual - Expected;
 }
 
 public sealed record ReplayExecutionResult(string Checksum, string? ExpectedChecksum);

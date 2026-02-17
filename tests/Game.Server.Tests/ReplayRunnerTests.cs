@@ -79,16 +79,91 @@ public sealed class ReplayRunnerTests
 
         int firstTick = ReadTickFromJsonlLine(expectedLines[0]);
         Assert.True(firstTick is 0 or 1, $"Unexpected first tick in tickreport: {firstTick}.");
-        Assert.Contains("tick=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("FirstDivergentTick=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("ExpectedChecksumAtTick=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("ActualChecksumAtTick=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("artifacts=", ex.Message, StringComparison.Ordinal);
         Assert.Equal(tempRoot, ex.ArtifactsDirectory);
     }
 
+    [Fact]
+    public void ReplayVerify_Mismatch_IncludesFirstDivergentTick_InMessage()
+    {
+        using Stream replayStream = CreateReplayWithWrongExpectedChecksum();
+
+        ReplayVerificationException ex = Assert.Throws<ReplayVerificationException>(() =>
+            ReplayRunner.RunReplayWithExpected(replayStream));
+
+        Assert.Contains("FirstDivergentTick=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("ExpectedChecksumAtTick=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("ActualChecksumAtTick=", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReplayVerify_Mismatch_WritesMismatchSummaryFile()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "soulwars-pr47-tests", nameof(ReplayVerify_Mismatch_WritesMismatchSummaryFile));
+        if (Directory.Exists(tempRoot))
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+
+        Directory.CreateDirectory(tempRoot);
+
+        using Stream replayStream = CreateReplayWithWrongExpectedChecksum();
+        ReplayVerificationException ex = Assert.Throws<ReplayVerificationException>(() =>
+            ReplayRunner.RunReplayWithExpected(replayStream, verifyOptions: new ReplayVerifyOptions(tempRoot)));
+
+        string summaryPath = Path.Combine(tempRoot, "mismatch_summary.txt");
+        Assert.True(File.Exists(summaryPath));
+
+        string summaryText = File.ReadAllText(summaryPath);
+        Assert.Contains("FirstDivergentTick=", summaryText, StringComparison.Ordinal);
+        Assert.Contains("ExpectedChecksumAtTick=", summaryText, StringComparison.Ordinal);
+        Assert.Contains("ActualChecksumAtTick=", summaryText, StringComparison.Ordinal);
+        Assert.Contains($"FirstDivergentTick={ex.DivergentTick}", summaryText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReplayVerify_Mismatch_SummaryContainsDeterministicDiffs()
+    {
+        string rootA = Path.Combine(Path.GetTempPath(), "soulwars-pr47-tests", nameof(ReplayVerify_Mismatch_SummaryContainsDeterministicDiffs), "run-a");
+        string rootB = Path.Combine(Path.GetTempPath(), "soulwars-pr47-tests", nameof(ReplayVerify_Mismatch_SummaryContainsDeterministicDiffs), "run-b");
+
+        ResetDir(rootA);
+        ResetDir(rootB);
+
+        using (Stream replayStream = CreateReplayWithWrongExpectedChecksum())
+        {
+            Assert.Throws<ReplayVerificationException>(() =>
+                ReplayRunner.RunReplayWithExpected(replayStream, verifyOptions: new ReplayVerifyOptions(rootA)));
+        }
+
+        using (Stream replayStream = CreateReplayWithWrongExpectedChecksum())
+        {
+            Assert.Throws<ReplayVerificationException>(() =>
+                ReplayRunner.RunReplayWithExpected(replayStream, verifyOptions: new ReplayVerifyOptions(rootB)));
+        }
+
+        byte[] summaryA = File.ReadAllBytes(Path.Combine(rootA, "mismatch_summary.txt"));
+        byte[] summaryB = File.ReadAllBytes(Path.Combine(rootB, "mismatch_summary.txt"));
+        Assert.Equal(summaryA, summaryB);
+    }
 
     private static int ReadTickFromJsonlLine(string line)
     {
         using JsonDocument doc = JsonDocument.Parse(line);
         return doc.RootElement.GetProperty("Tick").GetInt32();
+    }
+
+    private static void ResetDir(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, recursive: true);
+        }
+
+        Directory.CreateDirectory(path);
     }
 
     private static Stream CreateReplayWithWrongExpectedChecksum()
