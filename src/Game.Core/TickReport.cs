@@ -9,6 +9,8 @@ public readonly record struct TickReportCountLong(string Key, long Value);
 public sealed record TickReport(
     int Tick,
     string WorldChecksum,
+    string GlobalChecksum,
+    ImmutableArray<ZoneChecksum> ZoneChecksums,
     string? SnapshotHash,
     ImmutableArray<TickReportCountInt> EntityCountByType,
     int LootCount,
@@ -64,6 +66,8 @@ public static class TickReportBuilder
         return new TickReport(
             Tick: world.Tick,
             WorldChecksum: worldChecksum,
+            GlobalChecksum: StateChecksum.ComputeGlobalChecksum(world),
+            ZoneChecksums: StateChecksum.ComputeZoneChecksums(world),
             SnapshotHash: snapshotHash,
             EntityCountByType: entityCountByType
                 .OrderBy(pair => pair.Key, StringComparer.Ordinal)

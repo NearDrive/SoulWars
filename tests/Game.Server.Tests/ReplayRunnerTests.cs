@@ -76,6 +76,28 @@ public sealed class ReplayRunnerTests
         Assert.Empty(Directory.GetFiles(tempRoot));
     }
 
+
+    [Fact]
+    public void ReplayVerify_MultiZone_Passes()
+    {
+        ScenarioConfig scenario = new(
+            ServerSeed: 3030,
+            TickCount: 40,
+            SnapshotEveryTicks: 2,
+            BotCount: 2,
+            ZoneId: 1,
+            BaseBotSeed: 9000,
+            ZoneCount: 2,
+            NpcCount: 0);
+
+        using MemoryStream replay = new();
+        ScenarioRunner.RunAndRecord(scenario, replay);
+        replay.Position = 0;
+
+        ReplayExecutionResult result = ReplayRunner.RunReplayWithExpected(replay);
+        Assert.Equal(TestChecksum.NormalizeFullHex(result.ExpectedChecksum!), TestChecksum.NormalizeFullHex(result.Checksum));
+    }
+
     [Fact]
     public void ReplayVerify_Mismatch_EmitsArtifacts()
     {
@@ -119,6 +141,8 @@ public sealed class ReplayRunnerTests
         Assert.Contains("FirstDivergentTick=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("ExpectedChecksumAtTick=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("ActualChecksumAtTick=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("ExpectedGlobalChecksumAtTick=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("ActualGlobalChecksumAtTick=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("artifact_output_dir=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("expected_checksum=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("actual_checksum=", ex.Message, StringComparison.Ordinal);
@@ -136,6 +160,8 @@ public sealed class ReplayRunnerTests
         Assert.Contains("FirstDivergentTick=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("ExpectedChecksumAtTick=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("ActualChecksumAtTick=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("ExpectedGlobalChecksumAtTick=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("ActualGlobalChecksumAtTick=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("expected_checksum=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("actual_checksum=", ex.Message, StringComparison.Ordinal);
     }
@@ -162,6 +188,8 @@ public sealed class ReplayRunnerTests
         Assert.Contains("FirstDivergentTick=", summaryText, StringComparison.Ordinal);
         Assert.Contains("ExpectedChecksumAtTick=", summaryText, StringComparison.Ordinal);
         Assert.Contains("ActualChecksumAtTick=", summaryText, StringComparison.Ordinal);
+        Assert.Contains("ExpectedGlobalChecksumAtTick=", summaryText, StringComparison.Ordinal);
+        Assert.Contains("ActualGlobalChecksumAtTick=", summaryText, StringComparison.Ordinal);
         Assert.Contains("ExpectedFinalChecksum=", summaryText, StringComparison.Ordinal);
         Assert.Contains("ActualFinalChecksum=", summaryText, StringComparison.Ordinal);
         Assert.Contains($"FirstDivergentTick={ex.DivergentTick}", summaryText, StringComparison.Ordinal);

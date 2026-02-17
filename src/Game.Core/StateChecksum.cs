@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 
 namespace Game.Core;
 
+public readonly record struct ZoneChecksum(int ZoneId, string Value);
+
 public static class StateChecksum
 {
     public static string Compute(WorldState state)
@@ -19,27 +21,82 @@ public static class StateChecksum
 
         foreach (ZoneState zone in orderedZones)
         {
-            writer.Write(zone.Id.Value);
-            writer.Write(zone.Map.Width);
-            writer.Write(zone.Map.Height);
-
-            byte[] mapHash = ComputeMapHash(zone.Map);
-            writer.Write(mapHash.Length);
-            writer.Write(mapHash);
-
-            ImmutableArray<EntityState> orderedEntities = zone.Entities.OrderBy(entity => entity.Id.Value).ToImmutableArray();
-            writer.Write(orderedEntities.Length);
-
-            foreach (EntityState entity in orderedEntities)
-            {
-                writer.Write(entity.Id.Value);
-                writer.Write(entity.Pos.X.Raw);
-                writer.Write(entity.Pos.Y.Raw);
-                writer.Write(entity.Vel.X.Raw);
-                writer.Write(entity.Vel.Y.Raw);
-            }
+            WriteZoneData(writer, zone);
         }
 
+        WriteGlobalWorldData(writer, state);
+
+        writer.Flush();
+        return ComputeSha256Hex(stream.ToArray());
+    }
+
+    public static string ComputeGlobalChecksum(WorldState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+
+        ImmutableArray<ZoneChecksum> zoneChecksums = ComputeZoneChecksums(state);
+        using MemoryStream stream = new();
+        using BinaryWriter writer = new(stream);
+
+        writer.Write(zoneChecksums.Length);
+        foreach (ZoneChecksum zoneChecksum in zoneChecksums)
+        {
+            writer.Write(zoneChecksum.ZoneId);
+            writer.Write(zoneChecksum.Value);
+        }
+
+        writer.Flush();
+        return ComputeSha256Hex(stream.ToArray());
+    }
+
+    public static ImmutableArray<ZoneChecksum> ComputeZoneChecksums(WorldState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+
+        return state.Zones
+            .OrderBy(zone => zone.Id.Value)
+            .Select(zone => zone.ComputeChecksum())
+            .ToImmutableArray();
+    }
+
+    public static string ComputeZoneChecksum(ZoneState zone)
+    {
+        ArgumentNullException.ThrowIfNull(zone);
+
+        using MemoryStream stream = new();
+        using BinaryWriter writer = new(stream);
+
+        WriteZoneData(writer, zone);
+
+        writer.Flush();
+        return ComputeSha256Hex(stream.ToArray());
+    }
+
+    private static void WriteZoneData(BinaryWriter writer, ZoneState zone)
+    {
+        writer.Write(zone.Id.Value);
+        writer.Write(zone.Map.Width);
+        writer.Write(zone.Map.Height);
+
+        byte[] mapHash = ComputeMapHash(zone.Map);
+        writer.Write(mapHash.Length);
+        writer.Write(mapHash);
+
+        ImmutableArray<EntityState> orderedEntities = zone.Entities.OrderBy(entity => entity.Id.Value).ToImmutableArray();
+        writer.Write(orderedEntities.Length);
+
+        foreach (EntityState entity in orderedEntities)
+        {
+            writer.Write(entity.Id.Value);
+            writer.Write(entity.Pos.X.Raw);
+            writer.Write(entity.Pos.Y.Raw);
+            writer.Write(entity.Vel.X.Raw);
+            writer.Write(entity.Vel.Y.Raw);
+        }
+    }
+
+    private static void WriteGlobalWorldData(BinaryWriter writer, WorldState state)
+    {
         ImmutableArray<PlayerInventoryState> orderedInventories = (state.PlayerInventories.IsDefault ? ImmutableArray<PlayerInventoryState>.Empty : state.PlayerInventories)
             .OrderBy(i => i.EntityId.Value)
             .ToImmutableArray();
@@ -112,10 +169,6 @@ public static class StateChecksum
             writer.Write(entry.GoldBefore);
             writer.Write(entry.GoldAfter);
         }
-
-        writer.Flush();
-        byte[] hash = SHA256.HashData(stream.ToArray());
-        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     private static byte[] ComputeMapHash(TileMap map)
@@ -128,4 +181,6 @@ public static class StateChecksum
 
         return SHA256.HashData(tileBytes);
     }
+
+    private static string ComputeSha256Hex(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 }
