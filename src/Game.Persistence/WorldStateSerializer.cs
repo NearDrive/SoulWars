@@ -6,6 +6,25 @@ namespace Game.Persistence;
 
 public static class WorldStateSerializer
 {
+    private sealed record RawSnapshotPayload(
+        int Version,
+        int Tick,
+        ImmutableArray<ZoneState> Zones,
+        ImmutableArray<LootEntityState> LootEntities,
+        ImmutableArray<PlayerInventoryState> PlayerInventories,
+        ImmutableArray<PlayerWalletState> PlayerWallets,
+        ImmutableArray<VendorDefinition> Vendors,
+        ImmutableArray<VendorTransactionAuditEntry> VendorAudit);
+
+    private sealed record V4SnapshotPayload(
+        int Tick,
+        ImmutableArray<ZoneState> Zones,
+        ImmutableArray<LootEntityState> LootEntities,
+        ImmutableArray<PlayerInventoryState> PlayerInventories,
+        ImmutableArray<PlayerWalletState> PlayerWallets,
+        ImmutableArray<VendorDefinition> Vendors,
+        ImmutableArray<VendorTransactionAuditEntry> VendorAudit);
+
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
     private const int CurrentVersion = 4;
     public static int SerializerVersion => CurrentVersion;
@@ -58,63 +77,9 @@ public static class WorldStateSerializer
         try
         {
             using BinaryReader reader = new(stream, Encoding.UTF8, leaveOpen: true);
-
-            byte[] magic = reader.ReadBytes(Magic.Length);
-            if (magic.Length != Magic.Length || !magic.AsSpan().SequenceEqual(Magic))
-            {
-                throw new InvalidDataException("Invalid world-state magic header.");
-            }
-
-            int version = reader.ReadInt32();
-            if (version is not (1 or 2 or 3 or CurrentVersion))
-            {
-                throw new InvalidDataException($"Unsupported world-state version '{version}'.");
-            }
-
-            int tick = reader.ReadInt32();
-            int zoneCount = reader.ReadInt32();
-            ValidateCount(zoneCount, MaxZoneCount, nameof(zoneCount));
-
-            ImmutableArray<ZoneState>.Builder zones = ImmutableArray.CreateBuilder<ZoneState>(zoneCount);
-
-            int previousZoneId = int.MinValue;
-            for (int i = 0; i < zoneCount; i++)
-            {
-                int zoneIdValue = reader.ReadInt32();
-                if (zoneIdValue <= previousZoneId)
-                {
-                    throw new InvalidDataException("Zones are not in strictly ascending ZoneId order.");
-                }
-
-                previousZoneId = zoneIdValue;
-
-                TileMap map = ReadMap(reader);
-                ZoneEntities entities = ReadEntities(reader);
-
-                zones.Add(new ZoneState(new ZoneId(zoneIdValue), map, entities));
-            }
-
-            ImmutableArray<ZoneState> immutableZones = zones.MoveToImmutable();
-            ImmutableArray<LootEntityState> lootEntities = version >= 2
-                ? ReadLootEntities(reader)
-                : ImmutableArray<LootEntityState>.Empty;
-            ImmutableArray<PlayerInventoryState> playerInventories = version >= 3
-                ? ReadPlayerInventories(reader)
-                : ImmutableArray<PlayerInventoryState>.Empty;
-            ImmutableArray<PlayerWalletState> playerWallets = version >= 4
-                ? ReadPlayerWallets(reader)
-                : ImmutableArray<PlayerWalletState>.Empty;
-            ImmutableArray<VendorDefinition> vendors = version >= 4
-                ? ReadVendors(reader)
-                : ImmutableArray<VendorDefinition>.Empty;
-            ImmutableArray<VendorTransactionAuditEntry> vendorAudit = version >= 4
-                ? ReadVendorAudit(reader)
-                : ImmutableArray<VendorTransactionAuditEntry>.Empty;
-            ImmutableArray<EntityLocation> locations = BuildEntityLocations(immutableZones);
-
-            WorldState loaded = new(tick, immutableZones, locations, lootEntities, playerInventories, PlayerWallets: playerWallets, VendorTransactionAuditLog: vendorAudit, Vendors: vendors);
-            CoreInvariants.Validate(loaded, tick);
-            return loaded;
+            RawSnapshotPayload raw = LoadRaw(reader);
+            V4SnapshotPayload migrated = MigrateToV4(raw);
+            return LoadV4(migrated);
         }
         catch (EndOfStreamException ex)
         {
@@ -133,6 +98,111 @@ public static class WorldStateSerializer
     {
         using MemoryStream stream = new(data.ToArray(), writable: false);
         return Load(stream);
+    }
+
+    private static RawSnapshotPayload LoadRaw(BinaryReader reader)
+    {
+        byte[] magic = reader.ReadBytes(Magic.Length);
+        if (magic.Length != Magic.Length || !magic.AsSpan().SequenceEqual(Magic))
+        {
+            throw new InvalidDataException("Invalid world-state magic header.");
+        }
+
+        int version = reader.ReadInt32();
+        if (version is not (1 or 2 or 3 or CurrentVersion))
+        {
+            throw new InvalidDataException($"Unsupported world-state version '{version}'.");
+        }
+
+        int tick = reader.ReadInt32();
+        int zoneCount = reader.ReadInt32();
+        ValidateCount(zoneCount, MaxZoneCount, nameof(zoneCount));
+
+        ImmutableArray<ZoneState>.Builder zones = ImmutableArray.CreateBuilder<ZoneState>(zoneCount);
+        int previousZoneId = int.MinValue;
+
+        for (int i = 0; i < zoneCount; i++)
+        {
+            int zoneIdValue = reader.ReadInt32();
+            if (zoneIdValue <= previousZoneId)
+            {
+                throw new InvalidDataException("Zones are not in strictly ascending ZoneId order.");
+            }
+
+            previousZoneId = zoneIdValue;
+
+            TileMap map = ReadMap(reader);
+            ZoneEntities entities = ReadEntities(reader);
+
+            zones.Add(new ZoneState(new ZoneId(zoneIdValue), map, entities));
+        }
+
+        ImmutableArray<LootEntityState> lootEntities = version >= 2
+            ? ReadLootEntities(reader)
+            : ImmutableArray<LootEntityState>.Empty;
+        ImmutableArray<PlayerInventoryState> playerInventories = version >= 3
+            ? ReadPlayerInventories(reader)
+            : ImmutableArray<PlayerInventoryState>.Empty;
+        ImmutableArray<PlayerWalletState> playerWallets = version >= 4
+            ? ReadPlayerWallets(reader)
+            : ImmutableArray<PlayerWalletState>.Empty;
+        ImmutableArray<VendorDefinition> vendors = version >= 4
+            ? ReadVendors(reader)
+            : ImmutableArray<VendorDefinition>.Empty;
+        ImmutableArray<VendorTransactionAuditEntry> vendorAudit = version >= 4
+            ? ReadVendorAudit(reader)
+            : ImmutableArray<VendorTransactionAuditEntry>.Empty;
+
+        return new RawSnapshotPayload(
+            Version: version,
+            Tick: tick,
+            Zones: zones.MoveToImmutable(),
+            LootEntities: lootEntities,
+            PlayerInventories: playerInventories,
+            PlayerWallets: playerWallets,
+            Vendors: vendors,
+            VendorAudit: vendorAudit);
+    }
+
+    private static V4SnapshotPayload MigrateToV4(RawSnapshotPayload payload)
+    {
+        if (payload.Version == CurrentVersion)
+        {
+            return new V4SnapshotPayload(
+                Tick: payload.Tick,
+                Zones: payload.Zones,
+                LootEntities: payload.LootEntities,
+                PlayerInventories: payload.PlayerInventories,
+                PlayerWallets: payload.PlayerWallets,
+                Vendors: payload.Vendors,
+                VendorAudit: payload.VendorAudit);
+        }
+
+        return new V4SnapshotPayload(
+            Tick: payload.Tick,
+            Zones: payload.Zones.OrderBy(z => z.Id.Value).ToImmutableArray(),
+            LootEntities: payload.LootEntities.OrderBy(l => l.Id.Value).ToImmutableArray(),
+            PlayerInventories: payload.PlayerInventories.OrderBy(i => i.EntityId.Value).ToImmutableArray(),
+            PlayerWallets: ImmutableArray<PlayerWalletState>.Empty,
+            Vendors: ImmutableArray<VendorDefinition>.Empty,
+            VendorAudit: ImmutableArray<VendorTransactionAuditEntry>.Empty);
+    }
+
+    private static WorldState LoadV4(V4SnapshotPayload payload)
+    {
+        ImmutableArray<EntityLocation> locations = BuildEntityLocations(payload.Zones);
+        WorldState loaded = new(
+            payload.Tick,
+            payload.Zones,
+            locations,
+            payload.LootEntities,
+            payload.PlayerInventories,
+            PlayerWallets: payload.PlayerWallets,
+            VendorTransactionAuditLog: payload.VendorAudit,
+            Vendors: payload.Vendors);
+
+        CoreInvariants.Validate(loaded, payload.Tick);
+        return loaded;
     }
 
     private static void WriteMap(BinaryWriter writer, TileMap map)
