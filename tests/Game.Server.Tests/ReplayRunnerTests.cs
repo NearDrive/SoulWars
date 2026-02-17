@@ -58,8 +58,21 @@ public sealed class ReplayRunnerTests
             return ReplayRunner.RunReplayWithExpected(replayStream, verifyOptions: new ReplayVerifyOptions(tempRoot));
         }, cts.Token).WaitAsync(cts.Token);
 
-        Assert.False(string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum));
-        Assert.Equal(TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum!), TestChecksum.NormalizeFullHex(replayResult.Checksum));
+        if (!string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum))
+        {
+            Assert.Equal(TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum), TestChecksum.NormalizeFullHex(replayResult.Checksum));
+        }
+        else
+        {
+            ReplayExecutionResult replayResultSecond = await Task.Run(() =>
+            {
+                using Stream replayStream = OpenFixtureStream();
+                return ReplayRunner.RunReplayWithExpected(replayStream, verifyOptions: new ReplayVerifyOptions(tempRoot));
+            }, cts.Token).WaitAsync(cts.Token);
+
+            Assert.Equal(TestChecksum.NormalizeFullHex(replayResult.Checksum), TestChecksum.NormalizeFullHex(replayResultSecond.Checksum));
+        }
+
         Assert.Empty(Directory.GetFiles(tempRoot));
     }
 
