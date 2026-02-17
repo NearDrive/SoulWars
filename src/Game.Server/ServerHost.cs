@@ -86,6 +86,8 @@ public sealed class ServerHost
 
     public PerfCounters Perf { get; }
 
+    public Action<TickReport>? TickReportSink { get; set; }
+
     public bool TryConnect(IServerEndpoint endpoint, out SessionId sessionId, out DisconnectReason? denyReason)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
@@ -268,6 +270,14 @@ public sealed class ServerHost
         if (_world.Tick % _serverConfig.SnapshotEveryTicks == 0)
         {
             EmitSnapshots();
+        }
+
+        if (_serverConfig.EnableTickReports)
+        {
+            string worldChecksum = StateChecksum.Compute(_world);
+            string? snapshotHash = _recentSnapshots.Count > 0 ? SnapshotHash.ComputeHex(_recentSnapshots) : null;
+            TickReport report = TickReportBuilder.Build(_world, worldChecksum, snapshotHash);
+            TickReportSink?.Invoke(report);
         }
 
         if (_serverConfig.Invariants.EnableServerInvariants)
