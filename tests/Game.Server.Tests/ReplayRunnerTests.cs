@@ -90,6 +90,7 @@ public sealed class ReplayRunnerTests
         using ReplayWriter writer = new(output, reader.Header);
 
         string wrongExpected = "0000000000000000000000000000000000000000000000000000000000000000";
+        bool hasFinalChecksum = false;
         while (reader.TryReadNext(out ReplayEvent evt))
         {
             if (evt.RecordType == ReplayRecordType.TickInputs)
@@ -98,6 +99,12 @@ public sealed class ReplayRunnerTests
                 continue;
             }
 
+            hasFinalChecksum = true;
+            writer.WriteFinalChecksum(wrongExpected);
+        }
+
+        if (!hasFinalChecksum)
+        {
             writer.WriteFinalChecksum(wrongExpected);
         }
 
