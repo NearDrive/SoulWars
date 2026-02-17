@@ -246,7 +246,7 @@ public static class Simulation
 
         foreach (WorldCommand move in npcCommands.Where(c => c.Kind == WorldCommandKind.MoveIntent).OrderBy(c => c.EntityId.Value))
         {
-            updatedZone = ApplyMoveIntent(config, updatedZone, move, instrumentation);
+            updatedZone = ApplyMoveIntent(config, updatedZone, move, instrumentation: instrumentation);
         }
 
         foreach (WorldCommand attack in npcCommands.Where(c => c.Kind == WorldCommandKind.AttackIntent).OrderBy(c => c.EntityId.Value))
@@ -1399,8 +1399,8 @@ public static class Simulation
         Fix32 min = new(Fix32.OneRaw);
         Fix32 maxX = Fix32.FromInt(map.Width - 1);
         Fix32 maxY = Fix32.FromInt(map.Height - 1);
-        Fix32 x = Clamp(position.X, min, maxX);
-        Fix32 y = Clamp(position.Y, min, maxY);
+        Fix32 x = Fix32.Clamp(position.X, min, maxX);
+        Fix32 y = Fix32.Clamp(position.Y, min, maxY);
         return new Vec2Fix(x, y);
     }
 
