@@ -77,14 +77,14 @@ public sealed class LootServerTests
     private static WorldState BuildWorldWithNpc()
     {
         TileMap map = BuildOpenMap(8, 8);
-        Vec2Fix npcPos = new(Fix32.FromInt(3), Fix32.FromInt(3));
+        Vec2Fix npcPos = new(Fix32.FromInt(1) + new Fix32(Fix32.OneRaw / 2), Fix32.FromInt(1) + new Fix32(Fix32.OneRaw / 2));
 
         EntityState npc = new(
             Id: new EntityId(2),
             Pos: npcPos,
             Vel: Vec2Fix.Zero,
-            MaxHp: 100,
-            Hp: 100,
+            MaxHp: 10,
+            Hp: 10,
             IsAlive: true,
             AttackRange: Fix32.FromInt(1),
             AttackDamage: 10,
