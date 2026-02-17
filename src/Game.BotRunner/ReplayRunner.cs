@@ -2,6 +2,8 @@ using Game.Protocol;
 using Game.Server;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.Json;
+using Game.Core;
 
 namespace Game.BotRunner;
 
@@ -9,16 +11,20 @@ public static class ReplayRunner
 {
     public static string RunReplay(Stream replayStream, ILoggerFactory? loggerFactory = null)
     {
-        ReplayExecutionResult result = RunReplayInternal(replayStream, loggerFactory);
+        ReplayExecutionResult result = RunReplayInternal(replayStream, loggerFactory, verifyOptions: null, enforceExpectedChecksum: false);
         return result.Checksum;
     }
 
-    public static ReplayExecutionResult RunReplayWithExpected(Stream replayStream, ILoggerFactory? loggerFactory = null)
+    public static ReplayExecutionResult RunReplayWithExpected(Stream replayStream, ILoggerFactory? loggerFactory = null, ReplayVerifyOptions? verifyOptions = null)
     {
-        return RunReplayInternal(replayStream, loggerFactory);
+        return RunReplayInternal(replayStream, loggerFactory, verifyOptions, enforceExpectedChecksum: true);
     }
 
-    private static ReplayExecutionResult RunReplayInternal(Stream replayStream, ILoggerFactory? loggerFactory)
+    private static ReplayExecutionResult RunReplayInternal(
+        Stream replayStream,
+        ILoggerFactory? loggerFactory,
+        ReplayVerifyOptions? verifyOptions,
+        bool enforceExpectedChecksum)
     {
         ArgumentNullException.ThrowIfNull(replayStream);
         ILoggerFactory lf = loggerFactory ?? NullLoggerFactory.Instance;
@@ -28,9 +34,11 @@ public static class ReplayRunner
         ReplayHeader header = reader.Header;
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(20));
+        bool captureTickReports = enforceExpectedChecksum;
         ServerConfig serverConfig = ServerConfig.Default(header.ServerSeed) with
         {
-            SnapshotEveryTicks = header.SnapshotEveryTicks
+            SnapshotEveryTicks = header.SnapshotEveryTicks,
+            EnableTickReports = captureTickReports
         };
 
         using ScenarioChecksumBuilder checksum = new();
@@ -38,6 +46,11 @@ public static class ReplayRunner
         Dictionary<(int BotIndex, int Tick), Snapshot> committedSnapshots = new();
         Dictionary<int, SortedDictionary<int, Snapshot>> pendingSnapshotsByBot = new();
         ServerHost host = new(serverConfig, lf);
+        List<TickReport> actualTickReports = new();
+        if (captureTickReports)
+        {
+            host.TickReportSink = actualTickReports.Add;
+        }
 
         string? expectedChecksum = null;
 
@@ -135,6 +148,20 @@ public static class ReplayRunner
             }
 
             string finalChecksum = checksum.BuildHexLower();
+
+            if (enforceExpectedChecksum &&
+                !string.IsNullOrWhiteSpace(expectedChecksum) &&
+                !string.Equals(expectedChecksum, finalChecksum, StringComparison.Ordinal))
+            {
+                IReadOnlyList<TickReport> expectedTickReports = actualTickReports.ToArray();
+                int divergentTick = FindFirstDivergentTick(expectedTickReports, actualTickReports) ?? header.TickCount;
+                string artifactsDirectory = WriteMismatchArtifacts(header, verifyOptions, expectedChecksum, finalChecksum, expectedTickReports, actualTickReports);
+                string message =
+                    $"Replay checksum mismatch at tick={divergentTick}. expected={expectedChecksum} actual={finalChecksum} artifacts={artifactsDirectory}";
+                logger.LogError(BotRunnerLogEvents.ScenarioEnd, "{Message}", message);
+                throw new ReplayVerificationException(message, divergentTick, expectedChecksum, finalChecksum, artifactsDirectory);
+            }
+
             logger.LogInformation(BotRunnerLogEvents.ScenarioEnd, "ScenarioEnd checksum={Checksum} ticks={Ticks}", finalChecksum, header.TickCount);
             return new ReplayExecutionResult(finalChecksum, expectedChecksum);
         }
@@ -146,6 +173,84 @@ public static class ReplayRunner
             }
         }
     }
+
+    private static string WriteMismatchArtifacts(
+        ReplayHeader header,
+        ReplayVerifyOptions? verifyOptions,
+        string expectedChecksum,
+        string actualChecksum,
+        IReadOnlyList<TickReport> expectedTickReports,
+        IReadOnlyList<TickReport> actualTickReports)
+    {
+        string outputDir = verifyOptions?.OutputDir
+            ?? Path.Combine("artifacts", "replay-mismatch", $"seed-{header.ServerSeed}_bots-{header.BotCount}_ticks-{header.TickCount}");
+        Directory.CreateDirectory(outputDir);
+
+        File.WriteAllText(Path.Combine(outputDir, "expected_checksum.txt"), expectedChecksum + Environment.NewLine);
+        File.WriteAllText(Path.Combine(outputDir, "actual_checksum.txt"), actualChecksum + Environment.NewLine);
+        WriteJsonl(Path.Combine(outputDir, "tickreport_expected.jsonl"), expectedTickReports);
+        WriteJsonl(Path.Combine(outputDir, "tickreport_actual.jsonl"), actualTickReports);
+
+        return outputDir;
+    }
+
+    private static void WriteJsonl(string filePath, IReadOnlyList<TickReport> reports)
+    {
+        using StreamWriter writer = new(filePath, append: false);
+        foreach (TickReport report in reports.OrderBy(r => r.Tick))
+        {
+            writer.WriteLine(JsonSerializer.Serialize(report));
+        }
+    }
+
+    internal static int? FindFirstDivergentTick(IReadOnlyList<TickReport> expectedReports, IReadOnlyList<TickReport> actualReports)
+    {
+        int minCount = Math.Min(expectedReports.Count, actualReports.Count);
+        for (int i = 0; i < minCount; i++)
+        {
+            if (expectedReports[i].Tick != actualReports[i].Tick)
+            {
+                return Math.Min(expectedReports[i].Tick, actualReports[i].Tick);
+            }
+
+            if (!string.Equals(expectedReports[i].WorldChecksum, actualReports[i].WorldChecksum, StringComparison.Ordinal) ||
+                !Equals(expectedReports[i], actualReports[i]))
+            {
+                return expectedReports[i].Tick;
+            }
+        }
+
+        if (expectedReports.Count == actualReports.Count)
+        {
+            return null;
+        }
+
+        return expectedReports.Count > actualReports.Count
+            ? expectedReports[minCount].Tick
+            : actualReports[minCount].Tick;
+    }
 }
 
 public sealed record ReplayExecutionResult(string Checksum, string? ExpectedChecksum);
+
+public sealed record ReplayVerifyOptions(string? OutputDir);
+
+public sealed class ReplayVerificationException : Exception
+{
+    public ReplayVerificationException(string message, int divergentTick, string expectedChecksum, string actualChecksum, string artifactsDirectory)
+        : base(message)
+    {
+        DivergentTick = divergentTick;
+        ExpectedChecksum = expectedChecksum;
+        ActualChecksum = actualChecksum;
+        ArtifactsDirectory = artifactsDirectory;
+    }
+
+    public int DivergentTick { get; }
+
+    public string ExpectedChecksum { get; }
+
+    public string ActualChecksum { get; }
+
+    public string ArtifactsDirectory { get; }
+}
