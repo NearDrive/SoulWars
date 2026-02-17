@@ -28,9 +28,23 @@ public static class ServerInvariants
 
             lastSessionId = session.SessionId;
 
-            if (session.EntityId.HasValue && !assignedEntityIds.Add(session.EntityId.Value))
+            if (session.EntityId.HasValue)
             {
-                throw new InvariantViolationException($"invariant=UniqueEntityPerSession sessionId={session.SessionId} entityId={session.EntityId.Value}");
+                if (!assignedEntityIds.Add(session.EntityId.Value))
+                {
+                    throw new InvariantViolationException($"invariant=UniqueEntityPerSession sessionId={session.SessionId} entityId={session.EntityId.Value}");
+                }
+
+                EntityId sessionEntityId = new(session.EntityId.Value);
+                if (!view.World.TryGetEntityZone(sessionEntityId, out ZoneId entityZoneId))
+                {
+                    throw new InvariantViolationException($"invariant=SessionEntityExists sessionId={session.SessionId} entityId={session.EntityId.Value}");
+                }
+
+                if (session.ActiveZoneId is int activeZoneId && activeZoneId != entityZoneId.Value)
+                {
+                    throw new InvariantViolationException($"invariant=SessionZoneMatchesWorld sessionId={session.SessionId} entityId={session.EntityId.Value} activeZoneId={activeZoneId} worldZoneId={entityZoneId.Value}");
+                }
             }
 
             if (session.LastSnapshotTick > view.CurrentTick)

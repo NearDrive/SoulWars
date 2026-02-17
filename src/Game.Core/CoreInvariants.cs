@@ -10,8 +10,10 @@ public static class CoreInvariants
     {
         ArgumentNullException.ThrowIfNull(world);
 
+        Dictionary<int, ZoneState> zonesById = world.Zones.ToDictionary(z => z.Id.Value);
         HashSet<int> seenEntityIds = new();
         Dictionary<int, int> entityZones = new();
+        HashSet<int> seenLootIds = new();
         int lastZoneId = int.MinValue;
 
         foreach (ZoneState zone in world.Zones)
@@ -161,9 +163,31 @@ public static class CoreInvariants
 
             lastLootId = loot.Id.Value;
 
-            if (!world.Zones.Any(z => z.Id.Value == loot.ZoneId.Value))
+            if (!seenLootIds.Add(loot.Id.Value))
+            {
+                throw new InvariantViolationException($"invariant=UniqueLootEntityId tick={tick} lootEntityId={loot.Id.Value}");
+            }
+
+            if (seenEntityIds.Contains(loot.Id.Value))
+            {
+                throw new InvariantViolationException($"invariant=LootEntityIdCollision tick={tick} lootEntityId={loot.Id.Value}");
+            }
+
+            if (!zonesById.TryGetValue(loot.ZoneId.Value, out ZoneState? lootZone))
             {
                 throw new InvariantViolationException($"invariant=LootZoneExists tick={tick} lootEntityId={loot.Id.Value} zoneId={loot.ZoneId.Value}");
+            }
+
+            if (!IsFinite(loot.Pos.X) || !IsFinite(loot.Pos.Y))
+            {
+                throw new InvariantViolationException($"invariant=LootPositionFinite tick={tick} lootEntityId={loot.Id.Value} posXRaw={loot.Pos.X.Raw} posYRaw={loot.Pos.Y.Raw}");
+            }
+
+            int lootTileX = Fix32.FloorToInt(loot.Pos.X);
+            int lootTileY = Fix32.FloorToInt(loot.Pos.Y);
+            if (lootTileX < 0 || lootTileY < 0 || lootTileX >= lootZone.Map.Width || lootTileY >= lootZone.Map.Height)
+            {
+                throw new InvariantViolationException($"invariant=LootInsideBounds tick={tick} lootEntityId={loot.Id.Value} tileX={lootTileX} tileY={lootTileY}");
             }
 
             if (loot.Items.IsDefaultOrEmpty)
@@ -350,4 +374,6 @@ public static class CoreInvariants
             throw new InvariantViolationException($"invariant=EntityLocationCountMatches tick={tick} zoneEntities={entityZones.Count} locations={world.EntityLocations.Length}");
         }
     }
+
+    private static bool IsFinite(Fix32 value) => value.Raw != int.MinValue && value.Raw != int.MaxValue;
 }
