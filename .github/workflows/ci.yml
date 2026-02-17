@@ -55,6 +55,9 @@ jobs:
       - name: Test
         run: dotnet test -c Release --no-build --filter "Category!=Soak" --logger "console;verbosity=detailed" --blame --blame-hang-timeout 2m
 
+      - name: MVP7 verification gate
+        run: ./scripts/verify_mvp7.sh
+
       - name: Persistence consistency gate
         run: dotnet test -c Release --no-build --filter "Category=Persistence" --logger "console;verbosity=normal"
 
@@ -81,6 +84,9 @@ jobs:
 
       - name: DoD drift gate
         run: dotnet test -c Release --no-build --filter "Category=DoD" --logger "console;verbosity=detailed"
+
+      - name: Replay verify golden drift gate
+        run: dotnet test -c Release --no-build --filter "Category=ReplayVerify" --logger "console;verbosity=normal"
 
   soak:
     runs-on: ubuntu-latest
