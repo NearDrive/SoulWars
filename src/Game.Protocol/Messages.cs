@@ -55,6 +55,8 @@ public sealed record ClientAckV2(int ZoneId, int LastSnapshotSeqReceived) : ICli
 
 public sealed record TeleportRequest(int ToZoneId) : IClientMessage;
 
+public sealed record LootIntent(int LootEntityId, int ZoneId) : IClientMessage;
+
 public sealed record Welcome(
     SessionId SessionId,
     PlayerId PlayerId,

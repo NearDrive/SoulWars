@@ -34,7 +34,7 @@ public sealed class ServerPersistence
             loaded.World,
             loaded.ServerSeed,
             loaded.Players
-                .Select(player => new BootstrapPlayerRecord(player.AccountId, player.PlayerId, player.EntityId, player.ZoneId))
+                .Select(player => new BootstrapPlayerRecord(player.AccountId, player.PlayerId, player.EntityId, player.ZoneId, ImmutableArray<ItemStack>.Empty))
                 .ToImmutableArray());
     }
 

@@ -215,7 +215,13 @@ public sealed class ServerHost
                 TargetEntityId: new EntityId(pending.TargetEntityId)));
         }
 
+        ImmutableArray<LootEntityState> lootBefore = (_world.LootEntities.IsDefault ? ImmutableArray<LootEntityState>.Empty : _world.LootEntities)
+            .OrderBy(l => l.Id.Value)
+            .ToImmutableArray();
+
         _world = Simulation.Step(_simulationConfig, _world, new Inputs(worldCommands.ToImmutableArray()), _simulationInstrumentation);
+        ApplyCollectedLootToPlayers(worldCommands, lootBefore, _world.LootEntities.IsDefault ? ImmutableArray<LootEntityState>.Empty : _world.LootEntities);
+
         HashSet<int> afterSimEntityIds = _world.Zones
             .SelectMany(zone => zone.Entities)
             .Select(entity => entity.Id.Value)
@@ -417,6 +423,9 @@ public sealed class ServerHost
                 case TeleportRequest teleportRequest:
                     HandleTeleport(session, teleportRequest, worldCommands);
                     break;
+                case LootIntent lootIntent:
+                    HandleLootIntent(session, lootIntent, worldCommands);
+                    break;
                 case ClientAckV2 ack:
                     HandleClientAck(session, ack);
                     break;
@@ -601,6 +610,25 @@ public sealed class ServerHost
 
 
 
+    private void HandleLootIntent(SessionState session, LootIntent lootIntent, List<WorldCommand> worldCommands)
+    {
+        if (session.EntityId is null || session.CurrentZoneId is null)
+        {
+            return;
+        }
+
+        if (session.CurrentZoneId.Value != lootIntent.ZoneId)
+        {
+            return;
+        }
+
+        worldCommands.Add(new WorldCommand(
+            Kind: WorldCommandKind.LootIntent,
+            EntityId: new EntityId(session.EntityId.Value),
+            ZoneId: new ZoneId(lootIntent.ZoneId),
+            LootEntityId: new EntityId(lootIntent.LootEntityId)));
+    }
+
     private void HandleClientAck(SessionState session, ClientAckV2 ack)
     {
         if (ack.ZoneId <= 0 || ack.LastSnapshotSeqReceived < 0)
@@ -713,6 +741,31 @@ public sealed class ServerHost
             .ToArray();
     }
 
+
+    private void ApplyCollectedLootToPlayers(IReadOnlyList<WorldCommand> processedCommands, ImmutableArray<LootEntityState> before, ImmutableArray<LootEntityState> after)
+    {
+        Dictionary<int, LootEntityState> beforeById = before.ToDictionary(l => l.Id.Value, l => l);
+        HashSet<int> remainingAfter = after.Select(l => l.Id.Value).ToHashSet();
+
+        foreach (WorldCommand lootCommand in processedCommands
+                     .Where(c => c.Kind == WorldCommandKind.LootIntent)
+                     .OrderBy(c => c.EntityId.Value)
+                     .ThenBy(c => c.LootEntityId!.Value.Value))
+        {
+            if (lootCommand.LootEntityId is null)
+            {
+                continue;
+            }
+
+            int lootEntityId = lootCommand.LootEntityId.Value.Value;
+            if (!beforeById.TryGetValue(lootEntityId, out LootEntityState loot) || remainingAfter.Contains(lootEntityId))
+            {
+                continue;
+            }
+
+            _playerRegistry.AppendPendingLootByEntityId(lootCommand.EntityId.Value, loot.Items);
+        }
+    }
 
     private IEnumerable<PendingAttackIntent> OrderedPendingAttackIntents(int targetTick)
     {

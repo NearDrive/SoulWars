@@ -130,7 +130,7 @@ public sealed class AoiProviderTests
         ServerBootstrap bootstrap = new(
             world,
             ServerSeed: 321,
-            Players: ImmutableArray.Create(new BootstrapPlayerRecord("viewer", 100, 1, 1)));
+            Players: ImmutableArray.Create(new BootstrapPlayerRecord("viewer", 100, 1, 1, ImmutableArray<ItemStack>.Empty)));
 
         Fix32 visionRadius = Fix32.FromInt(2);
         ServerConfig config = ServerConfig.Default(seed: 321) with
@@ -152,7 +152,8 @@ public sealed class AoiProviderTests
         return new WorldState(
             Tick: 0,
             Zones: ImmutableArray.Create(zone),
-            EntityLocations: allEntities.Select(e => new EntityLocation(e.Id, new ZoneId(1))).ToImmutableArray());
+            EntityLocations: allEntities.Select(e => new EntityLocation(e.Id, new ZoneId(1))).ToImmutableArray(),
+            LootEntities: ImmutableArray<LootEntityState>.Empty);
     }
 
 
