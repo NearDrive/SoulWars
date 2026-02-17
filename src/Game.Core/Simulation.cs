@@ -48,7 +48,8 @@ public static class Simulation
             Tick: 0,
             Zones: initialZones,
             EntityLocations: BuildEntityLocations(initialZones),
-            LootEntities: ImmutableArray<LootEntityState>.Empty);
+            LootEntities: ImmutableArray<LootEntityState>.Empty,
+            PlayerInventories: ImmutableArray<PlayerInventoryState>.Empty);
     }
 
     private static WorldState CreateInitialStateFromManualDefinitions(SimulationConfig config, ZoneDefinitions definitions)
@@ -70,7 +71,8 @@ public static class Simulation
             Tick: 0,
             Zones: zones,
             EntityLocations: BuildEntityLocations(zones),
-            LootEntities: ImmutableArray<LootEntityState>.Empty);
+            LootEntities: ImmutableArray<LootEntityState>.Empty,
+            PlayerInventories: ImmutableArray<PlayerInventoryState>.Empty);
     }
 
     public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs, SimulationInstrumentation? instrumentation = null)
@@ -301,6 +303,10 @@ public static class Simulation
         }
 
         List<LootEntityState> nextLoot = state.LootEntities.OrderBy(l => l.Id.Value).ToList();
+        List<PlayerInventoryState> inventories = (state.PlayerInventories.IsDefault ? ImmutableArray<PlayerInventoryState>.Empty : state.PlayerInventories)
+            .OrderBy(i => i.EntityId.Value)
+            .ToList();
+
         foreach (WorldCommand command in commands
                      .Where(c => c.Kind == WorldCommandKind.LootIntent && c.LootEntityId is not null)
                      .OrderBy(c => c.ZoneId.Value)
@@ -340,10 +346,94 @@ public static class Simulation
                 continue;
             }
 
+            int inventoryIndex = inventories.FindIndex(i => i.EntityId.Value == command.EntityId.Value);
+            PlayerInventoryState inventoryState = inventoryIndex >= 0
+                ? inventories[inventoryIndex]
+                : new PlayerInventoryState(command.EntityId, InventoryComponent.CreateDefault());
+
+            if (!TryAddLootAtomically(inventoryState.Inventory, loot.Items, out InventoryComponent? updatedInventory))
+            {
+                continue;
+            }
+
+            if (inventoryIndex >= 0)
+            {
+                inventories[inventoryIndex] = inventoryState with { Inventory = updatedInventory! };
+            }
+            else
+            {
+                inventories.Add(new PlayerInventoryState(command.EntityId, updatedInventory!));
+            }
+
             nextLoot.RemoveAt(lootIndex);
         }
 
-        return state.WithLootEntities(nextLoot.ToImmutableArray());
+        return state
+            .WithLootEntities(nextLoot.ToImmutableArray())
+            .WithPlayerInventories(inventories
+                .OrderBy(i => i.EntityId.Value)
+                .ToImmutableArray());
+    }
+
+    private static bool TryAddLootAtomically(InventoryComponent inventory, ImmutableArray<ItemStack> lootItems, out InventoryComponent? updated)
+    {
+        ImmutableArray<ItemStack> canonicalItems = lootItems
+            .OrderBy(i => i.ItemId, StringComparer.Ordinal)
+            .ThenBy(i => i.Quantity)
+            .ToImmutableArray();
+
+        InventorySlot[] slots = inventory.Slots.ToArray();
+
+        foreach (ItemStack stack in canonicalItems)
+        {
+            int remaining = stack.Quantity;
+            if (remaining <= 0)
+            {
+                updated = null;
+                return false;
+            }
+
+            for (int i = 0; i < slots.Length && remaining > 0; i++)
+            {
+                InventorySlot slot = slots[i];
+                if (slot.IsEmpty || !string.Equals(slot.ItemId, stack.ItemId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                int room = inventory.StackLimit - slot.Quantity;
+                if (room <= 0)
+                {
+                    continue;
+                }
+
+                int moved = Math.Min(room, remaining);
+                slots[i] = slot with { Quantity = slot.Quantity + moved };
+                remaining -= moved;
+            }
+
+            for (int i = 0; i < slots.Length && remaining > 0; i++)
+            {
+                InventorySlot slot = slots[i];
+                if (!slot.IsEmpty)
+                {
+                    continue;
+                }
+
+                int moved = Math.Min(inventory.StackLimit, remaining);
+                slots[i] = new InventorySlot(stack.ItemId, moved);
+                remaining -= moved;
+            }
+
+            if (remaining != 0)
+            {
+                updated = null;
+                return false;
+            }
+        }
+
+        updated = inventory with { Slots = slots.ToImmutableArray() };
+        return true;
     }
 
     private static EntityId DeriveLootEntityId(EntityId deadNpcId) => new(-deadNpcId.Value);

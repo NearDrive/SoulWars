@@ -130,7 +130,7 @@ public sealed class AoiProviderTests
         ServerBootstrap bootstrap = new(
             world,
             ServerSeed: 321,
-            Players: ImmutableArray.Create(new BootstrapPlayerRecord("viewer", 100, 1, 1, ImmutableArray<ItemStack>.Empty)));
+            Players: ImmutableArray.Create(new BootstrapPlayerRecord("viewer", 100, 1, 1)));
 
         Fix32 visionRadius = Fix32.FromInt(2);
         ServerConfig config = ServerConfig.Default(seed: 321) with
