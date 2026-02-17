@@ -7,7 +7,7 @@ namespace Game.Persistence;
 public static class WorldStateSerializer
 {
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 3;
+    private const int CurrentVersion = 4;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
     private const int MaxEntityCountPerZone = 2_000_000;
@@ -15,6 +15,10 @@ public static class WorldStateSerializer
     private const int MaxLootItemsPerEntity = 4096;
     private const int MaxInventoryCount = 2_000_000;
     private const int MaxInventoryCapacity = 4096;
+    private const int MaxWalletCount = 2_000_000;
+    private const int MaxVendorCount = 100_000;
+    private const int MaxVendorOffers = 4096;
+    private const int MaxVendorAuditCount = 5_000_000;
 
     public static void Save(Stream stream, WorldState world)
     {
@@ -41,6 +45,9 @@ public static class WorldStateSerializer
 
         WriteLootEntities(writer, world.LootEntities.IsDefault ? ImmutableArray<LootEntityState>.Empty : world.LootEntities);
         WritePlayerInventories(writer, world.PlayerInventories.IsDefault ? ImmutableArray<PlayerInventoryState>.Empty : world.PlayerInventories);
+        WritePlayerWallets(writer, world.PlayerWallets.IsDefault ? ImmutableArray<PlayerWalletState>.Empty : world.PlayerWallets);
+        WriteVendors(writer, world.Vendors.IsDefault ? ImmutableArray<VendorDefinition>.Empty : world.Vendors);
+        WriteVendorAudit(writer, world.VendorTransactionAuditLog.IsDefault ? ImmutableArray<VendorTransactionAuditEntry>.Empty : world.VendorTransactionAuditLog);
     }
 
     public static WorldState Load(Stream stream)
@@ -58,7 +65,7 @@ public static class WorldStateSerializer
             }
 
             int version = reader.ReadInt32();
-            if (version is not (1 or 2 or CurrentVersion))
+            if (version is not (1 or 2 or 3 or CurrentVersion))
             {
                 throw new InvalidDataException($"Unsupported world-state version '{version}'.");
             }
@@ -93,9 +100,18 @@ public static class WorldStateSerializer
             ImmutableArray<PlayerInventoryState> playerInventories = version >= 3
                 ? ReadPlayerInventories(reader)
                 : ImmutableArray<PlayerInventoryState>.Empty;
+            ImmutableArray<PlayerWalletState> playerWallets = version >= 4
+                ? ReadPlayerWallets(reader)
+                : ImmutableArray<PlayerWalletState>.Empty;
+            ImmutableArray<VendorDefinition> vendors = version >= 4
+                ? ReadVendors(reader)
+                : ImmutableArray<VendorDefinition>.Empty;
+            ImmutableArray<VendorTransactionAuditEntry> vendorAudit = version >= 4
+                ? ReadVendorAudit(reader)
+                : ImmutableArray<VendorTransactionAuditEntry>.Empty;
             ImmutableArray<EntityLocation> locations = BuildEntityLocations(immutableZones);
 
-            WorldState loaded = new(tick, immutableZones, locations, lootEntities, playerInventories);
+            WorldState loaded = new(tick, immutableZones, locations, lootEntities, playerInventories, PlayerWallets: playerWallets, VendorTransactionAuditLog: vendorAudit, Vendors: vendors);
             CoreInvariants.Validate(loaded, tick);
             return loaded;
         }
@@ -544,5 +560,170 @@ public static class WorldStateSerializer
 
             previousEntityId = current;
         }
+    }
+
+    private static void WritePlayerWallets(BinaryWriter writer, ImmutableArray<PlayerWalletState> playerWallets)
+    {
+        ImmutableArray<PlayerWalletState> ordered = playerWallets.OrderBy(w => w.EntityId.Value).ToImmutableArray();
+        writer.Write(ordered.Length);
+        foreach (PlayerWalletState wallet in ordered)
+        {
+            writer.Write(wallet.EntityId.Value);
+            writer.Write(wallet.Gold);
+        }
+    }
+
+    private static ImmutableArray<PlayerWalletState> ReadPlayerWallets(BinaryReader reader)
+    {
+        int count = reader.ReadInt32();
+        ValidateCount(count, MaxWalletCount, nameof(count));
+        ImmutableArray<PlayerWalletState>.Builder wallets = ImmutableArray.CreateBuilder<PlayerWalletState>(count);
+        int prev = int.MinValue;
+        for (int i = 0; i < count; i++)
+        {
+            int entityId = reader.ReadInt32();
+            long gold = reader.ReadInt64();
+            if (entityId <= prev)
+            {
+                throw new InvalidDataException("Player wallets are not in strictly ascending EntityId order.");
+            }
+
+            if (gold < 0)
+            {
+                throw new InvalidDataException("Player wallet gold cannot be negative.");
+            }
+
+            prev = entityId;
+            wallets.Add(new PlayerWalletState(new EntityId(entityId), gold));
+        }
+
+        return wallets.MoveToImmutable();
+    }
+
+    private static void WriteVendors(BinaryWriter writer, ImmutableArray<VendorDefinition> vendors)
+    {
+        ImmutableArray<VendorDefinition> ordered = vendors
+            .OrderBy(v => v.ZoneId.Value)
+            .ThenBy(v => v.VendorId, StringComparer.Ordinal)
+            .ToImmutableArray();
+        writer.Write(ordered.Length);
+        foreach (VendorDefinition vendor in ordered)
+        {
+            writer.Write(vendor.ZoneId.Value);
+            writer.Write(vendor.VendorId);
+            ImmutableArray<VendorOfferDefinition> offers = vendor.CanonicalOffers;
+            writer.Write(offers.Length);
+            for (int i = 0; i < offers.Length; i++)
+            {
+                VendorOfferDefinition offer = offers[i];
+                writer.Write(offer.ItemId);
+                writer.Write(offer.BuyPrice);
+                writer.Write(offer.SellPrice);
+                writer.Write(offer.MaxPerTransaction ?? -1);
+            }
+        }
+    }
+
+    private static ImmutableArray<VendorDefinition> ReadVendors(BinaryReader reader)
+    {
+        int count = reader.ReadInt32();
+        ValidateCount(count, MaxVendorCount, nameof(count));
+        ImmutableArray<VendorDefinition>.Builder vendors = ImmutableArray.CreateBuilder<VendorDefinition>(count);
+        int lastZone = int.MinValue;
+        string lastVendorId = string.Empty;
+        for (int i = 0; i < count; i++)
+        {
+            int zoneId = reader.ReadInt32();
+            string vendorId = reader.ReadString();
+            if (zoneId < lastZone || (zoneId == lastZone && string.CompareOrdinal(vendorId, lastVendorId) <= 0))
+            {
+                throw new InvalidDataException("Vendors are not in canonical order.");
+            }
+
+            int offerCount = reader.ReadInt32();
+            ValidateCount(offerCount, MaxVendorOffers, nameof(offerCount));
+            ImmutableArray<VendorOfferDefinition>.Builder offers = ImmutableArray.CreateBuilder<VendorOfferDefinition>(offerCount);
+            string lastItemId = string.Empty;
+            for (int offerIndex = 0; offerIndex < offerCount; offerIndex++)
+            {
+                string itemId = reader.ReadString();
+                long buyPrice = reader.ReadInt64();
+                long sellPrice = reader.ReadInt64();
+                int maxPerTxRaw = reader.ReadInt32();
+                if (string.CompareOrdinal(itemId, lastItemId) < 0)
+                {
+                    throw new InvalidDataException("Vendor offers are not in ascending ItemId order.");
+                }
+
+                lastItemId = itemId;
+                offers.Add(new VendorOfferDefinition(itemId, buyPrice, sellPrice, maxPerTxRaw < 0 ? null : maxPerTxRaw));
+            }
+
+            vendors.Add(new VendorDefinition(vendorId, new ZoneId(zoneId), offers.MoveToImmutable()));
+            lastZone = zoneId;
+            lastVendorId = vendorId;
+        }
+
+        return vendors.MoveToImmutable();
+    }
+
+    private static void WriteVendorAudit(BinaryWriter writer, ImmutableArray<VendorTransactionAuditEntry> entries)
+    {
+        ImmutableArray<VendorTransactionAuditEntry> ordered = entries
+            .OrderBy(e => e.Tick)
+            .ThenBy(e => e.PlayerEntityId.Value)
+            .ThenBy(e => e.ZoneId.Value)
+            .ThenBy(e => e.VendorId, StringComparer.Ordinal)
+            .ThenBy(e => (int)e.Action)
+            .ThenBy(e => e.ItemId, StringComparer.Ordinal)
+            .ThenBy(e => e.Quantity)
+            .ToImmutableArray();
+        writer.Write(ordered.Length);
+        foreach (VendorTransactionAuditEntry entry in ordered)
+        {
+            writer.Write(entry.Tick);
+            writer.Write(entry.PlayerEntityId.Value);
+            writer.Write(entry.ZoneId.Value);
+            writer.Write(entry.VendorId);
+            writer.Write((byte)entry.Action);
+            writer.Write(entry.ItemId);
+            writer.Write(entry.Quantity);
+            writer.Write(entry.UnitPrice);
+            writer.Write(entry.GoldBefore);
+            writer.Write(entry.GoldAfter);
+        }
+    }
+
+    private static ImmutableArray<VendorTransactionAuditEntry> ReadVendorAudit(BinaryReader reader)
+    {
+        int count = reader.ReadInt32();
+        ValidateCount(count, MaxVendorAuditCount, nameof(count));
+        ImmutableArray<VendorTransactionAuditEntry>.Builder entries = ImmutableArray.CreateBuilder<VendorTransactionAuditEntry>(count);
+        int lastTick = int.MinValue;
+        int lastPlayer = int.MinValue;
+        for (int i = 0; i < count; i++)
+        {
+            int tick = reader.ReadInt32();
+            EntityId playerId = new(reader.ReadInt32());
+            ZoneId zoneId = new(reader.ReadInt32());
+            string vendorId = reader.ReadString();
+            VendorAction action = (VendorAction)reader.ReadByte();
+            string itemId = reader.ReadString();
+            int quantity = reader.ReadInt32();
+            long unitPrice = reader.ReadInt64();
+            long goldBefore = reader.ReadInt64();
+            long goldAfter = reader.ReadInt64();
+
+            if (tick < lastTick || (tick == lastTick && playerId.Value < lastPlayer))
+            {
+                throw new InvalidDataException("Vendor audit entries are not in canonical order.");
+            }
+
+            lastTick = tick;
+            lastPlayer = playerId.Value;
+            entries.Add(new VendorTransactionAuditEntry(tick, playerId, zoneId, vendorId, action, itemId, quantity, unitPrice, goldBefore, goldAfter));
+        }
+
+        return entries.MoveToImmutable();
     }
 }

@@ -10,6 +10,7 @@ public static class Simulation
     private const int NpcSpawnMaxAttempts = 64;
     private static readonly Fix32 LootPickupRange = Fix32.FromInt(3) / Fix32.FromInt(2);
     private const string DefaultNpcArchetypeId = "npc.default";
+    public const long DefaultStartingGold = 1000;
 
     public static WorldState CreateInitialState(SimulationConfig config, ZoneDefinitions? zoneDefinitions = null)
     {
@@ -49,7 +50,10 @@ public static class Simulation
             Zones: initialZones,
             EntityLocations: BuildEntityLocations(initialZones),
             LootEntities: ImmutableArray<LootEntityState>.Empty,
-            PlayerInventories: ImmutableArray<PlayerInventoryState>.Empty);
+            PlayerInventories: ImmutableArray<PlayerInventoryState>.Empty,
+            PlayerWallets: ImmutableArray<PlayerWalletState>.Empty,
+            VendorTransactionAuditLog: ImmutableArray<VendorTransactionAuditEntry>.Empty,
+            Vendors: ImmutableArray<VendorDefinition>.Empty);
     }
 
     private static WorldState CreateInitialStateFromManualDefinitions(SimulationConfig config, ZoneDefinitions definitions)
@@ -72,7 +76,10 @@ public static class Simulation
             Zones: zones,
             EntityLocations: BuildEntityLocations(zones),
             LootEntities: ImmutableArray<LootEntityState>.Empty,
-            PlayerInventories: ImmutableArray<PlayerInventoryState>.Empty);
+            PlayerInventories: ImmutableArray<PlayerInventoryState>.Empty,
+            PlayerWallets: ImmutableArray<PlayerWalletState>.Empty,
+            VendorTransactionAuditLog: ImmutableArray<VendorTransactionAuditEntry>.Empty,
+            Vendors: ImmutableArray<VendorDefinition>.Empty);
     }
 
     public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs, SimulationInstrumentation? instrumentation = null)
@@ -130,6 +137,8 @@ public static class Simulation
         updated = SpawnLootForNpcDeaths(state, updated);
         updated = HandlePlayerDeaths(config, state, updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
         updated = ProcessLootIntents(updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
+        updated = ProcessVendorIntents(updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
+        updated = EnsureWalletsForPlayers(updated);
 
         if (config.Invariants.EnableCoreInvariants)
         {
@@ -595,6 +604,206 @@ public static class Simulation
         return true;
     }
 
+    private static WorldState ProcessVendorIntents(WorldState state, ImmutableArray<WorldCommand> commands)
+    {
+        ImmutableArray<VendorDefinition> vendors = state.Vendors.IsDefault ? ImmutableArray<VendorDefinition>.Empty : state.Vendors;
+        if (vendors.IsDefaultOrEmpty)
+        {
+            return state;
+        }
+
+        List<PlayerInventoryState> inventories = (state.PlayerInventories.IsDefault ? ImmutableArray<PlayerInventoryState>.Empty : state.PlayerInventories)
+            .OrderBy(i => i.EntityId.Value)
+            .ToList();
+        List<PlayerWalletState> wallets = (state.PlayerWallets.IsDefault ? ImmutableArray<PlayerWalletState>.Empty : state.PlayerWallets)
+            .OrderBy(w => w.EntityId.Value)
+            .ToList();
+        List<VendorTransactionAuditEntry> audit = (state.VendorTransactionAuditLog.IsDefault ? ImmutableArray<VendorTransactionAuditEntry>.Empty : state.VendorTransactionAuditLog)
+            .OrderBy(e => e.Tick)
+            .ThenBy(e => e.PlayerEntityId.Value)
+            .ToList();
+
+        foreach (WorldCommand command in commands
+                     .Where(c => c.Kind is WorldCommandKind.VendorBuyIntent or WorldCommandKind.VendorSellIntent)
+                     .OrderBy(c => c.ZoneId.Value)
+                     .ThenBy(c => c.EntityId.Value)
+                     .ThenBy(c => c.VendorId, StringComparer.Ordinal)
+                     .ThenBy(c => c.ItemId, StringComparer.Ordinal)
+                     .ThenBy(c => c.Quantity)
+                     .ThenBy(c => (int)c.Kind))
+        {
+            if (command.Quantity <= 0)
+            {
+                continue;
+            }
+
+            if (!state.TryGetEntityZone(command.EntityId, out ZoneId playerZone) || playerZone.Value != command.ZoneId.Value)
+            {
+                continue;
+            }
+
+            VendorDefinition? vendor = vendors.FirstOrDefault(v =>
+                v.ZoneId.Value == command.ZoneId.Value &&
+                string.Equals(v.VendorId, command.VendorId, StringComparison.Ordinal));
+            if (vendor is null)
+            {
+                continue;
+            }
+
+            VendorOfferDefinition? offer = vendor.CanonicalOffers.FirstOrDefault(o => string.Equals(o.ItemId, command.ItemId, StringComparison.Ordinal));
+            if (offer is null)
+            {
+                continue;
+            }
+
+            if (offer.MaxPerTransaction is int maxPerTx && command.Quantity > maxPerTx)
+            {
+                continue;
+            }
+
+            int inventoryIndex = inventories.FindIndex(i => i.EntityId.Value == command.EntityId.Value);
+            PlayerInventoryState inventoryState = inventoryIndex >= 0
+                ? inventories[inventoryIndex]
+                : new PlayerInventoryState(command.EntityId, InventoryComponent.CreateDefault());
+            int walletIndex = wallets.FindIndex(w => w.EntityId.Value == command.EntityId.Value);
+            PlayerWalletState walletState = walletIndex >= 0
+                ? wallets[walletIndex]
+                : new PlayerWalletState(command.EntityId, DefaultStartingGold);
+
+            if (command.Kind == WorldCommandKind.VendorBuyIntent)
+            {
+                long total = offer.BuyPrice * command.Quantity;
+                if (walletState.Gold < total)
+                {
+                    continue;
+                }
+
+                if (!TryAddLootAtomically(inventoryState.Inventory, ImmutableArray.Create(new ItemStack(command.ItemId, command.Quantity)), out InventoryComponent? updatedInventory))
+                {
+                    continue;
+                }
+
+                PlayerWalletState updatedWallet = walletState with { Gold = walletState.Gold - total };
+                inventoryState = inventoryState with { Inventory = updatedInventory! };
+                if (inventoryIndex >= 0) inventories[inventoryIndex] = inventoryState; else inventories.Add(inventoryState);
+                if (walletIndex >= 0) wallets[walletIndex] = updatedWallet; else wallets.Add(updatedWallet);
+
+                audit.Add(new VendorTransactionAuditEntry(
+                    Tick: state.Tick,
+                    PlayerEntityId: command.EntityId,
+                    ZoneId: command.ZoneId,
+                    VendorId: vendor.VendorId,
+                    Action: VendorAction.Buy,
+                    ItemId: command.ItemId,
+                    Quantity: command.Quantity,
+                    UnitPrice: offer.BuyPrice,
+                    GoldBefore: walletState.Gold,
+                    GoldAfter: updatedWallet.Gold));
+            }
+            else
+            {
+                if (!TryRemoveItemsAtomically(inventoryState.Inventory, command.ItemId, command.Quantity, out InventoryComponent? updatedInventory))
+                {
+                    continue;
+                }
+
+                long total = offer.SellPrice * command.Quantity;
+                PlayerWalletState updatedWallet = walletState with { Gold = walletState.Gold + total };
+                inventoryState = inventoryState with { Inventory = updatedInventory! };
+                if (inventoryIndex >= 0) inventories[inventoryIndex] = inventoryState; else inventories.Add(inventoryState);
+                if (walletIndex >= 0) wallets[walletIndex] = updatedWallet; else wallets.Add(updatedWallet);
+
+                audit.Add(new VendorTransactionAuditEntry(
+                    Tick: state.Tick,
+                    PlayerEntityId: command.EntityId,
+                    ZoneId: command.ZoneId,
+                    VendorId: vendor.VendorId,
+                    Action: VendorAction.Sell,
+                    ItemId: command.ItemId,
+                    Quantity: command.Quantity,
+                    UnitPrice: offer.SellPrice,
+                    GoldBefore: walletState.Gold,
+                    GoldAfter: updatedWallet.Gold));
+            }
+        }
+
+        return state
+            .WithPlayerInventories(inventories.ToImmutableArray())
+            .WithPlayerWallets(wallets.ToImmutableArray())
+            .WithVendorTransactionAuditLog(audit.ToImmutableArray());
+    }
+
+    private static bool TryRemoveItemsAtomically(InventoryComponent inventory, string itemId, int quantity, out InventoryComponent? updated)
+    {
+        if (quantity <= 0)
+        {
+            updated = null;
+            return false;
+        }
+
+        InventorySlot[] slots = inventory.Slots.ToArray();
+        int total = 0;
+        for (int i = 0; i < slots.Length; i++)
+        {
+            if (string.Equals(slots[i].ItemId, itemId, StringComparison.Ordinal))
+            {
+                total += slots[i].Quantity;
+            }
+        }
+
+        if (total < quantity)
+        {
+            updated = null;
+            return false;
+        }
+
+        int remaining = quantity;
+        for (int i = 0; i < slots.Length && remaining > 0; i++)
+        {
+            InventorySlot slot = slots[i];
+            if (!string.Equals(slot.ItemId, itemId, StringComparison.Ordinal) || slot.Quantity <= 0)
+            {
+                continue;
+            }
+
+            int removed = Math.Min(slot.Quantity, remaining);
+            int nextQty = slot.Quantity - removed;
+            slots[i] = nextQty == 0 ? new InventorySlot(string.Empty, 0) : slot with { Quantity = nextQty };
+            remaining -= removed;
+        }
+
+        if (remaining != 0)
+        {
+            updated = null;
+            return false;
+        }
+
+        updated = inventory with { Slots = slots.ToImmutableArray() };
+        return true;
+    }
+
+
+    private static WorldState EnsureWalletsForPlayers(WorldState state)
+    {
+        List<PlayerWalletState> wallets = (state.PlayerWallets.IsDefault ? ImmutableArray<PlayerWalletState>.Empty : state.PlayerWallets)
+            .OrderBy(w => w.EntityId.Value)
+            .ToList();
+
+        HashSet<int> walletIds = wallets.Select(w => w.EntityId.Value).ToHashSet();
+        foreach (EntityState player in state.Zones
+                     .OrderBy(z => z.Id.Value)
+                     .SelectMany(z => z.Entities.OrderBy(e => e.Id.Value))
+                     .Where(e => e.Kind == EntityKind.Player))
+        {
+            if (walletIds.Add(player.Id.Value))
+            {
+                wallets.Add(new PlayerWalletState(player.Id, DefaultStartingGold));
+            }
+        }
+
+        return state.WithPlayerWallets(wallets.ToImmutableArray());
+    }
+
     private static EntityId DeriveLootEntityId(EntityId deadNpcId) => new(-deadNpcId.Value);
 
     private static ZoneId FindEntityZone(WorldState state, EntityId entityId)
@@ -978,6 +1187,14 @@ public static class Simulation
         if (command.Kind is WorldCommandKind.LootIntent && command.LootEntityId is null)
         {
             return false;
+        }
+
+        if (command.Kind is WorldCommandKind.VendorBuyIntent or WorldCommandKind.VendorSellIntent)
+        {
+            if (string.IsNullOrWhiteSpace(command.VendorId) || string.IsNullOrWhiteSpace(command.ItemId) || command.Quantity <= 0)
+            {
+                return false;
+            }
         }
 
         return true;

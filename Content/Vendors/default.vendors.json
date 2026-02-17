@@ -1,0 +1,8 @@
+{
+  "ZoneId": 1,
+  "VendorId": "vendor.safe.1",
+  "Offers": [
+    { "ItemId": "potion.minor", "BuyPrice": 25, "SellPrice": 10, "MaxPerTransaction": 10 },
+    { "ItemId": "gold.coin", "BuyPrice": 1, "SellPrice": 1, "MaxPerTransaction": 99 }
+  ]
+}
