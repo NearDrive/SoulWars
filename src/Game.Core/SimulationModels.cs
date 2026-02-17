@@ -183,6 +183,8 @@ public sealed record ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData
     {
         EntitiesData = ZoneEntities.FromEntityStates(Entities)
     };
+
+    public ZoneChecksum ComputeChecksum() => new(Id.Value, StateChecksum.ComputeZoneChecksum(this));
 }
 
 public readonly record struct EntityLocation(EntityId Id, ZoneId ZoneId);

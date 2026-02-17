@@ -218,6 +218,7 @@ public static class ReplayRunner
             }
 
             if (!string.Equals(expectedReports[i].WorldChecksum, actualReports[i].WorldChecksum, StringComparison.Ordinal) ||
+                !string.Equals(expectedReports[i].GlobalChecksum, actualReports[i].GlobalChecksum, StringComparison.Ordinal) ||
                 !Equals(expectedReports[i], actualReports[i]))
             {
                 return expectedReports[i].Tick;
@@ -247,6 +248,8 @@ public static class ReplayRunner
 
         string expectedChecksumAtTick = expectedTickReport?.WorldChecksum ?? expectedFinalChecksum;
         string actualChecksumAtTick = actualTickReport?.WorldChecksum ?? actualFinalChecksum;
+        string expectedGlobalChecksumAtTick = expectedTickReport?.GlobalChecksum ?? string.Empty;
+        string actualGlobalChecksumAtTick = actualTickReport?.GlobalChecksum ?? string.Empty;
 
         return new ReplayMismatchSummary(
             FirstDivergentTick: firstTick,
@@ -254,10 +257,33 @@ public static class ReplayRunner
             ActualFinalChecksum: actualFinalChecksum,
             ExpectedChecksumAtTick: expectedChecksumAtTick,
             ActualChecksumAtTick: actualChecksumAtTick,
+            ExpectedGlobalChecksumAtTick: expectedGlobalChecksumAtTick,
+            ActualGlobalChecksumAtTick: actualGlobalChecksumAtTick,
+            ZoneChecksumDiffs: BuildZoneChecksumDiffs(expectedTickReport?.ZoneChecksums ?? [], actualTickReport?.ZoneChecksums ?? []),
             EntityCountByTypeDiffs: BuildCountIntDiffs(expectedTickReport?.EntityCountByType ?? [], actualTickReport?.EntityCountByType ?? [], topN),
             InventoryTotalsDiffs: BuildCountIntDiffs(expectedTickReport?.InventoryTotals ?? [], actualTickReport?.InventoryTotals ?? [], topN),
             LootCountDiff: (actualTickReport?.LootCount ?? 0) - (expectedTickReport?.LootCount ?? 0),
             WalletTotalsDiffs: BuildCountLongDiffs(expectedTickReport?.WalletTotals ?? [], actualTickReport?.WalletTotals ?? [], topN));
+    }
+
+
+    private static IReadOnlyList<ReplayMismatchZoneChecksumDiff> BuildZoneChecksumDiffs(
+        ImmutableArray<ZoneChecksum> expected,
+        ImmutableArray<ZoneChecksum> actual)
+    {
+        Dictionary<int, string> expectedMap = expected.ToDictionary(c => c.ZoneId, c => c.Value);
+        Dictionary<int, string> actualMap = actual.ToDictionary(c => c.ZoneId, c => c.Value);
+
+        return expectedMap.Keys
+            .Concat(actualMap.Keys)
+            .Distinct()
+            .OrderBy(zoneId => zoneId)
+            .Select(zoneId => new ReplayMismatchZoneChecksumDiff(
+                zoneId,
+                expectedMap.TryGetValue(zoneId, out string? expectedValue) ? expectedValue : string.Empty,
+                actualMap.TryGetValue(zoneId, out string? actualValue) ? actualValue : string.Empty))
+            .Where(diff => !string.Equals(diff.Expected, diff.Actual, StringComparison.Ordinal))
+            .ToArray();
     }
 
     private static IReadOnlyList<ReplayMismatchDiffInt> BuildCountIntDiffs(
@@ -307,6 +333,9 @@ public sealed record ReplayMismatchSummary(
     string ActualFinalChecksum,
     string ExpectedChecksumAtTick,
     string ActualChecksumAtTick,
+    string ExpectedGlobalChecksumAtTick,
+    string ActualGlobalChecksumAtTick,
+    IReadOnlyList<ReplayMismatchZoneChecksumDiff> ZoneChecksumDiffs,
     IReadOnlyList<ReplayMismatchDiffInt> EntityCountByTypeDiffs,
     IReadOnlyList<ReplayMismatchDiffInt> InventoryTotalsDiffs,
     int LootCountDiff,
@@ -314,7 +343,7 @@ public sealed record ReplayMismatchSummary(
 {
     public string ToSingleLine()
     {
-        return $"FirstDivergentTick={FirstDivergentTick} expected_checksum={ExpectedFinalChecksum} actual_checksum={ActualFinalChecksum} ExpectedChecksumAtTick={ExpectedChecksumAtTick} ActualChecksumAtTick={ActualChecksumAtTick}";
+        return $"FirstDivergentTick={FirstDivergentTick} expected_checksum={ExpectedFinalChecksum} actual_checksum={ActualFinalChecksum} ExpectedChecksumAtTick={ExpectedChecksumAtTick} ActualChecksumAtTick={ActualChecksumAtTick} ExpectedGlobalChecksumAtTick={ExpectedGlobalChecksumAtTick} ActualGlobalChecksumAtTick={ActualGlobalChecksumAtTick}";
     }
 
     public string ToText()
@@ -326,7 +355,11 @@ public sealed record ReplayMismatchSummary(
             $"ActualFinalChecksum={ActualFinalChecksum}",
             $"ExpectedChecksumAtTick={ExpectedChecksumAtTick}",
             $"ActualChecksumAtTick={ActualChecksumAtTick}",
+            $"ExpectedGlobalChecksumAtTick={ExpectedGlobalChecksumAtTick}",
+            $"ActualGlobalChecksumAtTick={ActualGlobalChecksumAtTick}",
             $"LootCountDiff={LootCountDiff}",
+            "ZoneChecksumDiffs:",
+            .. ZoneChecksumDiffs.Select(FormatZoneDiff),
             "EntityCountByTypeDiffs:",
             .. EntityCountByTypeDiffs.Select(FormatDiff),
             "InventoryTotalsDiffs:",
@@ -337,6 +370,9 @@ public sealed record ReplayMismatchSummary(
 
         return string.Join(Environment.NewLine, lines) + Environment.NewLine;
     }
+
+    private static string FormatZoneDiff(ReplayMismatchZoneChecksumDiff diff) =>
+        $"- zone={diff.ZoneId}: expected={diff.Expected} actual={diff.Actual}";
 
     private static string FormatDiff(ReplayMismatchDiffInt diff) =>
         $"- {diff.Key}: expected={diff.Expected} actual={diff.Actual} delta={diff.Delta}";
@@ -378,3 +414,5 @@ public sealed class ReplayVerificationException : Exception
 
     public string ArtifactsDirectory { get; }
 }
+
+public sealed record ReplayMismatchZoneChecksumDiff(int ZoneId, string Expected, string Actual);
