@@ -758,7 +758,9 @@ public sealed class ServerHost
             }
 
             int lootEntityId = lootCommand.LootEntityId.Value.Value;
-            if (!beforeById.TryGetValue(lootEntityId, out LootEntityState loot) || remainingAfter.Contains(lootEntityId))
+            if (!beforeById.TryGetValue(lootEntityId, out LootEntityState? loot) ||
+                loot is null ||
+                remainingAfter.Contains(lootEntityId))
             {
                 continue;
             }
