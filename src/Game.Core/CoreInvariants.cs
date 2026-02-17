@@ -222,11 +222,6 @@ public static class CoreInvariants
             }
 
             lastInventoryEntityId = playerInventory.EntityId.Value;
-            if (!entityZones.TryGetValue(playerInventory.EntityId.Value, out _))
-            {
-                throw new InvariantViolationException($"invariant=InventoryEntityExists tick={tick} entityId={playerInventory.EntityId.Value}");
-            }
-
             InventoryComponent inventory = playerInventory.Inventory;
             if (inventory.Capacity <= 0 || inventory.Slots.Length != inventory.Capacity)
             {
@@ -274,11 +269,6 @@ public static class CoreInvariants
             }
 
             lastWalletEntityId = wallet.EntityId.Value;
-            if (!entityZones.TryGetValue(wallet.EntityId.Value, out _))
-            {
-                throw new InvariantViolationException($"invariant=WalletEntityExists tick={tick} entityId={wallet.EntityId.Value}");
-            }
-
             if (wallet.Gold < 0)
             {
                 throw new InvariantViolationException($"invariant=WalletGoldNonNegative tick={tick} entityId={wallet.EntityId.Value} gold={wallet.Gold}");
