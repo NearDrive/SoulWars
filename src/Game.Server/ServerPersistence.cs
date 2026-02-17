@@ -20,7 +20,9 @@ public sealed class ServerPersistence
             .Select(player => new PlayerRecord(player.AccountId, player.PlayerId.Value, player.EntityId, player.ZoneId))
             .ToArray();
 
-        store.SaveWorld(world, host.Seed, players, checksum);
+        SnapshotMeta snapshotMeta = SnapshotMetaBuilder.Create(world, host.SimulationConfig, host.ZoneDefinitions, buildHash: null);
+
+        store.SaveWorld(world, host.Seed, players, checksum, snapshotMeta);
     }
 
     public ServerBootstrap Load(string dbPath)

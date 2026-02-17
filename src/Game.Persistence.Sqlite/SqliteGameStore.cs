@@ -8,7 +8,7 @@ namespace Game.Persistence.Sqlite;
 
 public sealed record PlayerRecord(string AccountId, int PlayerId, int? EntityId, int? ZoneId);
 
-public sealed record LoadResult(WorldState World, int ServerSeed, IReadOnlyList<PlayerRecord> Players, string? ChecksumHex);
+public sealed record LoadResult(WorldState World, int ServerSeed, IReadOnlyList<PlayerRecord> Players, string? ChecksumHex, SnapshotMeta SnapshotMeta);
 
 public sealed class SqliteGameStore
 {
@@ -27,11 +27,12 @@ public sealed class SqliteGameStore
         SqliteMigrator.InitializeOrMigrate(_dbPath);
     }
 
-    public void SaveWorld(WorldState world, int serverSeed, IReadOnlyList<PlayerRecord> players, string checksumHex)
+    public void SaveWorld(WorldState world, int serverSeed, IReadOnlyList<PlayerRecord> players, string checksumHex, SnapshotMeta snapshotMeta)
     {
         ArgumentNullException.ThrowIfNull(world);
         ArgumentNullException.ThrowIfNull(players);
         ArgumentException.ThrowIfNullOrWhiteSpace(checksumHex);
+        ArgumentNullException.ThrowIfNull(snapshotMeta);
 
         InitializeSchema();
 
@@ -68,6 +69,11 @@ VALUES ($accountId, $playerId, $entityId, $zoneId);",
             ?? world.Tick.ToString(System.Globalization.CultureInfo.InvariantCulture);
         WriteMetaValue(connection, transaction, "created_at_tick", createdAtTick);
         WriteMetaValue(connection, transaction, "saved_at_tick", world.Tick.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        WriteMetaValue(connection, transaction, "snapshot_meta_serializer_version", snapshotMeta.SerializerVersion);
+        WriteMetaValue(connection, transaction, "snapshot_meta_zone_definitions_hash", snapshotMeta.ZoneDefinitionsHash);
+        WriteMetaValue(connection, transaction, "snapshot_meta_config_hash", snapshotMeta.ConfigHash);
+        WriteMetaValue(connection, transaction, "snapshot_meta_build_hash", snapshotMeta.BuildHash ?? string.Empty);
 
         transaction.Commit();
     }
@@ -114,12 +120,19 @@ VALUES ($accountId, $playerId, $entityId, $zoneId);",
             throw new InvalidDataException("Missing or invalid meta.server_seed.");
         }
 
+        SnapshotMeta snapshotMeta = ReadSnapshotMeta(connection, transaction);
+        string actualChecksum = StateChecksum.Compute(world);
+        if (!string.Equals(snapshot.Checksum, actualChecksum, StringComparison.Ordinal))
+        {
+            throw new SnapshotChecksumMismatchException(snapshot.Checksum, actualChecksum, _dbPath, snapshotMeta);
+        }
+
         ImmutableArray<PlayerRecord> players = ReadPlayers(connection, transaction);
         ImmutableArray<PlayerRecord> reconciledPlayers = ReconcilePlayers(world, players);
 
         transaction.Commit();
 
-        return new LoadResult(world, serverSeed, reconciledPlayers, snapshot.Checksum);
+        return new LoadResult(world, serverSeed, reconciledPlayers, snapshot.Checksum, snapshotMeta);
     }
 
     private SqliteConnection OpenConnection()
@@ -155,6 +168,24 @@ LIMIT 1;";
         byte[] worldBlob = (byte[])reader[0];
         string checksum = reader.GetString(1);
         return (worldBlob, checksum);
+    }
+
+    private static SnapshotMeta ReadSnapshotMeta(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        string? serializerVersion = ReadMetaValue(connection, transaction, "snapshot_meta_serializer_version");
+        string? zoneDefinitionsHash = ReadMetaValue(connection, transaction, "snapshot_meta_zone_definitions_hash");
+        string? configHash = ReadMetaValue(connection, transaction, "snapshot_meta_config_hash");
+        string? buildHashRaw = ReadMetaValue(connection, transaction, "snapshot_meta_build_hash");
+
+        if (string.IsNullOrWhiteSpace(serializerVersion) ||
+            string.IsNullOrWhiteSpace(zoneDefinitionsHash) ||
+            string.IsNullOrWhiteSpace(configHash))
+        {
+            return SnapshotMeta.Legacy;
+        }
+
+        string? buildHash = string.IsNullOrWhiteSpace(buildHashRaw) ? null : buildHashRaw;
+        return new SnapshotMeta(serializerVersion, zoneDefinitionsHash, configHash, buildHash);
     }
 
     private static ImmutableArray<PlayerRecord> ReadPlayers(SqliteConnection connection, SqliteTransaction transaction)

@@ -81,6 +81,10 @@ public sealed class ServerHost
 
     public int Seed => _serverConfig.Seed;
 
+    internal SimulationConfig SimulationConfig => _simulationConfig;
+
+    internal ZoneDefinitions? ZoneDefinitions => _zoneDefinitions;
+
     public IReadOnlyList<PlayerState> GetPlayersSnapshot() => _playerRegistry.OrderedStates().ToArray();
     public ServerMetrics Metrics { get; }
 
