@@ -1154,18 +1154,18 @@ public static class Simulation
 
             if (!updated.TryGetZone(fromZoneId, out ZoneState fromZone))
             {
-                throw new InvalidOperationException($"ZoneTransferEvent source zone {transfer.FromZoneId} not found for entity {transfer.EntityId.Value}.");
+                continue;
             }
 
             if (!updated.TryGetZone(toZoneId, out ZoneState toZone))
             {
-                throw new InvalidOperationException($"ZoneTransferEvent destination zone {transfer.ToZoneId} not found for entity {transfer.EntityId.Value}.");
+                continue;
             }
 
             int fromIndex = ZoneEntities.FindIndex(fromZone.EntitiesData.AliveIds, transfer.EntityId);
             if (fromIndex < 0)
             {
-                throw new InvalidOperationException($"ZoneTransferEvent entity {transfer.EntityId.Value} does not exist in source zone {transfer.FromZoneId}.");
+                continue;
             }
 
             EntityState entity = fromZone.Entities[fromIndex];

@@ -70,7 +70,7 @@ public sealed class ZoneTransferTests
             .ThenBy(e => e.ToZoneId)
             .ThenBy(e => e.EntityId.Value)
             .ToImmutableArray();
-        Assert.Equal(expectedOrder, runA.applied);
+        Assert.Equal(expectedOrder.ToArray(), runA.applied.ToArray());
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public sealed class ZoneTransferTests
         ImmutableArray<string> globalsA = RunChecksumsWithTransfer(config, ticks: 8);
         ImmutableArray<string> globalsB = RunChecksumsWithTransfer(config, ticks: 8);
 
-        Assert.Equal(globalsA, globalsB);
+        Assert.Equal(globalsA.ToArray(), globalsB.ToArray());
     }
 
     private static (ImmutableArray<ZoneTransferEvent> applied, string checksum) RunSameTickTransfers(SimulationConfig config)
