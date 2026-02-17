@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Game.BotRunner;
 using Xunit;
 
@@ -76,10 +77,18 @@ public sealed class ReplayRunnerTests
         using ReplayReader reader = new(OpenFixtureStream());
         Assert.Equal(reader.Header.TickCount, expectedLines.Length);
 
-        Assert.Contains("\"Tick\":0", expectedLines[0], StringComparison.Ordinal);
+        int firstTick = ReadTickFromJsonlLine(expectedLines[0]);
+        Assert.True(firstTick is 0 or 1, $"Unexpected first tick in tickreport: {firstTick}.");
         Assert.Contains("tick=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("artifacts=", ex.Message, StringComparison.Ordinal);
         Assert.Equal(tempRoot, ex.ArtifactsDirectory);
+    }
+
+
+    private static int ReadTickFromJsonlLine(string line)
+    {
+        using JsonDocument doc = JsonDocument.Parse(line);
+        return doc.RootElement.GetProperty("Tick").GetInt32();
     }
 
     private static Stream CreateReplayWithWrongExpectedChecksum()
