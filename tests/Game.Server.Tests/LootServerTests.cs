@@ -10,9 +10,8 @@ public sealed class LootServerTests
     [Fact]
     public void LootCollected_Despawns_NoDup_NoOrphan_OnRestart()
     {
-        ServerConfig config = new()
+        ServerConfig config = ServerConfig.Default(seed: 7) with
         {
-            Seed = 7,
             ZoneCount = 1,
             MapWidth = 8,
             MapHeight = 8,

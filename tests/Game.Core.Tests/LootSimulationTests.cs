@@ -24,7 +24,7 @@ public sealed class LootSimulationTests
 
         Assert.Equal(new ItemStack("gold.coin", 3), firstLoot.Items[0]);
         Assert.Equal(new ItemStack("potion.minor", 1), firstLoot.Items[1]);
-        Assert.Equal(firstLoot.Items, secondLoot.Items);
+        Assert.Equal(firstLoot.Items.ToArray(), secondLoot.Items.ToArray());
     }
 
     [Fact]
