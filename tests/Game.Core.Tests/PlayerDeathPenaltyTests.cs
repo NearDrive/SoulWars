@@ -22,8 +22,8 @@ public sealed class PlayerDeathPenaltyTests
 
         Assert.Collection(loot.Items,
             item => { Assert.Equal("gold.coin", item.ItemId); Assert.Equal(50, item.Quantity); },
-            item => { Assert.Equal("potion.minor", item.ItemId); Assert.Equal(3, item.Quantity); },
-            item => { Assert.Equal("ore.iron", item.ItemId); Assert.Equal(20, item.Quantity); });
+            item => { Assert.Equal("ore.iron", item.ItemId); Assert.Equal(20, item.Quantity); },
+            item => { Assert.Equal("potion.minor", item.ItemId); Assert.Equal(3, item.Quantity); });
 
         PlayerInventoryState deadPlayerInventory = state.PlayerInventories.Single(i => i.EntityId.Value == 2);
         Assert.All(deadPlayerInventory.Inventory.Slots, slot => Assert.Equal(0, slot.Quantity));

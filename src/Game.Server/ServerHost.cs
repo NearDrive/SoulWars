@@ -195,6 +195,7 @@ public sealed class ServerHost
             .SelectMany(zone => zone.Entities)
             .Select(entity => entity.Id.Value)
             .ToHashSet();
+        int beforePlayerDeathAuditCount = (_world.PlayerDeathAuditLog.IsDefault ? 0 : _world.PlayerDeathAuditLog.Length);
 
         foreach (PendingInput pending in OrderedPendingInputs(targetTick))
         {
@@ -216,6 +217,18 @@ public sealed class ServerHost
         }
 
         _world = Simulation.Step(_simulationConfig, _world, new Inputs(worldCommands.ToImmutableArray()), _simulationInstrumentation);
+
+        if (!_world.PlayerDeathAuditLog.IsDefaultOrEmpty)
+        {
+            foreach (PlayerDeathAuditEntry death in _world.PlayerDeathAuditLog
+                         .Skip(beforePlayerDeathAuditCount)
+                         .OrderBy(e => e.Tick)
+                         .ThenBy(e => e.PlayerEntityId.Value)
+                         .ThenBy(e => e.LootEntityId.Value))
+            {
+                _auditSink.Emit(AuditEvent.Death(death.Tick, NextAuditSeq(), death.PlayerEntityId.Value, killerEntityId: null));
+            }
+        }
 
         HashSet<int> afterSimEntityIds = _world.Zones
             .SelectMany(zone => zone.Entities)

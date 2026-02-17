@@ -128,7 +128,7 @@ public static class Simulation
 
         updated = RebuildEntityLocations(updated);
         updated = SpawnLootForNpcDeaths(state, updated);
-        updated = HandlePlayerDeaths(config, state, updated);
+        updated = HandlePlayerDeaths(config, state, updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
         updated = ProcessLootIntents(updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
 
         if (config.Invariants.EnableCoreInvariants)
@@ -297,7 +297,7 @@ public static class Simulation
     }
 
 
-    private static WorldState HandlePlayerDeaths(SimulationConfig config, WorldState before, WorldState after)
+    private static WorldState HandlePlayerDeaths(SimulationConfig config, WorldState before, WorldState after, ImmutableArray<WorldCommand> commands)
     {
         Dictionary<int, (ZoneId ZoneId, EntityState Entity)> beforePlayers = before.Zones
             .SelectMany(zone => zone.Entities.Select(entity => (ZoneId: zone.Id, Entity: entity)))
@@ -330,6 +330,13 @@ public static class Simulation
 
             EntityState deadPlayer = pair.Value.Entity;
             ZoneId zoneId = pair.Value.ZoneId;
+            if (commands.Any(c => c.Kind == WorldCommandKind.LeaveZone
+                                  && c.EntityId.Value == playerId
+                                  && c.ZoneId.Value == zoneId.Value))
+            {
+                continue;
+            }
+
             EntityId lootEntityId = DerivePlayerDeathLootEntityId(deadPlayer.Id);
 
             int inventoryIndex = nextInventories.FindIndex(i => i.EntityId.Value == playerId);
@@ -423,7 +430,11 @@ public static class Simulation
             dropped.Add(new ItemStack(slot.ItemId, slot.Quantity));
         }
 
-        return dropped.ToImmutable();
+        return dropped
+            .ToImmutable()
+            .OrderBy(i => i.ItemId, StringComparer.Ordinal)
+            .ThenBy(i => i.Quantity)
+            .ToImmutableArray();
     }
 
     private static InventoryComponent ClearInventory(InventoryComponent inventory)
