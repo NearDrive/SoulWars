@@ -235,6 +235,32 @@ public static class CoreInvariants
             }
         }
 
+        int lastAuditTick = int.MinValue;
+        int lastAuditPlayerEntityId = int.MinValue;
+        foreach (PlayerDeathAuditEntry entry in (world.PlayerDeathAuditLog.IsDefault ? ImmutableArray<PlayerDeathAuditEntry>.Empty : world.PlayerDeathAuditLog))
+        {
+            if (entry.Tick < lastAuditTick || (entry.Tick == lastAuditTick && entry.PlayerEntityId.Value < lastAuditPlayerEntityId))
+            {
+                throw new InvariantViolationException($"invariant=PlayerDeathAuditOrdered tick={tick} entryTick={entry.Tick} entityId={entry.PlayerEntityId.Value}");
+            }
+
+            lastAuditTick = entry.Tick;
+            lastAuditPlayerEntityId = entry.PlayerEntityId.Value;
+
+            if (!world.Zones.Any(z => z.Id.Value == entry.ZoneId.Value))
+            {
+                throw new InvariantViolationException($"invariant=PlayerDeathAuditZoneExists tick={tick} zoneId={entry.ZoneId.Value} entityId={entry.PlayerEntityId.Value}");
+            }
+
+            foreach (ItemStack dropped in entry.DroppedItems)
+            {
+                if (dropped.Quantity <= 0)
+                {
+                    throw new InvariantViolationException($"invariant=PlayerDeathAuditDropPositive tick={tick} entityId={entry.PlayerEntityId.Value} itemId={dropped.ItemId} quantity={dropped.Quantity}");
+                }
+            }
+        }
+
         int lastLocationEntityId = int.MinValue;
         foreach (EntityLocation location in world.EntityLocations)
         {

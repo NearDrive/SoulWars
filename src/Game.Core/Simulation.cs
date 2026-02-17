@@ -128,6 +128,7 @@ public static class Simulation
 
         updated = RebuildEntityLocations(updated);
         updated = SpawnLootForNpcDeaths(state, updated);
+        updated = HandlePlayerDeaths(config, state, updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
         updated = ProcessLootIntents(updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
 
         if (config.Invariants.EnableCoreInvariants)
@@ -294,6 +295,164 @@ public static class Simulation
             .OrderBy(l => l.Id.Value)
             .ToImmutableArray());
     }
+
+
+    private static WorldState HandlePlayerDeaths(SimulationConfig config, WorldState before, WorldState after, ImmutableArray<WorldCommand> commands)
+    {
+        Dictionary<int, (ZoneId ZoneId, EntityState Entity)> beforePlayers = before.Zones
+            .SelectMany(zone => zone.Entities.Select(entity => (ZoneId: zone.Id, Entity: entity)))
+            .Where(x => x.Entity.Kind == EntityKind.Player)
+            .ToDictionary(x => x.Entity.Id.Value, x => (x.ZoneId, x.Entity));
+
+        HashSet<int> afterEntityIds = after.Zones
+            .SelectMany(zone => zone.Entities.Select(entity => entity.Id.Value))
+            .ToHashSet();
+
+        List<LootEntityState> nextLoot = (after.LootEntities.IsDefault ? ImmutableArray<LootEntityState>.Empty : after.LootEntities)
+            .OrderBy(l => l.Id.Value)
+            .ToList();
+        List<PlayerInventoryState> nextInventories = (after.PlayerInventories.IsDefault ? ImmutableArray<PlayerInventoryState>.Empty : after.PlayerInventories)
+            .OrderBy(i => i.EntityId.Value)
+            .ToList();
+        List<ZoneState> nextZones = after.Zones.OrderBy(z => z.Id.Value).ToList();
+        List<PlayerDeathAuditEntry> nextAudit = (after.PlayerDeathAuditLog.IsDefault ? ImmutableArray<PlayerDeathAuditEntry>.Empty : after.PlayerDeathAuditLog)
+            .OrderBy(e => e.Tick)
+            .ThenBy(e => e.PlayerEntityId.Value)
+            .ToList();
+
+        foreach (KeyValuePair<int, (ZoneId ZoneId, EntityState Entity)> pair in beforePlayers.OrderBy(p => p.Key))
+        {
+            int playerId = pair.Key;
+            if (afterEntityIds.Contains(playerId))
+            {
+                continue;
+            }
+
+            EntityState deadPlayer = pair.Value.Entity;
+            ZoneId zoneId = pair.Value.ZoneId;
+            if (commands.Any(c => c.Kind == WorldCommandKind.LeaveZone
+                                  && c.EntityId.Value == playerId
+                                  && c.ZoneId.Value == zoneId.Value))
+            {
+                continue;
+            }
+
+            EntityId lootEntityId = DerivePlayerDeathLootEntityId(deadPlayer.Id);
+
+            int inventoryIndex = nextInventories.FindIndex(i => i.EntityId.Value == playerId);
+            InventoryComponent inventory = inventoryIndex >= 0
+                ? nextInventories[inventoryIndex].Inventory
+                : InventoryComponent.CreateDefault();
+
+            ImmutableArray<ItemStack> droppedItems = CanonicalizeDeathDropItems(inventory);
+
+            if (!droppedItems.IsDefaultOrEmpty && !nextLoot.Any(l => l.Id.Value == lootEntityId.Value))
+            {
+                nextLoot.Add(new LootEntityState(
+                    Id: lootEntityId,
+                    ZoneId: zoneId,
+                    Pos: deadPlayer.Pos,
+                    Items: droppedItems));
+            }
+
+            InventoryComponent clearedInventory = ClearInventory(inventory);
+            if (inventoryIndex >= 0)
+            {
+                nextInventories[inventoryIndex] = nextInventories[inventoryIndex] with { Inventory = clearedInventory };
+            }
+            else
+            {
+                nextInventories.Add(new PlayerInventoryState(deadPlayer.Id, clearedInventory));
+            }
+
+            int zoneIndex = nextZones.FindIndex(z => z.Id.Value == zoneId.Value);
+            if (zoneIndex < 0)
+            {
+                continue;
+            }
+
+            ZoneState zone = nextZones[zoneIndex];
+            Vec2Fix respawnPos = ResolveRespawnPosition(config, zone);
+            EntityState respawnedPlayer = deadPlayer with
+            {
+                Pos = respawnPos,
+                Vel = Vec2Fix.Zero,
+                Hp = deadPlayer.MaxHp,
+                IsAlive = true
+            };
+
+            ZoneState updatedZone = zone.WithEntities(zone.Entities
+                .Add(respawnedPlayer)
+                .GroupBy(e => e.Id.Value)
+                .Select(g => g.Last())
+                .OrderBy(e => e.Id.Value)
+                .ToImmutableArray());
+            nextZones[zoneIndex] = updatedZone;
+
+            nextAudit.Add(new PlayerDeathAuditEntry(
+                Tick: after.Tick,
+                PlayerEntityId: deadPlayer.Id,
+                ZoneId: zoneId,
+                DeathPosition: deadPlayer.Pos,
+                DroppedItems: droppedItems,
+                LootEntityId: lootEntityId,
+                RespawnPosition: respawnPos));
+        }
+
+        WorldState withUpdates = after
+            .WithLootEntities(nextLoot.OrderBy(l => l.Id.Value).ToImmutableArray())
+            .WithPlayerInventories(nextInventories.OrderBy(i => i.EntityId.Value).ToImmutableArray())
+            .WithPlayerDeathAuditLog(nextAudit
+                .OrderBy(e => e.Tick)
+                .ThenBy(e => e.PlayerEntityId.Value)
+                .ThenBy(e => e.LootEntityId.Value)
+                .ToImmutableArray());
+
+        foreach (ZoneState zone in nextZones)
+        {
+            withUpdates = withUpdates.WithZoneUpdated(zone);
+        }
+
+        return RebuildEntityLocations(withUpdates);
+    }
+
+    private static ImmutableArray<ItemStack> CanonicalizeDeathDropItems(InventoryComponent inventory)
+    {
+        ImmutableArray<ItemStack>.Builder dropped = ImmutableArray.CreateBuilder<ItemStack>();
+        for (int i = 0; i < inventory.Slots.Length; i++)
+        {
+            InventorySlot slot = inventory.Slots[i];
+            if (slot.Quantity <= 0)
+            {
+                continue;
+            }
+
+            dropped.Add(new ItemStack(slot.ItemId, slot.Quantity));
+        }
+
+        return dropped
+            .ToImmutable()
+            .OrderBy(i => i.ItemId, StringComparer.Ordinal)
+            .ThenBy(i => i.Quantity)
+            .ToImmutableArray();
+    }
+
+    private static InventoryComponent ClearInventory(InventoryComponent inventory)
+    {
+        ImmutableArray<InventorySlot>.Builder clearedSlots = ImmutableArray.CreateBuilder<InventorySlot>(inventory.Slots.Length);
+        for (int i = 0; i < inventory.Slots.Length; i++)
+        {
+            clearedSlots.Add(new InventorySlot(string.Empty, 0));
+        }
+
+        return inventory with { Slots = clearedSlots.MoveToImmutable() };
+    }
+
+    private static Vec2Fix ResolveRespawnPosition(SimulationConfig config, ZoneState zone)
+        => FindSpawn(zone.Map, config.Radius);
+
+    private static EntityId DerivePlayerDeathLootEntityId(EntityId deadPlayerId)
+        => new(unchecked(int.MinValue + deadPlayerId.Value));
 
     private static WorldState ProcessLootIntents(WorldState state, ImmutableArray<WorldCommand> commands)
     {

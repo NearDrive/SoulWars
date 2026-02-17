@@ -37,7 +37,7 @@ public sealed class CombatSimulationTests
     }
 
     [Fact]
-    public void Combat_TargetDies_Removed()
+    public void Combat_TargetDies_RespawnsAtFullHealth_AndDropsLoot()
     {
         SimulationConfig config = CreateConfig(123);
         WorldState state = SpawnDuel(config);
@@ -49,7 +49,11 @@ public sealed class CombatSimulationTests
             new WorldCommand(WorldCommandKind.AttackIntent, new EntityId(1), new ZoneId(1), TargetEntityId: new EntityId(2)))));
 
         Assert.True(state.TryGetZone(new ZoneId(1), out ZoneState zone));
-        Assert.DoesNotContain(zone.Entities, e => e.Id.Value == 2);
+        EntityState respawnedTarget = Assert.Single(zone.Entities.Where(e => e.Id.Value == 2));
+        Assert.True(respawnedTarget.IsAlive);
+        Assert.Equal(respawnedTarget.MaxHp, respawnedTarget.Hp);
+        Assert.Empty(state.LootEntities);
+        Assert.Contains(state.PlayerDeathAuditLog, e => e.PlayerEntityId.Value == 2);
     }
 
     [Fact]

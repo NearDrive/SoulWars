@@ -48,15 +48,44 @@ public static class AuditReplayer
             {
                 foreach (AuditEvent evt in postTickEvents)
                 {
-                    if (evt.Header.Type is AuditEventType.Death or AuditEventType.DespawnDisconnected)
+                    if (evt.Header.Type == AuditEventType.DespawnDisconnected)
                     {
                         world = RemoveEntity(world, evt.EntityId);
+                        continue;
+                    }
+
+                    if (evt.Header.Type == AuditEventType.Death)
+                    {
+                        world = ApplyDeathEvent(world, evt.EntityId);
                     }
                 }
             }
         }
 
         return world;
+    }
+
+    private static WorldState ApplyDeathEvent(WorldState world, int entityId)
+    {
+        EntityId id = new(entityId);
+        if (!world.TryGetEntityZone(id, out ZoneId zoneId) || !world.TryGetZone(zoneId, out ZoneState zone))
+        {
+            return world;
+        }
+
+        EntityState? entity = zone.Entities.FirstOrDefault(e => e.Id.Value == entityId);
+        if (entity is null)
+        {
+            return world;
+        }
+
+        // Player deaths are handled in-core as drop+respawn and should not remove the entity in replay.
+        if (entity.Kind == EntityKind.Player)
+        {
+            return world;
+        }
+
+        return RemoveEntity(world, entityId);
     }
 
     private static WorldState RemoveEntity(WorldState world, int entityId)

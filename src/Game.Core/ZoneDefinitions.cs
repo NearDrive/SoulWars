@@ -18,7 +18,8 @@ public sealed record ZoneDefinition(
     ZoneId ZoneId,
     ImmutableArray<ZoneAabb> StaticObstacles,
     ImmutableArray<NpcSpawnDefinition> NpcSpawns,
-    LootRulesDefinition? LootRules);
+    LootRulesDefinition? LootRules,
+    Vec2Fix? RespawnPoint = null);
 
 public sealed record ZoneDefinitions(ImmutableArray<ZoneDefinition> Zones)
 {
@@ -62,6 +63,15 @@ public static class ZoneDefinitionCanonicalizer
                     .Append(obstacle.Center.Y.Raw).Append('|')
                     .Append(obstacle.HalfExtents.X.Raw).Append('|')
                     .Append(obstacle.HalfExtents.Y.Raw)
+                    .Append('\n');
+            }
+
+            if (zone.RespawnPoint is not null)
+            {
+                builder
+                    .Append("respawn|")
+                    .Append(zone.RespawnPoint.Value.X.Raw).Append('|')
+                    .Append(zone.RespawnPoint.Value.Y.Raw)
                     .Append('\n');
             }
 

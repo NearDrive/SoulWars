@@ -45,7 +45,10 @@ public sealed class CoreInvariantsTests
         }
 
         Assert.True(state.TryGetZone(new ZoneId(1), out ZoneState zone));
-        Assert.DoesNotContain(zone.Entities, e => e.Id.Value == targetId.Value);
+        EntityState target = Assert.Single(zone.Entities.Where(e => e.Id.Value == targetId.Value));
+        Assert.True(target.IsAlive);
+        Assert.Equal(target.MaxHp, target.Hp);
+        Assert.Contains(state.PlayerDeathAuditLog, e => e.PlayerEntityId.Value == targetId.Value);
         CoreInvariants.Validate(state, state.Tick);
 
         EntityState invalid = new(

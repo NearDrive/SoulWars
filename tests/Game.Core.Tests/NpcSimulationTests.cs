@@ -84,7 +84,7 @@ public sealed class NpcSimulationTests
                 continue;
             }
 
-            if (!current.Entities.Any(e => e.Id.Value == 1))
+            if (state.PlayerDeathAuditLog.Any(e => e.PlayerEntityId.Value == 1))
             {
                 return state.Tick;
             }

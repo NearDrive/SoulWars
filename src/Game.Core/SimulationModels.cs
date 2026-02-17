@@ -222,12 +222,22 @@ public sealed record LootEntityState(
     Vec2Fix Pos,
     ImmutableArray<ItemStack> Items);
 
+public sealed record PlayerDeathAuditEntry(
+    int Tick,
+    EntityId PlayerEntityId,
+    ZoneId ZoneId,
+    Vec2Fix DeathPosition,
+    ImmutableArray<ItemStack> DroppedItems,
+    EntityId LootEntityId,
+    Vec2Fix RespawnPosition);
+
 public sealed record WorldState(
     int Tick,
     ImmutableArray<ZoneState> Zones,
     ImmutableArray<EntityLocation> EntityLocations,
     ImmutableArray<LootEntityState> LootEntities = default,
-    ImmutableArray<PlayerInventoryState> PlayerInventories = default)
+    ImmutableArray<PlayerInventoryState> PlayerInventories = default,
+    ImmutableArray<PlayerDeathAuditEntry> PlayerDeathAuditLog = default)
 {
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
@@ -351,6 +361,18 @@ public sealed record WorldState(
         {
             PlayerInventories = playerInventories
                 .OrderBy(i => i.EntityId.Value)
+                .ToImmutableArray()
+        };
+    }
+
+    public WorldState WithPlayerDeathAuditLog(ImmutableArray<PlayerDeathAuditEntry> playerDeathAuditLog)
+    {
+        return this with
+        {
+            PlayerDeathAuditLog = playerDeathAuditLog
+                .OrderBy(e => e.Tick)
+                .ThenBy(e => e.PlayerEntityId.Value)
+                .ThenBy(e => e.LootEntityId.Value)
                 .ToImmutableArray()
         };
     }
