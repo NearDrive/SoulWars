@@ -66,6 +66,11 @@ public static class ZoneDefinitionsLoader
             throw new InvalidOperationException($"ZoneId must be > 0 in '{path}'.");
         }
 
+        if (file.Bounds is null)
+        {
+            throw new InvalidOperationException($"Missing required field 'Bounds' in '{path}'.");
+        }
+
         if (file.StaticObstacles is null)
         {
             throw new InvalidOperationException($"Missing required field 'StaticObstacles' in '{path}'.");
@@ -75,6 +80,23 @@ public static class ZoneDefinitionsLoader
         {
             throw new InvalidOperationException($"Missing required field 'NpcSpawns' in '{path}'.");
         }
+
+
+        ValidateFinite(file.Bounds.MinX, nameof(file.Bounds.MinX), path);
+        ValidateFinite(file.Bounds.MinY, nameof(file.Bounds.MinY), path);
+        ValidateFinite(file.Bounds.MaxX, nameof(file.Bounds.MaxX), path);
+        ValidateFinite(file.Bounds.MaxY, nameof(file.Bounds.MaxY), path);
+
+        if (file.Bounds.MaxX <= file.Bounds.MinX || file.Bounds.MaxY <= file.Bounds.MinY)
+        {
+            throw new InvalidOperationException($"Invalid Bounds in '{path}': Max must be > Min.");
+        }
+
+        ZoneBounds bounds = new(
+            MinX: Fix32.FromFloat(file.Bounds.MinX),
+            MinY: Fix32.FromFloat(file.Bounds.MinY),
+            MaxX: Fix32.FromFloat(file.Bounds.MaxX),
+            MaxY: Fix32.FromFloat(file.Bounds.MaxY));
 
         ImmutableArray<ZoneAabb>.Builder obstacles = ImmutableArray.CreateBuilder<ZoneAabb>(file.StaticObstacles.Count);
         foreach (ZoneAabbFile obstacle in file.StaticObstacles)
@@ -142,6 +164,7 @@ public static class ZoneDefinitionsLoader
 
         return new ZoneDefinition(
             ZoneId: new ZoneId(file.ZoneId),
+            Bounds: bounds,
             StaticObstacles: obstacles.ToImmutableArray(),
             NpcSpawns: spawns.ToImmutableArray(),
             LootRules: file.LootRules is null ? null : new LootRulesDefinition(),
@@ -159,10 +182,19 @@ public static class ZoneDefinitionsLoader
     private sealed class ZoneDefinitionFile
     {
         public int ZoneId { get; set; }
+        public ZoneBoundsFile? Bounds { get; set; }
         public List<ZoneAabbFile>? StaticObstacles { get; set; }
         public List<NpcSpawnFile>? NpcSpawns { get; set; }
         public object? LootRules { get; set; }
         public Vec2File? RespawnPoint { get; set; }
+    }
+
+    private sealed class ZoneBoundsFile
+    {
+        public float MinX { get; set; }
+        public float MinY { get; set; }
+        public float MaxX { get; set; }
+        public float MaxY { get; set; }
     }
 
     private sealed class ZoneAabbFile

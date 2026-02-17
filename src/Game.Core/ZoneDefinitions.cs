@@ -6,6 +6,12 @@ namespace Game.Core;
 
 public sealed record ZoneAabb(Vec2Fix Center, Vec2Fix HalfExtents);
 
+public sealed record ZoneBounds(Fix32 MinX, Fix32 MinY, Fix32 MaxX, Fix32 MaxY)
+{
+    public bool Contains(Vec2Fix point)
+        => point.X >= MinX && point.X <= MaxX && point.Y >= MinY && point.Y <= MaxY;
+}
+
 public sealed record NpcSpawnDefinition(
     string NpcArchetypeId,
     int Count,
@@ -16,6 +22,7 @@ public sealed record LootRulesDefinition;
 
 public sealed record ZoneDefinition(
     ZoneId ZoneId,
+    ZoneBounds Bounds,
     ImmutableArray<ZoneAabb> StaticObstacles,
     ImmutableArray<NpcSpawnDefinition> NpcSpawns,
     LootRulesDefinition? LootRules,
@@ -50,6 +57,13 @@ public static class ZoneDefinitionCanonicalizer
         foreach (ZoneDefinition zone in definitions.Zones.OrderBy(z => z.ZoneId.Value))
         {
             builder.Append("zone|").Append(zone.ZoneId.Value).Append('\n');
+            builder
+                .Append("bounds|")
+                .Append(zone.Bounds.MinX.Raw).Append('|')
+                .Append(zone.Bounds.MinY.Raw).Append('|')
+                .Append(zone.Bounds.MaxX.Raw).Append('|')
+                .Append(zone.Bounds.MaxY.Raw)
+                .Append('\n');
 
             foreach (ZoneAabb obstacle in zone.StaticObstacles
                          .OrderBy(o => o.Center.X.Raw)
@@ -76,9 +90,10 @@ public static class ZoneDefinitionCanonicalizer
             }
 
             foreach (NpcSpawnDefinition spawn in zone.NpcSpawns
-                         .OrderBy(s => s.NpcArchetypeId, StringComparer.Ordinal)
-                         .ThenBy(s => s.Level)
-                         .ThenBy(s => s.Count))
+                         .Select((value, index) => (Spawn: value, Index: index))
+                         .OrderBy(x => x.Spawn.NpcArchetypeId, StringComparer.Ordinal)
+                         .ThenBy(x => x.Index)
+                         .Select(x => x.Spawn))
             {
                 builder
                     .Append("spawn|")

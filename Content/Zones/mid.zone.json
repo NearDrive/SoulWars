@@ -1,0 +1,31 @@
+{
+  "ZoneId": 2,
+  "Bounds": {
+    "MinX": 0.0,
+    "MinY": 0.0,
+    "MaxX": 31.0,
+    "MaxY": 31.0
+  },
+  "StaticObstacles": [
+    { "CenterX": 10.0, "CenterY": 10.0, "HalfExtentX": 1.5, "HalfExtentY": 1.0 },
+    { "CenterX": 22.0, "CenterY": 17.0, "HalfExtentX": 2.0, "HalfExtentY": 1.0 }
+  ],
+  "NpcSpawns": [
+    {
+      "NpcArchetypeId": "wolf",
+      "Count": 8,
+      "Level": 5,
+      "SpawnPoints": [
+        { "X": 7.5, "Y": 7.5 },
+        { "X": 8.5, "Y": 7.5 },
+        { "X": 9.5, "Y": 7.5 },
+        { "X": 10.5, "Y": 7.5 },
+        { "X": 7.5, "Y": 8.5 },
+        { "X": 8.5, "Y": 8.5 },
+        { "X": 9.5, "Y": 8.5 },
+        { "X": 10.5, "Y": 8.5 }
+      ]
+    }
+  ],
+  "LootRules": null
+}

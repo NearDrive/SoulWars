@@ -1,0 +1,24 @@
+{
+  "ZoneId": 1,
+  "Bounds": {
+    "MinX": 0.0,
+    "MinY": 0.0,
+    "MaxX": 31.0,
+    "MaxY": 31.0
+  },
+  "StaticObstacles": [
+    { "CenterX": 14.0, "CenterY": 14.0, "HalfExtentX": 1.0, "HalfExtentY": 1.0 }
+  ],
+  "NpcSpawns": [
+    {
+      "NpcArchetypeId": "rat",
+      "Count": 2,
+      "Level": 1,
+      "SpawnPoints": [
+        { "X": 4.5, "Y": 4.5 },
+        { "X": 6.5, "Y": 5.5 }
+      ]
+    }
+  ],
+  "LootRules": null
+}

@@ -1,7 +1,12 @@
 {
   "ZoneId": 2,
   "StaticObstacles": [
-    { "CenterX": 12.0, "CenterY": 12.0, "HalfExtentX": 1.5, "HalfExtentY": 1.5 }
+    {
+      "CenterX": 12.0,
+      "CenterY": 12.0,
+      "HalfExtentX": 1.5,
+      "HalfExtentY": 1.5
+    }
   ],
   "NpcSpawns": [
     {
@@ -9,10 +14,22 @@
       "Count": 1,
       "Level": 1,
       "SpawnPoints": [
-        { "X": 6.5, "Y": 6.5 },
-        { "X": 8.5, "Y": 6.5 }
+        {
+          "X": 6.5,
+          "Y": 6.5
+        },
+        {
+          "X": 8.5,
+          "Y": 6.5
+        }
       ]
     }
   ],
-  "LootRules": null
+  "LootRules": null,
+  "Bounds": {
+    "MinX": 0,
+    "MinY": 0,
+    "MaxX": 31,
+    "MaxY": 31
+  }
 }
