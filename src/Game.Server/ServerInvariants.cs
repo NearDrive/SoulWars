@@ -124,6 +124,23 @@ public static class ServerInvariants
                 }
             }
 
+            foreach (NpcSpawnDefinition spawn in definition.NpcSpawns)
+            {
+                if (spawn.Count > spawn.SpawnPoints.Length)
+                {
+                    throw new InvariantViolationException($"invariant=NpcSpawnCountExceedsPoints tick={tick} zoneId={zone.Id.Value} archetype={spawn.NpcArchetypeId}");
+                }
+
+                for (int i = 0; i < spawn.Count; i++)
+                {
+                    Vec2Fix point = spawn.SpawnPoints[i];
+                    if (!definition.Bounds.Contains(point))
+                    {
+                        throw new InvariantViolationException($"invariant=DefinedSpawnOutOfBounds tick={tick} zoneId={zone.Id.Value} archetype={spawn.NpcArchetypeId} index={i}");
+                    }
+                }
+            }
+
             if (tick == 0)
             {
                 HashSet<(int X, int Y)> allowedPoints = definition.NpcSpawns
@@ -133,6 +150,11 @@ public static class ServerInvariants
 
                 foreach (EntityState npc in zone.Entities.Where(e => e.Kind == EntityKind.Npc))
                 {
+                    if (!definition.Bounds.Contains(npc.Pos))
+                    {
+                        throw new InvariantViolationException($"invariant=NpcOutOfBoundsAtSpawn tick={tick} zoneId={zone.Id.Value} entityId={npc.Id.Value}");
+                    }
+
                     if (!allowedPoints.Contains((npc.Pos.X.Raw, npc.Pos.Y.Raw)))
                     {
                         throw new InvariantViolationException($"invariant=NpcOutsideDefinedSpawn tick={tick} zoneId={zone.Id.Value} entityId={npc.Id.Value}");

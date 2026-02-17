@@ -678,13 +678,25 @@ public static class Simulation
         List<Vec2Fix> orderedSpawns = new();
 
         foreach (NpcSpawnDefinition spawn in zone.NpcSpawns
-                     .OrderBy(s => s.NpcArchetypeId, StringComparer.Ordinal)
-                     .ThenBy(s => s.Level)
-                     .ThenBy(s => s.Count))
+                     .Select((value, index) => (Spawn: value, Index: index))
+                     .OrderBy(x => x.Spawn.NpcArchetypeId, StringComparer.Ordinal)
+                     .ThenBy(x => x.Index)
+                     .Select(x => x.Spawn))
         {
+            if (spawn.Count > spawn.SpawnPoints.Length)
+            {
+                throw new InvalidOperationException($"Zone {zone.ZoneId.Value} has Count > SpawnPoints for archetype '{spawn.NpcArchetypeId}'.");
+            }
+
             for (int i = 0; i < spawn.Count; i++)
             {
-                orderedSpawns.Add(spawn.SpawnPoints[i]);
+                Vec2Fix point = spawn.SpawnPoints[i];
+                if (!zone.Bounds.Contains(point))
+                {
+                    throw new InvariantViolationException($"invariant=NpcSpawnOutOfBounds zoneId={zone.ZoneId.Value} archetype={spawn.NpcArchetypeId} index={i}");
+                }
+
+                orderedSpawns.Add(point);
             }
         }
 

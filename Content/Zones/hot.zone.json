@@ -1,0 +1,39 @@
+{
+  "ZoneId": 3,
+  "Bounds": {
+    "MinX": 0.0,
+    "MinY": 0.0,
+    "MaxX": 31.0,
+    "MaxY": 31.0
+  },
+  "StaticObstacles": [
+    { "CenterX": 12.0, "CenterY": 12.0, "HalfExtentX": 1.0, "HalfExtentY": 1.0 },
+    { "CenterX": 18.0, "CenterY": 12.0, "HalfExtentX": 1.0, "HalfExtentY": 1.0 },
+    { "CenterX": 15.0, "CenterY": 18.0, "HalfExtentX": 1.5, "HalfExtentY": 1.0 }
+  ],
+  "NpcSpawns": [
+    {
+      "NpcArchetypeId": "demon",
+      "Count": 15,
+      "Level": 12,
+      "SpawnPoints": [
+        { "X": 13.5, "Y": 13.5 },
+        { "X": 14.5, "Y": 13.5 },
+        { "X": 15.5, "Y": 13.5 },
+        { "X": 16.5, "Y": 13.5 },
+        { "X": 17.5, "Y": 13.5 },
+        { "X": 13.5, "Y": 14.5 },
+        { "X": 14.5, "Y": 14.5 },
+        { "X": 15.5, "Y": 14.5 },
+        { "X": 16.5, "Y": 14.5 },
+        { "X": 17.5, "Y": 14.5 },
+        { "X": 13.5, "Y": 15.5 },
+        { "X": 14.5, "Y": 15.5 },
+        { "X": 15.5, "Y": 15.5 },
+        { "X": 16.5, "Y": 15.5 },
+        { "X": 17.5, "Y": 15.5 }
+      ]
+    }
+  ],
+  "LootRules": null
+}
