@@ -423,7 +423,7 @@ public static class Simulation
             dropped.Add(new ItemStack(slot.ItemId, slot.Quantity));
         }
 
-        return dropped.MoveToImmutable();
+        return dropped.ToImmutable();
     }
 
     private static InventoryComponent ClearInventory(InventoryComponent inventory)
