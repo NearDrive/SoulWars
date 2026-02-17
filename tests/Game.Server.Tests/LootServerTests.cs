@@ -27,7 +27,7 @@ public sealed class LootServerTests
             ImmutableArray<BootstrapPlayerRecord>.Empty);
 
         ServerHost host = new(config, bootstrap: bootstrap);
-        InMemoryEndpoint endpoint = new("loot-client");
+        InMemoryEndpoint endpoint = new();
         host.Connect(endpoint);
 
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("v", "alice")));
