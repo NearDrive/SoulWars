@@ -189,6 +189,52 @@ public static class CoreInvariants
             }
         }
 
+        int lastInventoryEntityId = int.MinValue;
+        foreach (PlayerInventoryState playerInventory in (world.PlayerInventories.IsDefault ? ImmutableArray<PlayerInventoryState>.Empty : world.PlayerInventories))
+        {
+            if (playerInventory.EntityId.Value <= lastInventoryEntityId)
+            {
+                throw new InvariantViolationException($"invariant=PlayerInventoriesOrdered tick={tick} entityId={playerInventory.EntityId.Value} lastEntityId={lastInventoryEntityId}");
+            }
+
+            lastInventoryEntityId = playerInventory.EntityId.Value;
+            InventoryComponent inventory = playerInventory.Inventory;
+            if (inventory.Capacity <= 0 || inventory.Slots.Length != inventory.Capacity)
+            {
+                throw new InvariantViolationException($"invariant=InventoryCapacityMatchesSlots tick={tick} entityId={playerInventory.EntityId.Value} capacity={inventory.Capacity} slots={inventory.Slots.Length}");
+            }
+
+            if (inventory.StackLimit <= 0)
+            {
+                throw new InvariantViolationException($"invariant=InventoryStackLimitPositive tick={tick} entityId={playerInventory.EntityId.Value} stackLimit={inventory.StackLimit}");
+            }
+
+            for (int i = 0; i < inventory.Slots.Length; i++)
+            {
+                InventorySlot slot = inventory.Slots[i];
+                if (slot.Quantity < 0)
+                {
+                    throw new InvariantViolationException($"invariant=InventoryQuantityNonNegative tick={tick} entityId={playerInventory.EntityId.Value} slot={i} quantity={slot.Quantity}");
+                }
+
+                if (slot.Quantity > inventory.StackLimit)
+                {
+                    throw new InvariantViolationException($"invariant=NoStackOverMax tick={tick} entityId={playerInventory.EntityId.Value} slot={i} quantity={slot.Quantity} stackLimit={inventory.StackLimit}");
+                }
+
+                if (slot.Quantity == 0 && !string.IsNullOrEmpty(slot.ItemId))
+                {
+                    throw new InvariantViolationException($"invariant=EmptyInventorySlotHasNoItemId tick={tick} entityId={playerInventory.EntityId.Value} slot={i}");
+                }
+
+                if (slot.Quantity > 0 && string.IsNullOrWhiteSpace(slot.ItemId))
+                {
+                    throw new InvariantViolationException($"invariant=InventoryItemIdRequired tick={tick} entityId={playerInventory.EntityId.Value} slot={i} quantity={slot.Quantity}");
+                }
+
+            }
+        }
+
         int lastLocationEntityId = int.MinValue;
         foreach (EntityLocation location in world.EntityLocations)
         {

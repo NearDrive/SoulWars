@@ -49,7 +49,11 @@ public sealed class LootServerTests
         Assert.Empty(host.CurrentWorld.LootEntities);
 
         Assert.True(host.TryGetPlayerState(welcome.PlayerId, out PlayerState player));
-        Assert.Equal(2, player.PendingLoot.Length);
+        PlayerInventoryState inventory = Assert.Single(host.CurrentWorld.PlayerInventories);
+        Assert.Equal(player.EntityId, inventory.EntityId.Value);
+        Assert.Equal(3, inventory.Inventory.Slots[0].Quantity);
+        Assert.Equal("gold.coin", inventory.Inventory.Slots[0].ItemId);
+
 
         string dbPath = Path.Combine(Path.GetTempPath(), $"soulwars-loot-{Guid.NewGuid():N}.db");
         try
@@ -63,7 +67,9 @@ public sealed class LootServerTests
                 restarted.CurrentWorld.LootEntities.Select(l => l.Id.Value).Distinct().Count());
 
             Assert.True(restarted.TryGetPlayerState(player.PlayerId, out PlayerState restartedPlayer));
-            Assert.Empty(restartedPlayer.PendingLoot);
+            PlayerInventoryState restartedInventory = Assert.Single(restarted.CurrentWorld.PlayerInventories);
+            Assert.Equal(inventory, restartedInventory);
+
         }
         finally
         {

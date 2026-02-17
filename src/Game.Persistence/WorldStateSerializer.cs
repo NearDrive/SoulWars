@@ -7,12 +7,14 @@ namespace Game.Persistence;
 public static class WorldStateSerializer
 {
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 2;
+    private const int CurrentVersion = 3;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
     private const int MaxEntityCountPerZone = 2_000_000;
     private const int MaxLootEntityCount = 2_000_000;
     private const int MaxLootItemsPerEntity = 4096;
+    private const int MaxInventoryCount = 2_000_000;
+    private const int MaxInventoryCapacity = 4096;
 
     public static void Save(Stream stream, WorldState world)
     {
@@ -38,6 +40,7 @@ public static class WorldStateSerializer
         }
 
         WriteLootEntities(writer, world.LootEntities.IsDefault ? ImmutableArray<LootEntityState>.Empty : world.LootEntities);
+        WritePlayerInventories(writer, world.PlayerInventories.IsDefault ? ImmutableArray<PlayerInventoryState>.Empty : world.PlayerInventories);
     }
 
     public static WorldState Load(Stream stream)
@@ -55,7 +58,7 @@ public static class WorldStateSerializer
             }
 
             int version = reader.ReadInt32();
-            if (version is not (1 or CurrentVersion))
+            if (version is not (1 or 2 or CurrentVersion))
             {
                 throw new InvalidDataException($"Unsupported world-state version '{version}'.");
             }
@@ -87,9 +90,12 @@ public static class WorldStateSerializer
             ImmutableArray<LootEntityState> lootEntities = version >= 2
                 ? ReadLootEntities(reader)
                 : ImmutableArray<LootEntityState>.Empty;
+            ImmutableArray<PlayerInventoryState> playerInventories = version >= 3
+                ? ReadPlayerInventories(reader)
+                : ImmutableArray<PlayerInventoryState>.Empty;
             ImmutableArray<EntityLocation> locations = BuildEntityLocations(immutableZones);
 
-            WorldState loaded = new(tick, immutableZones, locations, lootEntities);
+            WorldState loaded = new(tick, immutableZones, locations, lootEntities, playerInventories);
             CoreInvariants.Validate(loaded, tick);
             return loaded;
         }
@@ -391,6 +397,87 @@ public static class WorldStateSerializer
         }
 
         return loot.MoveToImmutable();
+    }
+
+
+    private static void WritePlayerInventories(BinaryWriter writer, ImmutableArray<PlayerInventoryState> playerInventories)
+    {
+        ImmutableArray<PlayerInventoryState> ordered = playerInventories
+            .OrderBy(i => i.EntityId.Value)
+            .ToImmutableArray();
+
+        writer.Write(ordered.Length);
+        foreach (PlayerInventoryState playerInventory in ordered)
+        {
+            writer.Write(playerInventory.EntityId.Value);
+            writer.Write(playerInventory.Inventory.Capacity);
+            writer.Write(playerInventory.Inventory.StackLimit);
+            writer.Write(playerInventory.Inventory.Slots.Length);
+
+            for (int i = 0; i < playerInventory.Inventory.Slots.Length; i++)
+            {
+                InventorySlot slot = playerInventory.Inventory.Slots[i];
+                writer.Write(slot.ItemId ?? string.Empty);
+                writer.Write(slot.Quantity);
+            }
+        }
+    }
+
+    private static ImmutableArray<PlayerInventoryState> ReadPlayerInventories(BinaryReader reader)
+    {
+        int inventoryCount = reader.ReadInt32();
+        ValidateCount(inventoryCount, MaxInventoryCount, nameof(inventoryCount));
+
+        ImmutableArray<PlayerInventoryState>.Builder inventories = ImmutableArray.CreateBuilder<PlayerInventoryState>(inventoryCount);
+        int previousEntityId = int.MinValue;
+
+        for (int i = 0; i < inventoryCount; i++)
+        {
+            int entityId = reader.ReadInt32();
+            if (entityId <= previousEntityId)
+            {
+                throw new InvalidDataException("Player inventories are not in strictly ascending EntityId order.");
+            }
+
+            previousEntityId = entityId;
+            int capacity = reader.ReadInt32();
+            int stackLimit = reader.ReadInt32();
+            int slotCount = reader.ReadInt32();
+            ValidateCount(capacity, MaxInventoryCapacity, nameof(capacity));
+            ValidateCount(slotCount, MaxInventoryCapacity, nameof(slotCount));
+
+            if (capacity != slotCount)
+            {
+                throw new InvalidDataException("Inventory slot count must equal capacity.");
+            }
+
+            ImmutableArray<InventorySlot>.Builder slots = ImmutableArray.CreateBuilder<InventorySlot>(slotCount);
+            for (int slotIndex = 0; slotIndex < slotCount; slotIndex++)
+            {
+                string itemId = reader.ReadString();
+                int quantity = reader.ReadInt32();
+                if (quantity < 0)
+                {
+                    throw new InvalidDataException($"Inventory quantity cannot be negative: {quantity}.");
+                }
+
+                if (quantity == 0 && itemId.Length != 0)
+                {
+                    throw new InvalidDataException("Empty inventory slots must have empty item ids.");
+                }
+
+                if (quantity > 0 && itemId.Length == 0)
+                {
+                    throw new InvalidDataException("Non-empty inventory slots require an item id.");
+                }
+
+                slots.Add(new InventorySlot(itemId, quantity));
+            }
+
+            inventories.Add(new PlayerInventoryState(new EntityId(entityId), new InventoryComponent(capacity, stackLimit, slots.MoveToImmutable())));
+        }
+
+        return inventories.MoveToImmutable();
     }
 
     private static ImmutableArray<EntityLocation> BuildEntityLocations(ImmutableArray<ZoneState> zones)

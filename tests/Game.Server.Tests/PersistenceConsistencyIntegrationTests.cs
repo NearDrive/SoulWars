@@ -37,7 +37,7 @@ public sealed class PersistenceConsistencyIntegrationTests
             WorldStateSerializer.LoadFromBytes(bytes),
             config.Seed,
             first.GetPlayersSnapshot()
-                .Select(p => new BootstrapPlayerRecord(p.AccountId, p.PlayerId.Value, p.EntityId, p.ZoneId, ImmutableArray<ItemStack>.Empty))
+                .Select(p => new BootstrapPlayerRecord(p.AccountId, p.PlayerId.Value, p.EntityId, p.ZoneId))
                 .ToImmutableArray());
 
         InMemoryAuditSink auditB = new();

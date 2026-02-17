@@ -34,7 +34,7 @@ public sealed class PlayerRegistry
             if (!_byPlayerId.TryGetValue(candidate, out PlayerState? state))
             {
                 PlayerId created = new(candidate);
-                PlayerState newState = new(created, accountId, null, null, false, false, null, null, null, ImmutableArray<ItemStack>.Empty);
+                PlayerState newState = new(created, accountId, null, null, false, false, null, null, null);
                 _byAccount[accountId] = created;
                 _byPlayerId[candidate] = newState;
                 return created;
@@ -85,8 +85,7 @@ public sealed class PlayerRegistry
                 IsConnected: false,
                 AttachedSessionId: null,
                 DisconnectedAtTick: null,
-                DespawnAtTick: null,
-                PendingLoot: player.PendingLoot.IsDefault ? ImmutableArray<ItemStack>.Empty : player.PendingLoot);
+                DespawnAtTick: null);
 
             _byAccount[player.AccountId] = playerId;
             _byPlayerId[playerId.Value] = state;
@@ -136,32 +135,6 @@ public sealed class PlayerRegistry
         }
     }
 
-    public void AppendPendingLootByEntityId(int entityId, ImmutableArray<ItemStack> items)
-    {
-        if (items.IsDefaultOrEmpty)
-        {
-            return;
-        }
-
-        foreach (KeyValuePair<int, PlayerState> pair in _byPlayerId.OrderBy(p => p.Key))
-        {
-            PlayerState state = pair.Value;
-            if (state.EntityId != entityId)
-            {
-                continue;
-            }
-
-            ImmutableArray<ItemStack> merged = state.PendingLoot
-                .AddRange(items)
-                .OrderBy(i => i.ItemId, StringComparer.Ordinal)
-                .ThenBy(i => i.Quantity)
-                .ToImmutableArray();
-
-            _byPlayerId[pair.Key] = state with { PendingLoot = merged };
-            return;
-        }
-    }
-
     private static uint StableHash32(string value)
     {
         const uint offset = 2166136261u;
@@ -188,5 +161,4 @@ public sealed record PlayerState(
     bool IsConnected,
     SessionId? AttachedSessionId,
     int? DisconnectedAtTick,
-    int? DespawnAtTick,
-    ImmutableArray<ItemStack> PendingLoot);
+    int? DespawnAtTick);

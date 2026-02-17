@@ -215,12 +215,7 @@ public sealed class ServerHost
                 TargetEntityId: new EntityId(pending.TargetEntityId)));
         }
 
-        ImmutableArray<LootEntityState> lootBefore = (_world.LootEntities.IsDefault ? ImmutableArray<LootEntityState>.Empty : _world.LootEntities)
-            .OrderBy(l => l.Id.Value)
-            .ToImmutableArray();
-
         _world = Simulation.Step(_simulationConfig, _world, new Inputs(worldCommands.ToImmutableArray()), _simulationInstrumentation);
-        ApplyCollectedLootToPlayers(worldCommands, lootBefore, _world.LootEntities.IsDefault ? ImmutableArray<LootEntityState>.Empty : _world.LootEntities);
 
         HashSet<int> afterSimEntityIds = _world.Zones
             .SelectMany(zone => zone.Entities)
@@ -741,33 +736,6 @@ public sealed class ServerHost
             .ToArray();
     }
 
-
-    private void ApplyCollectedLootToPlayers(IReadOnlyList<WorldCommand> processedCommands, ImmutableArray<LootEntityState> before, ImmutableArray<LootEntityState> after)
-    {
-        Dictionary<int, LootEntityState> beforeById = before.ToDictionary(l => l.Id.Value, l => l);
-        HashSet<int> remainingAfter = after.Select(l => l.Id.Value).ToHashSet();
-
-        foreach (WorldCommand lootCommand in processedCommands
-                     .Where(c => c.Kind == WorldCommandKind.LootIntent)
-                     .OrderBy(c => c.EntityId.Value)
-                     .ThenBy(c => c.LootEntityId!.Value.Value))
-        {
-            if (lootCommand.LootEntityId is null)
-            {
-                continue;
-            }
-
-            int lootEntityId = lootCommand.LootEntityId.Value.Value;
-            if (!beforeById.TryGetValue(lootEntityId, out LootEntityState? loot) ||
-                loot is null ||
-                remainingAfter.Contains(lootEntityId))
-            {
-                continue;
-            }
-
-            _playerRegistry.AppendPendingLootByEntityId(lootCommand.EntityId.Value, loot.Items);
-        }
-    }
 
     private IEnumerable<PendingAttackIntent> OrderedPendingAttackIntents(int targetTick)
     {

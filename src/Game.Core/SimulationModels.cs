@@ -189,6 +189,33 @@ public readonly record struct EntityLocation(EntityId Id, ZoneId ZoneId);
 
 public sealed record ItemStack(string ItemId, int Quantity);
 
+public static class InventoryConstants
+{
+    public const int DefaultCapacity = 20;
+    public const int DefaultStackLimit = 99;
+}
+
+public sealed record InventorySlot(string ItemId, int Quantity)
+{
+    public bool IsEmpty => Quantity == 0;
+}
+
+public sealed record InventoryComponent(int Capacity, int StackLimit, ImmutableArray<InventorySlot> Slots)
+{
+    public static InventoryComponent CreateDefault()
+    {
+        ImmutableArray<InventorySlot>.Builder slots = ImmutableArray.CreateBuilder<InventorySlot>(InventoryConstants.DefaultCapacity);
+        for (int i = 0; i < InventoryConstants.DefaultCapacity; i++)
+        {
+            slots.Add(new InventorySlot(string.Empty, 0));
+        }
+
+        return new InventoryComponent(InventoryConstants.DefaultCapacity, InventoryConstants.DefaultStackLimit, slots.MoveToImmutable());
+    }
+}
+
+public sealed record PlayerInventoryState(EntityId EntityId, InventoryComponent Inventory);
+
 public sealed record LootEntityState(
     EntityId Id,
     ZoneId ZoneId,
@@ -199,7 +226,8 @@ public sealed record WorldState(
     int Tick,
     ImmutableArray<ZoneState> Zones,
     ImmutableArray<EntityLocation> EntityLocations,
-    ImmutableArray<LootEntityState> LootEntities = default)
+    ImmutableArray<LootEntityState> LootEntities = default,
+    ImmutableArray<PlayerInventoryState> PlayerInventories = default)
 {
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
@@ -313,6 +341,16 @@ public sealed record WorldState(
         {
             LootEntities = lootEntities
                 .OrderBy(l => l.Id.Value)
+                .ToImmutableArray()
+        };
+    }
+
+    public WorldState WithPlayerInventories(ImmutableArray<PlayerInventoryState> playerInventories)
+    {
+        return this with
+        {
+            PlayerInventories = playerInventories
+                .OrderBy(i => i.EntityId.Value)
                 .ToImmutableArray()
         };
     }

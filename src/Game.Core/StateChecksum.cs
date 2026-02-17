@@ -46,6 +46,29 @@ public static class StateChecksum
             }
         }
 
+
+        ImmutableArray<PlayerInventoryState> orderedInventories = (state.PlayerInventories.IsDefault ? ImmutableArray<PlayerInventoryState>.Empty : state.PlayerInventories)
+            .OrderBy(i => i.EntityId.Value)
+            .ToImmutableArray();
+        if (!orderedInventories.IsDefaultOrEmpty)
+        {
+            writer.Write(orderedInventories.Length);
+
+            foreach (PlayerInventoryState inv in orderedInventories)
+            {
+                writer.Write(inv.EntityId.Value);
+                writer.Write(inv.Inventory.Capacity);
+                writer.Write(inv.Inventory.StackLimit);
+                writer.Write(inv.Inventory.Slots.Length);
+                for (int i = 0; i < inv.Inventory.Slots.Length; i++)
+                {
+                    InventorySlot slot = inv.Inventory.Slots[i];
+                    writer.Write(slot.ItemId ?? string.Empty);
+                    writer.Write(slot.Quantity);
+                }
+            }
+        }
+
         writer.Flush();
         byte[] hash = SHA256.HashData(stream.ToArray());
 
