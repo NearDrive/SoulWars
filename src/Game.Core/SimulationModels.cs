@@ -237,7 +237,10 @@ public sealed record WorldState(
     ImmutableArray<EntityLocation> EntityLocations,
     ImmutableArray<LootEntityState> LootEntities = default,
     ImmutableArray<PlayerInventoryState> PlayerInventories = default,
-    ImmutableArray<PlayerDeathAuditEntry> PlayerDeathAuditLog = default)
+    ImmutableArray<PlayerDeathAuditEntry> PlayerDeathAuditLog = default,
+    ImmutableArray<PlayerWalletState> PlayerWallets = default,
+    ImmutableArray<VendorTransactionAuditEntry> VendorTransactionAuditLog = default,
+    ImmutableArray<VendorDefinition> Vendors = default)
 {
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
@@ -376,6 +379,44 @@ public sealed record WorldState(
                 .ToImmutableArray()
         };
     }
+
+    public WorldState WithPlayerWallets(ImmutableArray<PlayerWalletState> playerWallets)
+    {
+        return this with
+        {
+            PlayerWallets = playerWallets
+                .OrderBy(w => w.EntityId.Value)
+                .ToImmutableArray()
+        };
+    }
+
+    public WorldState WithVendorTransactionAuditLog(ImmutableArray<VendorTransactionAuditEntry> vendorTransactionAuditLog)
+    {
+        return this with
+        {
+            VendorTransactionAuditLog = vendorTransactionAuditLog
+                .OrderBy(e => e.Tick)
+                .ThenBy(e => e.PlayerEntityId.Value)
+                .ThenBy(e => e.ZoneId.Value)
+                .ThenBy(e => e.VendorId, StringComparer.Ordinal)
+                .ThenBy(e => (int)e.Action)
+                .ThenBy(e => e.ItemId, StringComparer.Ordinal)
+                .ThenBy(e => e.Quantity)
+                .ToImmutableArray()
+        };
+    }
+
+    public WorldState WithVendors(ImmutableArray<VendorDefinition> vendors)
+    {
+        return this with
+        {
+            Vendors = vendors
+                .OrderBy(v => v.ZoneId.Value)
+                .ThenBy(v => v.VendorId, StringComparer.Ordinal)
+                .Select(v => v with { Offers = v.CanonicalOffers })
+                .ToImmutableArray()
+        };
+    }
 }
 
 public enum WorldCommandKind : byte
@@ -385,7 +426,9 @@ public enum WorldCommandKind : byte
     MoveIntent = 3,
     AttackIntent = 4,
     TeleportIntent = 5,
-    LootIntent = 6
+    LootIntent = 6,
+    VendorBuyIntent = 7,
+    VendorSellIntent = 8
 }
 
 public sealed record WorldCommand(
@@ -397,7 +440,10 @@ public sealed record WorldCommand(
     sbyte MoveY = 0,
     Vec2Fix? SpawnPos = null,
     EntityId? TargetEntityId = null,
-    EntityId? LootEntityId = null);
+    EntityId? LootEntityId = null,
+    string VendorId = "",
+    string ItemId = "",
+    int Quantity = 0);
 
 public sealed record Inputs(ImmutableArray<WorldCommand> Commands);
 public sealed record PlayerInput(EntityId EntityId, sbyte MoveX, sbyte MoveY);

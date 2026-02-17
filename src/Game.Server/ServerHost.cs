@@ -20,6 +20,7 @@ public sealed class ServerHost
     private readonly DenyList _denyList = new();
     private readonly Dictionary<string, Queue<int>> _abuseDisconnectTicksByEndpoint = new(StringComparer.Ordinal);
     private readonly ZoneDefinitions? _zoneDefinitions;
+    private readonly ImmutableArray<VendorDefinition> _vendorDefinitions;
 
     private int _nextSessionId = 1;
     private int _nextEntityId = 1;
@@ -42,7 +43,14 @@ public sealed class ServerHost
         _zoneDefinitions = string.IsNullOrWhiteSpace(config.ZoneDefinitionsPath)
             ? null
             : ZoneDefinitionsLoader.LoadFromDirectory(config.ZoneDefinitionsPath);
+        _vendorDefinitions = string.IsNullOrWhiteSpace(config.VendorDefinitionsPath)
+            ? ImmutableArray<VendorDefinition>.Empty
+            : VendorDefinitionsLoader.LoadFromDirectory(config.VendorDefinitionsPath);
         _world = bootstrap?.World ?? Simulation.CreateInitialState(_simulationConfig, _zoneDefinitions);
+        if (!_vendorDefinitions.IsDefaultOrEmpty)
+        {
+            _world = _world.WithVendors(_vendorDefinitions);
+        }
         _nextEntityId = Math.Max(_nextEntityId, ComputeNextEntityId(_world));
         if (bootstrap is not null)
         {

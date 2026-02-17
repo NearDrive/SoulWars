@@ -28,7 +28,8 @@ public readonly record struct ServerConfig(
     InvariantOptions Invariants,
     bool EnableStructuredLogs,
     bool EnableMetrics,
-    string? ZoneDefinitionsPath)
+    string? ZoneDefinitionsPath,
+    string? VendorDefinitionsPath)
 {
     public Fix32 AoiRadius => VisionRadius;
 
@@ -76,5 +77,6 @@ public readonly record struct ServerConfig(
         Invariants: InvariantOptions.Enabled,
         EnableStructuredLogs: false,
         EnableMetrics: true,
-        ZoneDefinitionsPath: null);
+        ZoneDefinitionsPath: null,
+        VendorDefinitionsPath: null);
 }

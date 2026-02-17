@@ -235,6 +235,74 @@ public static class CoreInvariants
             }
         }
 
+
+        int lastWalletEntityId = int.MinValue;
+        foreach (PlayerWalletState wallet in (world.PlayerWallets.IsDefault ? ImmutableArray<PlayerWalletState>.Empty : world.PlayerWallets))
+        {
+            if (wallet.EntityId.Value <= lastWalletEntityId)
+            {
+                throw new InvariantViolationException($"invariant=PlayerWalletsOrdered tick={tick} entityId={wallet.EntityId.Value} lastEntityId={lastWalletEntityId}");
+            }
+
+            lastWalletEntityId = wallet.EntityId.Value;
+            if (wallet.Gold < 0)
+            {
+                throw new InvariantViolationException($"invariant=WalletGoldNonNegative tick={tick} entityId={wallet.EntityId.Value} gold={wallet.Gold}");
+            }
+        }
+
+        int lastVendorZoneId = int.MinValue;
+        string lastVendorId = string.Empty;
+        foreach (VendorDefinition vendor in (world.Vendors.IsDefault ? ImmutableArray<VendorDefinition>.Empty : world.Vendors))
+        {
+            if (vendor.ZoneId.Value < lastVendorZoneId || (vendor.ZoneId.Value == lastVendorZoneId && string.CompareOrdinal(vendor.VendorId, lastVendorId) <= 0))
+            {
+                throw new InvariantViolationException($"invariant=VendorsOrdered tick={tick} zoneId={vendor.ZoneId.Value} vendorId={vendor.VendorId}");
+            }
+
+            if (!world.Zones.Any(z => z.Id.Value == vendor.ZoneId.Value))
+            {
+                throw new InvariantViolationException($"invariant=VendorZoneExists tick={tick} zoneId={vendor.ZoneId.Value} vendorId={vendor.VendorId}");
+            }
+
+            lastVendorZoneId = vendor.ZoneId.Value;
+            lastVendorId = vendor.VendorId;
+
+            string lastItemId = string.Empty;
+            foreach (VendorOfferDefinition offer in vendor.CanonicalOffers)
+            {
+                if (string.CompareOrdinal(offer.ItemId, lastItemId) < 0)
+                {
+                    throw new InvariantViolationException($"invariant=VendorOffersOrdered tick={tick} vendorId={vendor.VendorId} itemId={offer.ItemId}");
+                }
+
+                if (offer.BuyPrice < 0 || offer.SellPrice < 0)
+                {
+                    throw new InvariantViolationException($"invariant=VendorPricesNonNegative tick={tick} vendorId={vendor.VendorId} itemId={offer.ItemId}");
+                }
+
+                lastItemId = offer.ItemId;
+            }
+        }
+
+        int lastVendorAuditTick = int.MinValue;
+        int lastVendorAuditPlayerId = int.MinValue;
+        foreach (VendorTransactionAuditEntry entry in (world.VendorTransactionAuditLog.IsDefault ? ImmutableArray<VendorTransactionAuditEntry>.Empty : world.VendorTransactionAuditLog))
+        {
+            if (entry.Tick < lastVendorAuditTick || (entry.Tick == lastVendorAuditTick && entry.PlayerEntityId.Value < lastVendorAuditPlayerId))
+            {
+                throw new InvariantViolationException($"invariant=VendorAuditOrdered tick={tick} entryTick={entry.Tick} entityId={entry.PlayerEntityId.Value}");
+            }
+
+            lastVendorAuditTick = entry.Tick;
+            lastVendorAuditPlayerId = entry.PlayerEntityId.Value;
+
+            if (entry.GoldAfter < 0 || entry.GoldBefore < 0)
+            {
+                throw new InvariantViolationException($"invariant=VendorAuditGoldNonNegative tick={tick} entityId={entry.PlayerEntityId.Value}");
+            }
+        }
+
         int lastAuditTick = int.MinValue;
         int lastAuditPlayerEntityId = int.MinValue;
         foreach (PlayerDeathAuditEntry entry in (world.PlayerDeathAuditLog.IsDefault ? ImmutableArray<PlayerDeathAuditEntry>.Empty : world.PlayerDeathAuditLog))
