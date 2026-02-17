@@ -23,11 +23,14 @@ public sealed class SqlitePersistenceTests
             SqliteGameStore store = new(dbPath);
             string expectedChecksum = StateChecksum.Compute(host.CurrentWorld);
 
+            SnapshotMeta snapshotMeta = SnapshotMetaBuilder.Create(host.CurrentWorld, ServerConfig.Default(seed: 201).ToSimulationConfig(), zoneDefinitions: null, buildHash: null);
+
             store.SaveWorld(
                 host.CurrentWorld,
                 serverSeed: 201,
                 players: Array.Empty<PlayerRecord>(),
-                checksumHex: expectedChecksum);
+                checksumHex: expectedChecksum,
+                snapshotMeta: snapshotMeta);
 
             LoadResult loaded = store.LoadWorld();
             string loadedChecksum = StateChecksum.Compute(loaded.World);
@@ -148,6 +151,60 @@ INSERT INTO meta (key, value) VALUES ('schema_version', $version);";
             string restartChecksum = StateChecksum.Compute(second.CurrentWorld);
 
             Assert.Equal(baselineChecksum, restartChecksum);
+        }
+        finally
+        {
+            TryDelete(dbPath);
+        }
+    }
+
+
+    [Fact]
+    public void LoadFromSqlite_ChecksumMatchesStored()
+    {
+        string dbPath = CreateTempDbPath();
+        try
+        {
+            ServerConfig config = ServerConfig.Default(seed: 512);
+            ServerHost host = new(config);
+            host.AdvanceTicks(25);
+            string expectedChecksum = StateChecksum.Compute(host.CurrentWorld);
+
+            host.SaveToSqlite(dbPath);
+
+            ServerHost loaded = ServerHost.LoadFromSqlite(config, dbPath);
+            string loadedChecksum = StateChecksum.Compute(loaded.CurrentWorld);
+
+            Assert.Equal(expectedChecksum, loadedChecksum);
+        }
+        finally
+        {
+            TryDelete(dbPath);
+        }
+    }
+
+    [Fact]
+    public void LoadFromSqlite_BadChecksum_Fails()
+    {
+        string dbPath = CreateTempDbPath();
+        try
+        {
+            ServerConfig config = ServerConfig.Default(seed: 777);
+            ServerHost host = new(config);
+            host.AdvanceTicks(10);
+            host.SaveToSqlite(dbPath);
+
+            using (SqliteConnection connection = new($"Data Source={dbPath}"))
+            {
+                connection.Open();
+                using SqliteCommand command = connection.CreateCommand();
+                command.CommandText = "UPDATE world_snapshots SET checksum = '00000000000000000000000000000000' WHERE id = (SELECT id FROM world_snapshots ORDER BY saved_at_tick DESC, id DESC LIMIT 1);";
+                command.ExecuteNonQuery();
+            }
+
+            SnapshotChecksumMismatchException ex = Assert.Throws<SnapshotChecksumMismatchException>(() => ServerHost.LoadFromSqlite(config, dbPath));
+            Assert.Contains("expected=", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("actual=", ex.Message, StringComparison.Ordinal);
         }
         finally
         {

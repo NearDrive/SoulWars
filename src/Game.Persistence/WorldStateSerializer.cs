@@ -8,6 +8,7 @@ public static class WorldStateSerializer
 {
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
     private const int CurrentVersion = 4;
+    public static int SerializerVersion => CurrentVersion;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
     private const int MaxEntityCountPerZone = 2_000_000;
