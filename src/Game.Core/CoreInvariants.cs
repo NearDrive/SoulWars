@@ -185,7 +185,7 @@ public static class CoreInvariants
 
             int lootTileX = Fix32.FloorToInt(loot.Pos.X);
             int lootTileY = Fix32.FloorToInt(loot.Pos.Y);
-            if (!lootZone.Map.IsInside(lootTileX, lootTileY))
+            if (lootTileX < 0 || lootTileY < 0 || lootTileX >= lootZone.Map.Width || lootTileY >= lootZone.Map.Height)
             {
                 throw new InvariantViolationException($"invariant=LootInsideBounds tick={tick} lootEntityId={loot.Id.Value} tileX={lootTileX} tileY={lootTileY}");
             }
