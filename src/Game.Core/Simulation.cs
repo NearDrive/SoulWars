@@ -102,6 +102,9 @@ public static class Simulation
             .ThenBy(x => x.Index)
             .ToImmutableArray();
 
+        Dictionary<int, int> projectedTeleportZones = updated.EntityLocations
+            .ToDictionary(location => location.Id.Value, location => location.ZoneId.Value);
+
         foreach (WorldCommand command in commands.Where(c => c.Kind == WorldCommandKind.TeleportIntent))
         {
             if (!IsValidCommand(command))
@@ -109,7 +112,7 @@ public static class Simulation
                 continue;
             }
 
-            QueueTeleportIntent(config, updated, command, pendingTransfers, instrumentation);
+            QueueTeleportIntent(config, updated, command, pendingTransfers, projectedTeleportZones, instrumentation);
         }
 
         foreach ((ZoneId zoneId, ImmutableArray<WorldCommand> zoneCommands) in orderedCommands
@@ -123,7 +126,7 @@ public static class Simulation
                 continue;
             }
 
-            ZoneState nextZone = ProcessZoneCommands(config, updated.Tick, zone, zoneCommands, pendingTransfers, instrumentation);
+            ZoneState nextZone = ProcessZoneCommands(config, updated.Tick, zone, zoneCommands, instrumentation);
             updated = updated.WithZoneUpdated(nextZone);
             updated = RebuildEntityLocations(updated);
         }
@@ -1042,7 +1045,13 @@ public static class Simulation
     }
 
 
-    private static void QueueTeleportIntent(SimulationConfig config, WorldState state, WorldCommand command, List<ZoneTransferEvent> pendingTransfers, SimulationInstrumentation? instrumentation)
+    private static void QueueTeleportIntent(
+        SimulationConfig config,
+        WorldState state,
+        WorldCommand command,
+        List<ZoneTransferEvent> pendingTransfers,
+        Dictionary<int, int> projectedTeleportZones,
+        SimulationInstrumentation? instrumentation)
     {
         if (command.ToZoneId is null)
         {
@@ -1057,27 +1066,56 @@ public static class Simulation
             return;
         }
 
-        if (!state.TryGetZone(fromZoneId, out ZoneState fromZone) || !state.TryGetZone(toZoneId, out ZoneState toZone))
+        if (!state.TryGetZone(toZoneId, out ZoneState toZone))
         {
             return;
         }
 
-        int fromIndex = ZoneEntities.FindIndex(fromZone.EntitiesData.AliveIds, command.EntityId);
-        if (fromIndex < 0)
+        if (!projectedTeleportZones.TryGetValue(command.EntityId.Value, out int projectedZoneValue) || projectedZoneValue != fromZoneId.Value)
         {
             return;
         }
 
         Vec2Fix spawn = FindSpawn(toZone.Map, config.Radius);
-        ZoneTransferEvent transfer = new(
-            FromZoneId: fromZoneId.Value,
-            ToZoneId: toZoneId.Value,
-            EntityId: command.EntityId,
-            Position: spawn,
-            Reason: 1u,
-            Tick: state.Tick + 1);
-        pendingTransfers.Add(transfer);
-        instrumentation?.OnZoneTransferQueued?.Invoke(transfer);
+
+        int existingIndex = pendingTransfers.FindIndex(t => t.EntityId.Value == command.EntityId.Value);
+        if (existingIndex >= 0)
+        {
+            ZoneTransferEvent existing = pendingTransfers[existingIndex];
+            ZoneTransferEvent chained = existing with
+            {
+                ToZoneId = toZoneId.Value,
+                Position = spawn,
+                Tick = state.Tick
+            };
+            pendingTransfers[existingIndex] = chained;
+            instrumentation?.OnZoneTransferQueued?.Invoke(chained);
+        }
+        else
+        {
+            if (!state.TryGetZone(fromZoneId, out ZoneState fromZone))
+            {
+                return;
+            }
+
+            int fromIndex = ZoneEntities.FindIndex(fromZone.EntitiesData.AliveIds, command.EntityId);
+            if (fromIndex < 0)
+            {
+                return;
+            }
+
+            ZoneTransferEvent transfer = new(
+                FromZoneId: fromZoneId.Value,
+                ToZoneId: toZoneId.Value,
+                EntityId: command.EntityId,
+                Position: spawn,
+                Reason: 1u,
+                Tick: state.Tick);
+            pendingTransfers.Add(transfer);
+            instrumentation?.OnZoneTransferQueued?.Invoke(transfer);
+        }
+
+        projectedTeleportZones[command.EntityId.Value] = toZoneId.Value;
     }
 
     private static WorldState ApplyTransfers(WorldState state, List<ZoneTransferEvent> pendingTransfers, SimulationInstrumentation? instrumentation)
@@ -1187,7 +1225,7 @@ public static class Simulation
             .ToImmutableArray();
     }
 
-    private static ZoneState ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<WorldCommand> zoneCommands, List<ZoneTransferEvent> pendingTransfers, SimulationInstrumentation? instrumentation)
+    private static ZoneState ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<WorldCommand> zoneCommands, SimulationInstrumentation? instrumentation)
     {
         ZoneState current = zone;
 
@@ -1208,7 +1246,7 @@ public static class Simulation
                 continue;
             }
 
-            current = ApplyMoveIntent(config, current, command, pendingTransfers, instrumentation);
+            current = ApplyMoveIntent(config, current, command, instrumentation: instrumentation);
         }
 
         foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.AttackIntent))
@@ -1310,7 +1348,7 @@ public static class Simulation
             .ToImmutableArray());
     }
 
-    private static ZoneState ApplyMoveIntent(SimulationConfig config, ZoneState zone, WorldCommand command, List<ZoneTransferEvent>? pendingTransfers = null, SimulationInstrumentation? instrumentation = null)
+    private static ZoneState ApplyMoveIntent(SimulationConfig config, ZoneState zone, WorldCommand command, SimulationInstrumentation? instrumentation = null)
     {
         ImmutableArray<EntityState> entities = zone.Entities;
         int entityIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.EntityId);
@@ -1339,23 +1377,6 @@ public static class Simulation
             config.Radius,
             instrumentation?.CountCollisionChecks);
 
-        if (pendingTransfers is not null && config.ZoneCount > 1)
-        {
-            ZoneId? boundaryTarget = ResolveBoundaryTransferTarget(zone.Id, updated.Pos, zone.Map, config.ZoneCount);
-            if (boundaryTarget is not null)
-            {
-                ZoneTransferEvent transfer = new(
-                    FromZoneId: zone.Id.Value,
-                    ToZoneId: boundaryTarget.Value.Value,
-                    EntityId: updated.Id,
-                    Position: ClampPositionToZone(updated.Pos, zone.Map),
-                    Reason: 2u,
-                    Tick: -1);
-                pendingTransfers.Add(transfer);
-                instrumentation?.OnZoneTransferQueued?.Invoke(transfer);
-            }
-        }
-
         ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
 
         for (int i = 0; i < entities.Length; i++)
@@ -1367,41 +1388,6 @@ public static class Simulation
             .ToImmutable()
             .OrderBy(e => e.Id.Value)
             .ToImmutableArray());
-    }
-
-    private static ZoneId? ResolveBoundaryTransferTarget(ZoneId currentZone, Vec2Fix position, TileMap map, int zoneCount)
-    {
-        if (zoneCount <= 1)
-        {
-            return null;
-        }
-
-        Fix32 min = new(Fix32.OneRaw);
-        Fix32 maxX = Fix32.FromInt(map.Width - 1);
-
-        if (position.X.Raw >= maxX.Raw)
-        {
-            int nextZone = currentZone.Value == zoneCount ? 1 : currentZone.Value + 1;
-            return new ZoneId(nextZone);
-        }
-
-        if (position.X.Raw <= min.Raw)
-        {
-            int prevZone = currentZone.Value == 1 ? zoneCount : currentZone.Value - 1;
-            return new ZoneId(prevZone);
-        }
-
-        return null;
-    }
-
-    private static Vec2Fix ClampPositionToZone(Vec2Fix position, TileMap map)
-    {
-        Fix32 min = new(Fix32.OneRaw);
-        Fix32 maxX = Fix32.FromInt(map.Width - 1);
-        Fix32 maxY = Fix32.FromInt(map.Height - 1);
-        Fix32 x = Fix32.Clamp(position.X, min, maxX);
-        Fix32 y = Fix32.Clamp(position.Y, min, maxY);
-        return new Vec2Fix(x, y);
     }
 
     private static ZoneState ApplyAttackIntent(int tick, ZoneState zone, WorldCommand command)

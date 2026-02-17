@@ -52,7 +52,18 @@ public sealed class ZoneTransferTests
         (ImmutableArray<ZoneTransferEvent> applied, string checksum) runB = RunSameTickTransfers(config);
 
         Assert.Equal(runA.checksum, runB.checksum);
-        Assert.Equal(runA.applied, runB.applied);
+
+        Assert.Equal(runA.applied.Length, runB.applied.Length);
+        for (int i = 0; i < runA.applied.Length; i++)
+        {
+            Assert.Equal(runA.applied[i].FromZoneId, runB.applied[i].FromZoneId);
+            Assert.Equal(runA.applied[i].ToZoneId, runB.applied[i].ToZoneId);
+            Assert.Equal(runA.applied[i].EntityId, runB.applied[i].EntityId);
+            Assert.Equal(runA.applied[i].Position.X.Raw, runB.applied[i].Position.X.Raw);
+            Assert.Equal(runA.applied[i].Position.Y.Raw, runB.applied[i].Position.Y.Raw);
+            Assert.Equal(runA.applied[i].Reason, runB.applied[i].Reason);
+            Assert.Equal(runA.applied[i].Tick, runB.applied[i].Tick);
+        }
 
         ImmutableArray<ZoneTransferEvent> expectedOrder = runA.applied
             .OrderBy(e => e.FromZoneId)
@@ -63,19 +74,29 @@ public sealed class ZoneTransferTests
     }
 
     [Fact]
-    public void ZoneTransfer_NoDuplicatesPerTick_FailsFast()
+    public void ZoneTransfer_ChainedSameTick_CollapsesToSingleAppliedTransfer()
     {
-        SimulationConfig config = CreateConfig(seed: 3003) with { ZoneCount = 2 };
+        SimulationConfig config = CreateConfig(seed: 3003) with { ZoneCount = 3 };
         WorldState state = Simulation.CreateInitialState(config);
 
         state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
-            new WorldCommand(WorldCommandKind.EnterZone, new EntityId(1), new ZoneId(1)))));
+            new WorldCommand(WorldCommandKind.EnterZone, new EntityId(1), new ZoneId(2)))));
 
-        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
-            new WorldCommand(WorldCommandKind.TeleportIntent, new EntityId(1), new ZoneId(1), ToZoneId: new ZoneId(2)),
-            new WorldCommand(WorldCommandKind.TeleportIntent, new EntityId(1), new ZoneId(1), ToZoneId: new ZoneId(2))))));
+        List<ZoneTransferEvent> applied = new();
+        SimulationInstrumentation instrumentation = new()
+        {
+            OnZoneTransferApplied = applied.Add
+        };
 
-        Assert.Contains("Duplicate ZoneTransferEvent", ex.Message, StringComparison.Ordinal);
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.TeleportIntent, new EntityId(1), new ZoneId(2), ToZoneId: new ZoneId(1)),
+            new WorldCommand(WorldCommandKind.TeleportIntent, new EntityId(1), new ZoneId(1), ToZoneId: new ZoneId(3)))), instrumentation);
+
+        Assert.Single(applied);
+        Assert.Equal(2, applied[0].FromZoneId);
+        Assert.Equal(3, applied[0].ToZoneId);
+        Assert.True(state.TryGetEntityZone(new EntityId(1), out ZoneId zoneId));
+        Assert.Equal(3, zoneId.Value);
     }
 
     [Fact]
