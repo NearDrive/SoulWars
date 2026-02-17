@@ -159,7 +159,7 @@ public static class ReplayRunner
                 ReplayMismatchSummary summary = BuildSummary(expectedTickReports, actualTickReports, divergentTick, expectedChecksum, finalChecksum);
                 string artifactsDirectory = WriteMismatchArtifacts(header, verifyOptions, expectedChecksum, finalChecksum, expectedTickReports, actualTickReports, summary);
                 string message =
-                    $"Replay checksum mismatch. {summary.ToSingleLine()} artifacts={artifactsDirectory}";
+                    $"Replay checksum mismatch. expected_checksum={expectedChecksum} actual_checksum={finalChecksum} {summary.ToSingleLine()} artifact_output_dir={artifactsDirectory}";
                 logger.LogError(BotRunnerLogEvents.ScenarioEnd, "{Message}", message);
                 throw new ReplayVerificationException(message, divergentTick, expectedChecksum, finalChecksum, artifactsDirectory);
             }
@@ -250,6 +250,8 @@ public static class ReplayRunner
 
         return new ReplayMismatchSummary(
             FirstDivergentTick: firstTick,
+            ExpectedFinalChecksum: expectedFinalChecksum,
+            ActualFinalChecksum: actualFinalChecksum,
             ExpectedChecksumAtTick: expectedChecksumAtTick,
             ActualChecksumAtTick: actualChecksumAtTick,
             EntityCountByTypeDiffs: BuildCountIntDiffs(expectedTickReport?.EntityCountByType ?? [], actualTickReport?.EntityCountByType ?? [], topN),
@@ -301,6 +303,8 @@ public static class ReplayRunner
 
 public sealed record ReplayMismatchSummary(
     int FirstDivergentTick,
+    string ExpectedFinalChecksum,
+    string ActualFinalChecksum,
     string ExpectedChecksumAtTick,
     string ActualChecksumAtTick,
     IReadOnlyList<ReplayMismatchDiffInt> EntityCountByTypeDiffs,
@@ -310,7 +314,7 @@ public sealed record ReplayMismatchSummary(
 {
     public string ToSingleLine()
     {
-        return $"FirstDivergentTick={FirstDivergentTick} ExpectedChecksumAtTick={ExpectedChecksumAtTick} ActualChecksumAtTick={ActualChecksumAtTick}";
+        return $"FirstDivergentTick={FirstDivergentTick} expected_checksum={ExpectedFinalChecksum} actual_checksum={ActualFinalChecksum} ExpectedChecksumAtTick={ExpectedChecksumAtTick} ActualChecksumAtTick={ActualChecksumAtTick}";
     }
 
     public string ToText()
@@ -318,6 +322,8 @@ public sealed record ReplayMismatchSummary(
         List<string> lines =
         [
             $"FirstDivergentTick={FirstDivergentTick}",
+            $"ExpectedFinalChecksum={ExpectedFinalChecksum}",
+            $"ActualFinalChecksum={ActualFinalChecksum}",
             $"ExpectedChecksumAtTick={ExpectedChecksumAtTick}",
             $"ActualChecksumAtTick={ActualChecksumAtTick}",
             $"LootCountDiff={LootCountDiff}",

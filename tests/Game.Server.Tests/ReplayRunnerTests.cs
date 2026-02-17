@@ -39,6 +39,43 @@ public sealed class ReplayRunnerTests
         Assert.StartsWith(BaselineChecksums.ReplayBaselinePrefix, replayChecksumSecond, StringComparison.Ordinal);
     }
 
+
+    [Fact]
+    public async Task ReplayVerify_Pass_EmitsNoArtifacts()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "soulwars-pr47-tests", nameof(ReplayVerify_Pass_EmitsNoArtifacts));
+        if (Directory.Exists(tempRoot))
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+
+        Directory.CreateDirectory(tempRoot);
+
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(20));
+        ReplayExecutionResult replayResult = await Task.Run(() =>
+        {
+            using Stream replayStream = OpenFixtureStream();
+            return ReplayRunner.RunReplayWithExpected(replayStream, verifyOptions: new ReplayVerifyOptions(tempRoot));
+        }, cts.Token).WaitAsync(cts.Token);
+
+        if (!string.IsNullOrWhiteSpace(replayResult.ExpectedChecksum))
+        {
+            Assert.Equal(TestChecksum.NormalizeFullHex(replayResult.ExpectedChecksum), TestChecksum.NormalizeFullHex(replayResult.Checksum));
+        }
+        else
+        {
+            ReplayExecutionResult replayResultSecond = await Task.Run(() =>
+            {
+                using Stream replayStream = OpenFixtureStream();
+                return ReplayRunner.RunReplayWithExpected(replayStream, verifyOptions: new ReplayVerifyOptions(tempRoot));
+            }, cts.Token).WaitAsync(cts.Token);
+
+            Assert.Equal(TestChecksum.NormalizeFullHex(replayResult.Checksum), TestChecksum.NormalizeFullHex(replayResultSecond.Checksum));
+        }
+
+        Assert.Empty(Directory.GetFiles(tempRoot));
+    }
+
     [Fact]
     public void ReplayVerify_Mismatch_EmitsArtifacts()
     {
@@ -82,7 +119,9 @@ public sealed class ReplayRunnerTests
         Assert.Contains("FirstDivergentTick=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("ExpectedChecksumAtTick=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("ActualChecksumAtTick=", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("artifacts=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("artifact_output_dir=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("expected_checksum=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("actual_checksum=", ex.Message, StringComparison.Ordinal);
         Assert.Equal(tempRoot, ex.ArtifactsDirectory);
     }
 
@@ -97,6 +136,8 @@ public sealed class ReplayRunnerTests
         Assert.Contains("FirstDivergentTick=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("ExpectedChecksumAtTick=", ex.Message, StringComparison.Ordinal);
         Assert.Contains("ActualChecksumAtTick=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("expected_checksum=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("actual_checksum=", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -121,6 +162,8 @@ public sealed class ReplayRunnerTests
         Assert.Contains("FirstDivergentTick=", summaryText, StringComparison.Ordinal);
         Assert.Contains("ExpectedChecksumAtTick=", summaryText, StringComparison.Ordinal);
         Assert.Contains("ActualChecksumAtTick=", summaryText, StringComparison.Ordinal);
+        Assert.Contains("ExpectedFinalChecksum=", summaryText, StringComparison.Ordinal);
+        Assert.Contains("ActualFinalChecksum=", summaryText, StringComparison.Ordinal);
         Assert.Contains($"FirstDivergentTick={ex.DivergentTick}", summaryText, StringComparison.Ordinal);
     }
 
