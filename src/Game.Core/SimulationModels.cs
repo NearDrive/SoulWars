@@ -189,6 +189,14 @@ public sealed record ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData
 
 public readonly record struct EntityLocation(EntityId Id, ZoneId ZoneId);
 
+public readonly record struct ZoneTransferEvent(
+    int FromZoneId,
+    int ToZoneId,
+    EntityId EntityId,
+    Vec2Fix Position,
+    uint Reason,
+    int Tick);
+
 public sealed record ItemStack(string ItemId, int Quantity);
 
 public static class InventoryConstants
