@@ -84,9 +84,12 @@ public sealed class Mvp9InvariantsTests
         }
 
         Snapshot first = snapshots[0];
-        SnapshotEntity[] unsorted = first.Entities
-            .OrderByDescending(e => e.EntityId)
-            .ToArray();
+        SnapshotEntity[] unsorted =
+        [
+            new SnapshotEntity(EntityId: 11, PosXRaw: 0, PosYRaw: 0),
+            new SnapshotEntity(EntityId: 3, PosXRaw: 0, PosYRaw: 0),
+            new SnapshotEntity(EntityId: 15, PosXRaw: 0, PosYRaw: 0)
+        ];
 
         InvariantViolationException ex = Assert.Throws<InvariantViolationException>(() =>
             WorldInvariants.AssertSortedAscending(unsorted, x => x.EntityId, "snapshot.entities", tick: first.Tick, zoneId: first.ZoneId));
