@@ -116,7 +116,7 @@ public static class Simulation
         }
 
         foreach ((ZoneId zoneId, ImmutableArray<WorldCommand> zoneCommands) in orderedCommands
-                     .Where(x => x.Command.Kind is WorldCommandKind.EnterZone or WorldCommandKind.MoveIntent or WorldCommandKind.AttackIntent or WorldCommandKind.LeaveZone or WorldCommandKind.LootIntent)
+                     .Where(x => x.Command.Kind is WorldCommandKind.EnterZone or WorldCommandKind.MoveIntent or WorldCommandKind.AttackIntent or WorldCommandKind.CastSkill or WorldCommandKind.LeaveZone or WorldCommandKind.LootIntent)
                      .GroupBy(x => x.Command.ZoneId.Value)
                      .OrderBy(g => g.Key)
                      .Select(g => (new ZoneId(g.Key), g.Select(v => v.Command).ToImmutableArray())))
@@ -1259,6 +1259,18 @@ public static class Simulation
             current = ApplyAttackIntent(tick, current, command);
         }
 
+        foreach (WorldCommand command in zoneCommands
+                     .Where(c => c.Kind is WorldCommandKind.CastSkill)
+                     .OrderBy(c => c.EntityId.Value))
+        {
+            if (!IsValidCommand(command))
+            {
+                continue;
+            }
+
+            current = ApplyCastSkill(config, tick, current, command);
+        }
+
         foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.LeaveZone))
         {
             if (!IsValidCommand(command))
@@ -1295,6 +1307,19 @@ public static class Simulation
         if (command.Kind is WorldCommandKind.LootIntent && command.LootEntityId is null)
         {
             return false;
+        }
+
+        if (command.Kind is WorldCommandKind.CastSkill)
+        {
+            if (command.SkillId is null)
+            {
+                return false;
+            }
+
+            if (command.TargetKind == CastTargetKind.Entity && command.TargetEntityId is null)
+            {
+                return false;
+            }
         }
 
         if (command.Kind is WorldCommandKind.VendorBuyIntent or WorldCommandKind.VendorSellIntent)
@@ -1465,6 +1490,155 @@ public static class Simulation
             .ToImmutable()
             .OrderBy(e => e.Id.Value)
             .ToImmutableArray());
+    }
+
+    private static ZoneState ApplyCastSkill(SimulationConfig config, int tick, ZoneState zone, WorldCommand command)
+    {
+        CastResult result = ValidateCastSkill(config, tick, zone, command);
+        if (result != CastResult.Ok)
+        {
+            return zone;
+        }
+
+        if (command.SkillId is null)
+        {
+            return zone;
+        }
+
+        SkillDefinition? skill = FindSkill(config, command.SkillId.Value);
+        if (skill is null)
+        {
+            return zone;
+        }
+
+        ImmutableArray<EntityState> entities = zone.Entities;
+        int casterIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.EntityId);
+        if (casterIndex < 0)
+        {
+            return zone;
+        }
+
+        EntityState caster = entities[casterIndex];
+        EntityState updatedCaster = caster with
+        {
+            LastAttackTick = tick,
+            AttackCooldownTicks = skill.Value.CooldownTicks
+        };
+
+        ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
+        for (int i = 0; i < entities.Length; i++)
+        {
+            builder.Add(i == casterIndex ? updatedCaster : entities[i]);
+        }
+
+        return zone.WithEntities(builder
+            .ToImmutable()
+            .OrderBy(e => e.Id.Value)
+            .ToImmutableArray());
+    }
+
+    public static CastResult ValidateCastSkill(SimulationConfig config, int tick, ZoneState zone, WorldCommand command)
+    {
+        if (command.SkillId is null)
+        {
+            return CastResult.Rejected_NoSuchSkill;
+        }
+
+        SkillDefinition? skill = FindSkill(config, command.SkillId.Value);
+        if (skill is null)
+        {
+            return CastResult.Rejected_NoSuchSkill;
+        }
+
+        int casterIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.EntityId);
+        if (casterIndex < 0)
+        {
+            return CastResult.Rejected_NoSuchCaster;
+        }
+
+        ImmutableArray<EntityState> entities = zone.Entities;
+        EntityState caster = entities[casterIndex];
+
+        if (!caster.IsAlive)
+        {
+            return CastResult.Rejected_NoSuchCaster;
+        }
+
+        if (tick - caster.LastAttackTick < caster.AttackCooldownTicks)
+        {
+            return CastResult.Rejected_OnCooldown;
+        }
+
+        if (skill.Value.ResourceCost > 0)
+        {
+            return CastResult.Rejected_NotEnoughResource;
+        }
+
+        if (skill.Value.TargetKind != command.TargetKind)
+        {
+            return CastResult.Rejected_InvalidTarget;
+        }
+
+        Vec2Fix targetPos;
+        if (command.TargetKind == CastTargetKind.Self)
+        {
+            targetPos = caster.Pos;
+        }
+        else if (command.TargetKind == CastTargetKind.Entity)
+        {
+            if (command.TargetEntityId is null)
+            {
+                return CastResult.Rejected_InvalidTarget;
+            }
+
+            int targetIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.TargetEntityId.Value);
+            if (targetIndex < 0)
+            {
+                return CastResult.Rejected_InvalidTarget;
+            }
+
+            EntityState target = entities[targetIndex];
+            if (!target.IsAlive)
+            {
+                return CastResult.Rejected_InvalidTarget;
+            }
+
+            targetPos = target.Pos;
+        }
+        else
+        {
+            targetPos = new Vec2Fix(Fix32.FromRaw(command.TargetPosXRaw), Fix32.FromRaw(command.TargetPosYRaw));
+        }
+
+        Fix32 dx = caster.Pos.X - targetPos.X;
+        Fix32 dy = caster.Pos.Y - targetPos.Y;
+        Fix32 distSq = (dx * dx) + (dy * dy);
+        Fix32 range = Fix32.FromRaw(skill.Value.RangeQRaw);
+        Fix32 rangeSq = range * range;
+
+        if (distSq > rangeSq)
+        {
+            return CastResult.Rejected_OutOfRange;
+        }
+
+        return CastResult.Ok;
+    }
+
+    private static SkillDefinition? FindSkill(SimulationConfig config, SkillId skillId)
+    {
+        ImmutableArray<SkillDefinition> skills = config.SkillDefinitions.IsDefault
+            ? ImmutableArray<SkillDefinition>.Empty
+            : config.SkillDefinitions;
+
+        for (int i = 0; i < skills.Length; i++)
+        {
+            if (skills[i].Id.Value == skillId.Value)
+            {
+                return skills[i];
+            }
+        }
+
+        return null;
     }
 
     private static Vec2Fix FindSpawn(TileMap map, Fix32 radius)

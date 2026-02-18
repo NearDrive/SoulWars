@@ -1,5 +1,7 @@
 namespace Game.Core;
 
+using System.Collections.Immutable;
+
 public readonly record struct SimulationConfig(
     int Seed,
     int TickHz,
@@ -13,7 +15,8 @@ public readonly record struct SimulationConfig(
     int NpcCountPerZone,
     int NpcWanderPeriodTicks,
     Fix32 NpcAggroRange,
-    InvariantOptions Invariants)
+    InvariantOptions Invariants,
+    ImmutableArray<SkillDefinition> SkillDefinitions = default)
 {
     public static SimulationConfig Default(int seed) => new(
         Seed: seed,
@@ -28,5 +31,6 @@ public readonly record struct SimulationConfig(
         NpcCountPerZone: 0,
         NpcWanderPeriodTicks: 30,
         NpcAggroRange: Fix32.FromInt(6),
+        SkillDefinitions: ImmutableArray<SkillDefinition>.Empty,
         Invariants: InvariantOptions.Enabled);
 }
