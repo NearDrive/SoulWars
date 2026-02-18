@@ -164,7 +164,7 @@ public static class CoreInvariants
                 throw new InvariantViolationException($"invariant=UniqueLootEntityId tick={tick} lootEntityId={loot.Id.Value}");
             }
 
-            if (seenEntityIds.Contains(loot.Id.Value))
+            if (entityZones.ContainsKey(loot.Id.Value))
             {
                 throw new InvariantViolationException($"invariant=LootEntityIdCollision tick={tick} lootEntityId={loot.Id.Value}");
             }
