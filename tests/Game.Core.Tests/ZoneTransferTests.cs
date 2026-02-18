@@ -74,6 +74,33 @@ public sealed class ZoneTransferTests
     }
 
     [Fact]
+    public void TransferQueue_IsDeterministic()
+    {
+        SimulationConfig config = CreateConfig(seed: 2112) with { ZoneCount = 2 };
+
+        (ImmutableArray<ZoneTransferEvent> applied, string checksum) runA = RunSameTickTransfers(config);
+        (ImmutableArray<ZoneTransferEvent> applied, string checksum) runB = RunSameTickTransfers(config);
+
+        Assert.Equal(runA.applied.ToArray(), runB.applied.ToArray());
+    }
+
+    [Fact]
+    public void ZoneTransfer_NoDuplicateInvariant()
+    {
+        SimulationConfig config = CreateConfig(seed: 2244) with { ZoneCount = 2 };
+        WorldState state = Simulation.CreateInitialState(config);
+
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.EnterZone, new EntityId(1), new ZoneId(1)))));
+
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.TeleportIntent, new EntityId(1), new ZoneId(1), ToZoneId: new ZoneId(2)))));
+
+        int count = state.Zones.Sum(zone => zone.Entities.Count(entity => entity.Id.Value == 1));
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
     public void ZoneTransfer_ChainedSameTick_CollapsesToSingleAppliedTransfer()
     {
         SimulationConfig config = CreateConfig(seed: 3003) with { ZoneCount = 3 };
@@ -108,6 +135,40 @@ public sealed class ZoneTransferTests
         ImmutableArray<string> globalsB = RunChecksumsWithTransfer(config, ticks: 8);
 
         Assert.Equal(globalsA.ToArray(), globalsB.ToArray());
+    }
+
+    [Fact]
+    public void ZoneTransfer_ReplayStable()
+    {
+        SimulationConfig config = CreateConfig(seed: 4111) with { ZoneCount = 2 };
+
+        ImmutableArray<string> runA = RunChecksumsWithTransfer(config, ticks: 16);
+        ImmutableArray<string> runB = RunChecksumsWithTransfer(config, ticks: 16);
+
+        Assert.Equal(runA.ToArray(), runB.ToArray());
+    }
+
+    [Fact]
+    public void ZoneTransfer_RestartStable()
+    {
+        SimulationConfig config = CreateConfig(seed: 4222) with { ZoneCount = 2 };
+        WorldState before = Simulation.CreateInitialState(config);
+
+        before = Simulation.Step(config, before, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.EnterZone, new EntityId(1), new ZoneId(1)))));
+
+        before = Simulation.Step(config, before, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.TeleportIntent, new EntityId(1), new ZoneId(1), ToZoneId: new ZoneId(2)))));
+
+        byte[] snapshot = Game.Persistence.WorldStateSerializer.SaveToBytes(before);
+        WorldState resumed = Game.Persistence.WorldStateSerializer.LoadFromBytes(snapshot);
+
+        for (int tick = 0; tick < 8; tick++)
+        {
+            before = Simulation.Step(config, before, new Inputs(ImmutableArray<WorldCommand>.Empty));
+            resumed = Simulation.Step(config, resumed, new Inputs(ImmutableArray<WorldCommand>.Empty));
+            Assert.Equal(StateChecksum.ComputeGlobalChecksum(before), StateChecksum.ComputeGlobalChecksum(resumed));
+        }
     }
 
     private static (ImmutableArray<ZoneTransferEvent> applied, string checksum) RunSameTickTransfers(SimulationConfig config)

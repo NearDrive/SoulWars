@@ -6,6 +6,25 @@ namespace Game.Server.Tests;
 public sealed class ZoneManagerRuntimeTests
 {
     [Fact]
+    public void ZoneIteration_IsCanonical()
+    {
+        ServerRuntime runtime = new();
+        runtime.ConfigureZones(new[]
+        {
+            new KeyValuePair<int, ServerHost>(3, new ServerHost(ServerConfig.Default(seed: 9901) with { ZoneCount = 1, NpcCountPerZone = 0 })),
+            new KeyValuePair<int, ServerHost>(1, new ServerHost(ServerConfig.Default(seed: 9901) with { ZoneCount = 1, NpcCountPerZone = 0 })),
+            new KeyValuePair<int, ServerHost>(2, new ServerHost(ServerConfig.Default(seed: 9901) with { ZoneCount = 1, NpcCountPerZone = 0 }))
+        });
+
+        List<int> seen = new();
+        runtime.ZoneTickTraceSink = zoneId => seen.Add(zoneId);
+
+        runtime.StepOnce();
+
+        Assert.Equal(new[] { 1, 2, 3 }, seen);
+    }
+
+    [Fact]
     public void TwoZones_TickOrderDeterministic()
     {
         ServerConfig config = ServerConfig.Default(seed: 700) with
