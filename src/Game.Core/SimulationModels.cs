@@ -29,6 +29,7 @@ public enum CastResult : byte
 public readonly record struct SkillDefinition(
     SkillId Id,
     int RangeQRaw,
+    int HitRadiusRaw,
     int CooldownTicks,
     int ResourceCost,
     CastTargetKind TargetKind,

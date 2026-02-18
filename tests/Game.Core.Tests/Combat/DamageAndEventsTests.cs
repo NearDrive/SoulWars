@@ -162,7 +162,7 @@ public sealed class DamageAndEventsTests
             NpcWanderPeriodTicks: 30,
             NpcAggroRange: Fix32.FromInt(6),
             SkillDefinitions: ImmutableArray.Create(
-                new SkillDefinition(new SkillId(10), range.Raw, CooldownTicks: 1, ResourceCost: 0, TargetKind: CastTargetKind.Entity, EffectKind: SkillEffectKind.Damage, BaseAmount: 5, CoefRaw: Fix32.OneRaw)),
+                new SkillDefinition(new SkillId(10), range.Raw, HitRadiusRaw: Fix32.OneRaw, CooldownTicks: 1, ResourceCost: 0, TargetKind: CastTargetKind.Entity, EffectKind: SkillEffectKind.Damage, BaseAmount: 5, CoefRaw: Fix32.OneRaw)),
             Invariants: InvariantOptions.Enabled);
     }
 }

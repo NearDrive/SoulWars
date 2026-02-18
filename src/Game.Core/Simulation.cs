@@ -1553,12 +1553,7 @@ public static class Simulation
             AttackCooldownTicks = skill.Value.CooldownTicks
         };
 
-        int targetIndex = command.TargetKind switch
-        {
-            CastTargetKind.Self => casterIndex,
-            CastTargetKind.Entity when command.TargetEntityId is not null => ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.TargetEntityId.Value),
-            _ => -1
-        };
+        int targetIndex = ResolveCastTargetIndex(zone, casterIndex, command, skill.Value);
 
         if (targetIndex < 0)
         {
@@ -1674,35 +1669,19 @@ public static class Simulation
             return CastResult.Rejected_InvalidTarget;
         }
 
-        Vec2Fix targetPos;
-        if (command.TargetKind == CastTargetKind.Self)
+        Vec2Fix targetPos = command.TargetKind == CastTargetKind.Point
+            ? new Vec2Fix(new Fix32(command.TargetPosXRaw), new Fix32(command.TargetPosYRaw))
+            : default;
+
+        if (command.TargetKind != CastTargetKind.Point)
         {
-            targetPos = caster.Pos;
-        }
-        else if (command.TargetKind == CastTargetKind.Entity)
-        {
-            if (command.TargetEntityId is null)
+            int resolvedIndex = ResolveCastTargetIndex(zone, casterIndex, command, skill.Value);
+            if (resolvedIndex < 0)
             {
                 return CastResult.Rejected_InvalidTarget;
             }
 
-            int targetIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.TargetEntityId.Value);
-            if (targetIndex < 0)
-            {
-                return CastResult.Rejected_InvalidTarget;
-            }
-
-            EntityState target = entities[targetIndex];
-            if (!target.IsAlive)
-            {
-                return CastResult.Rejected_InvalidTarget;
-            }
-
-            targetPos = target.Pos;
-        }
-        else
-        {
-            targetPos = new Vec2Fix(new Fix32(command.TargetPosXRaw), new Fix32(command.TargetPosYRaw));
+            targetPos = entities[resolvedIndex].Pos;
         }
 
         Fix32 dx = caster.Pos.X - targetPos.X;
@@ -1716,7 +1695,99 @@ public static class Simulation
             return CastResult.Rejected_OutOfRange;
         }
 
+        if (command.TargetKind == CastTargetKind.Point)
+        {
+            int pointTargetIndex = ResolveCastTargetIndex(zone, casterIndex, command, skill.Value);
+            if (pointTargetIndex < 0)
+            {
+                return CastResult.Rejected_InvalidTarget;
+            }
+        }
+
         return CastResult.Ok;
+    }
+
+
+    private static int ResolveCastTargetIndex(ZoneState zone, int casterIndex, WorldCommand command, SkillDefinition skill)
+    {
+        if (command.TargetKind == CastTargetKind.Self)
+        {
+            return casterIndex;
+        }
+
+        if (command.TargetKind == CastTargetKind.Entity)
+        {
+            if (command.TargetEntityId is null)
+            {
+                return -1;
+            }
+
+            int targetIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.TargetEntityId.Value);
+            if (targetIndex < 0)
+            {
+                return -1;
+            }
+
+            return zone.Entities[targetIndex].IsAlive ? targetIndex : -1;
+        }
+
+        if (command.TargetKind != CastTargetKind.Point)
+        {
+            return -1;
+        }
+
+        Vec2Fix point = new(new Fix32(command.TargetPosXRaw), new Fix32(command.TargetPosYRaw));
+        return ResolvePointTargetIndex(zone, casterIndex, point, new Fix32(skill.HitRadiusRaw));
+    }
+
+    private static int ResolvePointTargetIndex(ZoneState zone, int casterIndex, Vec2Fix point, Fix32 hitRadius)
+    {
+        if (hitRadius.Raw <= 0)
+        {
+            return -1;
+        }
+
+        ImmutableArray<EntityState> entities = zone.Entities;
+        Fix32 radiusSq = hitRadius * hitRadius;
+        int bestIndex = -1;
+        Fix32 bestDistSq = new(int.MaxValue);
+        EntityId bestEntityId = default;
+
+        for (int i = 0; i < entities.Length; i++)
+        {
+            if (i == casterIndex)
+            {
+                continue;
+            }
+
+            EntityState candidate = entities[i];
+            if (!candidate.IsAlive)
+            {
+                continue;
+            }
+
+            Vec2Fix delta = candidate.Pos - point;
+            Fix32 distSq = delta.LengthSq();
+            if (distSq > radiusSq)
+            {
+                continue;
+            }
+
+            bool better = bestIndex < 0
+                || distSq < bestDistSq
+                || (distSq == bestDistSq && candidate.Id.Value < bestEntityId.Value);
+
+            if (!better)
+            {
+                continue;
+            }
+
+            bestIndex = i;
+            bestDistSq = distSq;
+            bestEntityId = candidate.Id;
+        }
+
+        return bestIndex;
     }
 
     private static SkillDefinition? FindSkill(SimulationConfig config, SkillId skillId)
