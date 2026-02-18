@@ -210,11 +210,26 @@ public sealed class AoiMvp9Tests
         {
             host.StepOnce();
 
-            SnapshotV2 snapshot = ReadLastSnapshotV2(observerEndpoint);
-            observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(snapshot.ZoneId, snapshot.SnapshotSeq)));
-            if (predicate(snapshot))
+            SnapshotV2? lastSnapshot = null;
+            while (observerEndpoint.TryDequeueFromServer(out byte[] payload))
             {
-                return snapshot;
+                if (!ProtocolCodec.TryDecodeServer(payload, out IServerMessage? message, out _) || message is not SnapshotV2 snapshot)
+                {
+                    continue;
+                }
+
+                observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(snapshot.ZoneId, snapshot.SnapshotSeq)));
+                if (predicate(snapshot))
+                {
+                    return snapshot;
+                }
+
+                lastSnapshot = snapshot;
+            }
+
+            if (lastSnapshot is null)
+            {
+                Assert.Fail("Expected at least one SnapshotV2 while waiting for AOI condition.");
             }
         }
 
