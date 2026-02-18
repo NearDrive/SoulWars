@@ -26,6 +26,7 @@ public sealed class ServerHost
     private int _nextEntityId = 1;
     private readonly List<WorldCommand> _pendingWorldCommands = new();
     private readonly List<PendingAttackIntent> _pendingAttackIntents = new();
+    private readonly List<PendingCastSkillCommand> _pendingCastSkillCommands = new();
     private readonly List<Snapshot> _recentSnapshots = new();
     private WorldState _world;
     private int _lastTick;
@@ -228,6 +229,19 @@ public sealed class ServerHost
                 EntityId: new EntityId(pending.EntityId),
                 ZoneId: new ZoneId(pending.ZoneId),
                 TargetEntityId: new EntityId(pending.TargetEntityId)));
+        }
+
+        foreach (PendingCastSkillCommand pending in OrderedPendingCastSkillCommands(targetTick))
+        {
+            worldCommands.Add(new WorldCommand(
+                Kind: WorldCommandKind.CastSkill,
+                EntityId: new EntityId(pending.CasterId),
+                ZoneId: new ZoneId(pending.ZoneId),
+                SkillId: new SkillId(pending.SkillId),
+                TargetKind: (CastTargetKind)pending.TargetKind,
+                TargetEntityId: pending.TargetEntityId > 0 ? new EntityId(pending.TargetEntityId) : null,
+                TargetPosXRaw: pending.TargetPosXRaw,
+                TargetPosYRaw: pending.TargetPosYRaw));
         }
 
         _world = Simulation.Step(_simulationConfig, _world, new Inputs(worldCommands.ToImmutableArray()), _simulationInstrumentation);
@@ -456,6 +470,13 @@ public sealed class ServerHost
                 case LootIntent lootIntent:
                     HandleLootIntent(session, lootIntent, worldCommands);
                     break;
+                case CastSkillCommand castSkillCommand:
+                    PendingCastSkillCommand? pendingCast = CreatePendingCastSkillCommand(targetTick, session, castSkillCommand);
+                    if (pendingCast is not null)
+                    {
+                        _pendingCastSkillCommands.Add(pendingCast.Value);
+                    }
+                    break;
                 case ClientAckV2 ack:
                     HandleClientAck(session, ack);
                     break;
@@ -500,6 +521,29 @@ public sealed class ServerHost
         }
 
         return new PendingAttackIntent(targetTick, session.EntityId.Value, session.CurrentZoneId.Value, attackIntent.TargetId);
+    }
+
+    private PendingCastSkillCommand? CreatePendingCastSkillCommand(int targetTick, SessionState session, CastSkillCommand castSkillCommand)
+    {
+        if (session.EntityId is null || session.CurrentZoneId is null)
+        {
+            return null;
+        }
+
+        if (session.CurrentZoneId.Value != castSkillCommand.ZoneId)
+        {
+            return null;
+        }
+
+        return new PendingCastSkillCommand(
+            Tick: targetTick,
+            CasterId: session.EntityId.Value,
+            ZoneId: session.CurrentZoneId.Value,
+            SkillId: castSkillCommand.SkillId,
+            TargetKind: castSkillCommand.TargetKind,
+            TargetEntityId: castSkillCommand.TargetEntityId,
+            TargetPosXRaw: castSkillCommand.TargetPosXRaw,
+            TargetPosYRaw: castSkillCommand.TargetPosYRaw);
     }
 
     private PendingInput ClampMoveInput(int tick, int entityId, int zoneId, sbyte moveX, sbyte moveY)
@@ -784,6 +828,20 @@ public sealed class ServerHost
             .ToArray();
 
         _pendingAttackIntents.RemoveAll(p => p.Tick <= targetTick);
+        return due;
+    }
+
+    private IEnumerable<PendingCastSkillCommand> OrderedPendingCastSkillCommands(int targetTick)
+    {
+        PendingCastSkillCommand[] due = _pendingCastSkillCommands
+            .Where(p => p.Tick <= targetTick)
+            .OrderBy(p => p.Tick)
+            .ThenBy(p => p.ZoneId)
+            .ThenBy(p => p.CasterId)
+            .ThenBy(p => p.SkillId)
+            .ToArray();
+
+        _pendingCastSkillCommands.RemoveAll(p => p.Tick <= targetTick);
         return due;
     }
 
@@ -1253,4 +1311,13 @@ public sealed class ServerHost
     private readonly record struct PendingInput(int Tick, int EntityId, int ZoneId, sbyte MoveX, sbyte MoveY);
 
     private readonly record struct PendingAttackIntent(int Tick, int EntityId, int ZoneId, int TargetEntityId);
+    private readonly record struct PendingCastSkillCommand(
+        int Tick,
+        int CasterId,
+        int ZoneId,
+        int SkillId,
+        byte TargetKind,
+        int TargetEntityId,
+        int TargetPosXRaw,
+        int TargetPosYRaw);
 }

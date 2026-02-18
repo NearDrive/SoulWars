@@ -17,6 +17,7 @@ public static class ProtocolCodec
     private const byte ClientLeaveZoneRequestV2 = 10;
     private const byte ClientAckV2 = 11;
     private const byte ClientLootIntent = 12;
+    private const byte ClientCastSkillCommand = 13;
 
     private const byte ServerWelcome = 101;
     private const byte ServerEnterZoneAck = 102;
@@ -43,6 +44,7 @@ public static class ProtocolCodec
             ClientAckV2 ack => EncodeClientAckV2(ack),
             TeleportRequest request => EncodeIntMessage(ClientTeleportRequest, request.ToZoneId),
             LootIntent loot => EncodeLootIntent(loot),
+            CastSkillCommand cast => EncodeCastSkillCommand(cast),
             _ => throw new InvalidOperationException($"Unsupported client message type: {msg.GetType().Name}")
         };
     }
@@ -160,6 +162,8 @@ public static class ProtocolCodec
                 msg = new LootIntent(lootEntityId, lootZoneId);
                 error = ProtocolErrorCode.None;
                 return true;
+            case ClientCastSkillCommand:
+                return TryDecodeCastSkillCommand(data, out msg, out error);
             default:
                 error = ProtocolErrorCode.UnknownMessageType;
                 return false;
@@ -282,6 +286,53 @@ public static class ProtocolCodec
         WriteInt32(data, 1, loot.LootEntityId);
         WriteInt32(data, 5, loot.ZoneId);
         return data;
+    }
+
+    private static byte[] EncodeCastSkillCommand(CastSkillCommand cast)
+    {
+        byte[] data = new byte[1 + 4 + 4 + 4 + 4 + 1 + 4 + 4 + 4];
+        data[0] = ClientCastSkillCommand;
+        WriteInt32(data, 1, cast.Tick);
+        WriteInt32(data, 5, cast.CasterId);
+        WriteInt32(data, 9, cast.SkillId);
+        WriteInt32(data, 13, cast.ZoneId);
+        data[17] = cast.TargetKind;
+        WriteInt32(data, 18, cast.TargetEntityId);
+        WriteInt32(data, 22, cast.TargetPosXRaw);
+        WriteInt32(data, 26, cast.TargetPosYRaw);
+        return data;
+    }
+
+    private static bool TryDecodeCastSkillCommand(ReadOnlySpan<byte> data, out IClientMessage? msg, out ProtocolErrorCode error)
+    {
+        msg = null;
+        if (data.Length < 30)
+        {
+            error = ProtocolErrorCode.Truncated;
+            return false;
+        }
+
+        if (!TryReadInt32(data, 1, out int tick, out error) ||
+            !TryReadInt32(data, 5, out int casterId, out error) ||
+            !TryReadInt32(data, 9, out int skillId, out error) ||
+            !TryReadInt32(data, 13, out int zoneId, out error) ||
+            !TryReadInt32(data, 18, out int targetEntityId, out error) ||
+            !TryReadInt32(data, 22, out int targetPosXRaw, out error) ||
+            !TryReadInt32(data, 26, out int targetPosYRaw, out error))
+        {
+            return false;
+        }
+
+        byte targetKind = data[17];
+        if (tick < 0 || casterId <= 0 || skillId <= 0 || zoneId <= 0 || targetKind is < 1 or > 3)
+        {
+            error = ProtocolErrorCode.ValueOutOfRange;
+            return false;
+        }
+
+        msg = new CastSkillCommand(tick, casterId, skillId, zoneId, targetKind, targetEntityId, targetPosXRaw, targetPosYRaw);
+        error = ProtocolErrorCode.None;
+        return true;
     }
 
     private static byte[] EncodeClientAckV2(ClientAckV2 ack)

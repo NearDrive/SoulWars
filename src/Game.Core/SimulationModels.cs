@@ -6,6 +6,33 @@ public readonly record struct EntityId(int Value);
 
 public readonly record struct ZoneId(int Value);
 
+public readonly record struct SkillId(int Value);
+
+public enum CastTargetKind : byte
+{
+    Self = 1,
+    Entity = 2,
+    Point = 3
+}
+
+public enum CastResult : byte
+{
+    Ok = 0,
+    Rejected_NoSuchCaster = 1,
+    Rejected_NoSuchSkill = 2,
+    Rejected_OnCooldown = 3,
+    Rejected_NotEnoughResource = 4,
+    Rejected_InvalidTarget = 5,
+    Rejected_OutOfRange = 6
+}
+
+public readonly record struct SkillDefinition(
+    SkillId Id,
+    int RangeQRaw,
+    int CooldownTicks,
+    int ResourceCost,
+    CastTargetKind TargetKind);
+
 public enum EntityKind : byte
 {
     Player = 1,
@@ -438,7 +465,8 @@ public enum WorldCommandKind : byte
     TeleportIntent = 5,
     LootIntent = 6,
     VendorBuyIntent = 7,
-    VendorSellIntent = 8
+    VendorSellIntent = 8,
+    CastSkill = 9
 }
 
 public sealed record WorldCommand(
@@ -450,6 +478,10 @@ public sealed record WorldCommand(
     sbyte MoveY = 0,
     Vec2Fix? SpawnPos = null,
     EntityId? TargetEntityId = null,
+    SkillId? SkillId = null,
+    CastTargetKind TargetKind = CastTargetKind.Self,
+    int TargetPosXRaw = 0,
+    int TargetPosYRaw = 0,
     EntityId? LootEntityId = null,
     string VendorId = "",
     string ItemId = "",

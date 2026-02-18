@@ -57,6 +57,16 @@ public sealed record TeleportRequest(int ToZoneId) : IClientMessage;
 
 public sealed record LootIntent(int LootEntityId, int ZoneId) : IClientMessage;
 
+public sealed record CastSkillCommand(
+    int Tick,
+    int CasterId,
+    int SkillId,
+    int ZoneId,
+    byte TargetKind,
+    int TargetEntityId,
+    int TargetPosXRaw,
+    int TargetPosYRaw) : IClientMessage;
+
 public sealed record Welcome(
     SessionId SessionId,
     PlayerId PlayerId,
