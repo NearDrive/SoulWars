@@ -28,7 +28,7 @@ public static class WorldStateSerializer
         ImmutableArray<CombatEvent> CombatEvents);
 
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 5;
+    private const int CurrentVersion = 4;
     public static int SerializerVersion => CurrentVersion;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
@@ -113,7 +113,7 @@ public static class WorldStateSerializer
         }
 
         int version = reader.ReadInt32();
-        if (version is not (1 or 2 or 3 or 4 or CurrentVersion))
+        if (version is not (1 or 2 or 3 or CurrentVersion))
         {
             throw new InvalidDataException($"Unsupported world-state version '{version}'.");
         }
@@ -156,7 +156,7 @@ public static class WorldStateSerializer
         ImmutableArray<VendorTransactionAuditEntry> vendorAudit = version >= 4
             ? ReadVendorAudit(reader)
             : ImmutableArray<VendorTransactionAuditEntry>.Empty;
-        ImmutableArray<CombatEvent> combatEvents = version >= 5
+        ImmutableArray<CombatEvent> combatEvents = version >= 4 && HasRemainingData(reader)
             ? ReadCombatEvents(reader)
             : ImmutableArray<CombatEvent>.Empty;
 
@@ -666,6 +666,17 @@ public static class WorldStateSerializer
             .ToImmutable()
             .OrderBy(location => location.Id.Value)
             .ToImmutableArray();
+    }
+
+    private static bool HasRemainingData(BinaryReader reader)
+    {
+        Stream stream = reader.BaseStream;
+        if (!stream.CanSeek)
+        {
+            return false;
+        }
+
+        return stream.Position < stream.Length;
     }
 
     private static void ValidateCount(int value, int maxValue, string name)
