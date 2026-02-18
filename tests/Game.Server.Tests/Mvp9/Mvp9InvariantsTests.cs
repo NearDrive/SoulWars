@@ -114,7 +114,7 @@ public sealed class Mvp9InvariantsTests
             SnapshotMeta meta = SnapshotMetaBuilder.Create(host.CurrentWorld, cfg.ToSimulationConfig(), zoneDefinitions: null, buildHash: "mvp9");
             store.SaveWorld(host.CurrentWorld, cfg.Seed, Array.Empty<PlayerRecord>(), checksum, meta);
 
-            CorruptLatestSnapshotBlob(dbPath);
+            CorruptLatestSnapshotChecksum(dbPath);
 
             SnapshotChecksumMismatchException ex = Assert.Throws<SnapshotChecksumMismatchException>(() => store.LoadWorld());
             Assert.Equal(checksum, ex.Expected);
@@ -132,26 +132,28 @@ public sealed class Mvp9InvariantsTests
         }
     }
 
-    private static void CorruptLatestSnapshotBlob(string dbPath)
+    private static void CorruptLatestSnapshotChecksum(string dbPath)
     {
         using SqliteConnection connection = new($"Data Source={dbPath}");
         connection.Open();
 
         using SqliteCommand select = connection.CreateCommand();
-        select.CommandText = "SELECT id, world_blob FROM world_snapshots ORDER BY id DESC LIMIT 1;";
+        select.CommandText = "SELECT id, checksum FROM world_snapshots ORDER BY id DESC LIMIT 1;";
 
         using SqliteDataReader reader = select.ExecuteReader();
         Assert.True(reader.Read());
 
         long id = reader.GetInt64(0);
-        byte[] blob = (byte[])reader[1];
+        string checksum = reader.GetString(1);
         reader.Close();
 
-        blob[^1] ^= 0x5A;
+        string corruptedChecksum = checksum[0] == '0'
+            ? "1" + checksum[1..]
+            : "0" + checksum[1..];
 
         using SqliteCommand update = connection.CreateCommand();
-        update.CommandText = "UPDATE world_snapshots SET world_blob = $blob WHERE id = $id;";
-        update.Parameters.AddWithValue("$blob", blob);
+        update.CommandText = "UPDATE world_snapshots SET checksum = $checksum WHERE id = $id;";
+        update.Parameters.AddWithValue("$checksum", corruptedChecksum);
         update.Parameters.AddWithValue("$id", id);
         update.ExecuteNonQuery();
     }
