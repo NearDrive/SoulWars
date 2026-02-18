@@ -118,6 +118,36 @@ public static class WorldStateSerializer
             throw new InvalidDataException($"Unsupported world-state version '{version}'.");
         }
 
+        if (version != CurrentVersion)
+        {
+            return ParseSnapshotPayload(reader, version, readDefenseForV4: false);
+        }
+
+        Stream stream = reader.BaseStream;
+        if (!stream.CanSeek)
+        {
+            return ParseSnapshotPayload(reader, version, readDefenseForV4: true);
+        }
+
+        long payloadStart = stream.Position;
+        try
+        {
+            return ParseSnapshotPayload(reader, version, readDefenseForV4: true);
+        }
+        catch (InvalidDataException)
+        {
+            stream.Position = payloadStart;
+            return ParseSnapshotPayload(reader, version, readDefenseForV4: false);
+        }
+        catch (EndOfStreamException)
+        {
+            stream.Position = payloadStart;
+            return ParseSnapshotPayload(reader, version, readDefenseForV4: false);
+        }
+    }
+
+    private static RawSnapshotPayload ParseSnapshotPayload(BinaryReader reader, int version, bool readDefenseForV4)
+    {
         int tick = reader.ReadInt32();
         int zoneCount = reader.ReadInt32();
         ValidateCount(zoneCount, MaxZoneCount, nameof(zoneCount));
@@ -136,7 +166,7 @@ public static class WorldStateSerializer
             previousZoneId = zoneIdValue;
 
             TileMap map = ReadMap(reader);
-            ZoneEntities entities = ReadEntities(reader, version);
+            ZoneEntities entities = ReadEntities(reader, version, readDefenseForV4);
 
             zones.Add(new ZoneState(new ZoneId(zoneIdValue), map, entities));
         }
@@ -344,7 +374,7 @@ public static class WorldStateSerializer
         }
     }
 
-    private static ZoneEntities ReadEntities(BinaryReader reader, int snapshotVersion)
+    private static ZoneEntities ReadEntities(BinaryReader reader, int snapshotVersion, bool readDefenseForV4)
     {
         int entityCount = reader.ReadInt32();
         ValidateCount(entityCount, MaxEntityCountPerZone, nameof(entityCount));
@@ -402,7 +432,7 @@ public static class WorldStateSerializer
             {
                 Fix32 range = new(reader.ReadInt32());
                 int damage = reader.ReadInt32();
-                int defense = snapshotVersion >= 5 ? reader.ReadInt32() : 0;
+                int defense = (snapshotVersion >= 5 || (snapshotVersion == CurrentVersion && readDefenseForV4)) ? reader.ReadInt32() : 0;
                 int cooldownTicks = reader.ReadInt32();
                 int lastAttackTick = reader.ReadInt32();
 
