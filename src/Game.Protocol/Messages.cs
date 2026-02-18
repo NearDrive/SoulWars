@@ -69,8 +69,23 @@ public sealed record EnterZoneAck(int ZoneId, int EntityId) : IServerMessage;
 
 public record Snapshot(int Tick, int ZoneId, SnapshotEntity[] Entities) : IServerMessage;
 
-public sealed record SnapshotV2(int Tick, int ZoneId, int SnapshotSeq, bool IsFull, SnapshotEntity[] Entities)
-    : Snapshot(Tick, ZoneId, Entities);
+public sealed record SnapshotV2(
+    int Tick,
+    int ZoneId,
+    int SnapshotSeq,
+    bool IsFull,
+    SnapshotEntity[] Entities,
+    int[]? Leaves = null,
+    SnapshotEntity[]? Enters = null,
+    SnapshotEntity[]? Updates = null)
+    : Snapshot(Tick, ZoneId, Entities)
+{
+    public int[] Leaves { get; init; } = Leaves ?? Array.Empty<int>();
+
+    public SnapshotEntity[] Enters { get; init; } = Enters ?? Array.Empty<SnapshotEntity>();
+
+    public SnapshotEntity[] Updates { get; init; } = Updates ?? Array.Empty<SnapshotEntity>();
+}
 
 public sealed record Error(string Code, string Message) : IServerMessage;
 
