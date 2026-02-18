@@ -4,7 +4,15 @@ This document freezes the MVP9 snapshot contract and determinism ordering rules.
 
 ## SnapshotMeta
 
-`SnapshotMeta` is persisted alongside snapshot blobs and includes:
+`SnapshotMeta` freezes the deterministic envelope we care about for replay/persistence comparisons:
+
+- `Tick`: simulation tick for the emitted/loaded snapshot.
+- `ZoneId`: source zone for the snapshot slice.
+- `SnapshotSeq` (if present in protocol version): per-session sequence number.
+- `PerZoneChecksum` (`ZoneChecksums[]` in tick reports): ordered checksums for each zone.
+- `GlobalChecksum`: checksum aggregated from the ordered per-zone checksums.
+
+Persistence-specific metadata that remains part of the stored snapshot contract:
 
 - `SerializerVersion`: world serializer version used for snapshot encoding.
 - `ZoneDefinitionsHash`: canonical hash of zone definitions (or world-derived fallback for legacy flow).
