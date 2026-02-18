@@ -114,10 +114,11 @@ public sealed class Mvp9InvariantsTests
             SnapshotMeta meta = SnapshotMetaBuilder.Create(host.CurrentWorld, cfg.ToSimulationConfig(), zoneDefinitions: null, buildHash: "mvp9");
             store.SaveWorld(host.CurrentWorld, cfg.Seed, Array.Empty<PlayerRecord>(), checksum, meta);
 
-            CorruptLatestSnapshotChecksum(dbPath);
+            string corruptedChecksum = CorruptLatestSnapshotChecksum(dbPath);
 
             SnapshotChecksumMismatchException ex = Assert.Throws<SnapshotChecksumMismatchException>(() => store.LoadWorld());
-            Assert.Equal(checksum, ex.Expected);
+            Assert.NotEqual(checksum, corruptedChecksum);
+            Assert.Equal(corruptedChecksum, ex.Expected);
             Assert.NotEqual(ex.Expected, ex.Actual);
             Assert.Contains($"expected={ex.Expected}", ex.Message, StringComparison.Ordinal);
             Assert.Contains($"actual={ex.Actual}", ex.Message, StringComparison.Ordinal);
@@ -132,7 +133,7 @@ public sealed class Mvp9InvariantsTests
         }
     }
 
-    private static void CorruptLatestSnapshotChecksum(string dbPath)
+    private static string CorruptLatestSnapshotChecksum(string dbPath)
     {
         using SqliteConnection connection = new($"Data Source={dbPath}");
         connection.Open();
@@ -156,6 +157,7 @@ public sealed class Mvp9InvariantsTests
         update.Parameters.AddWithValue("$checksum", corruptedChecksum);
         update.Parameters.AddWithValue("$id", id);
         update.ExecuteNonQuery();
+        return corruptedChecksum;
     }
 
     private static EntityState CreateEntity(int id, int x, int y)
