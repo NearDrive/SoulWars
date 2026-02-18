@@ -134,7 +134,7 @@ public sealed class MultiZoneSnapshotTests
         byte[] bytes = WorldStateSerializer.SaveToBytes(original);
         WorldState loaded = WorldStateSerializer.LoadFromBytes(bytes);
 
-        Assert.Equal(StateChecksum.ComputeZoneChecksums(original), StateChecksum.ComputeZoneChecksums(loaded));
+        Assert.Equal(StateChecksum.ComputeZoneChecksums(original).ToArray(), StateChecksum.ComputeZoneChecksums(loaded).ToArray());
         Assert.Equal(StateChecksum.ComputeGlobalChecksum(original), StateChecksum.ComputeGlobalChecksum(loaded));
     }
 
