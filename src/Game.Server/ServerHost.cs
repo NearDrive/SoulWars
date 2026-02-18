@@ -736,6 +736,7 @@ public sealed class ServerHost
             ZoneId: new ZoneId(requestedZoneId)));
 
         session.CurrentZoneId = null;
+        session.LastVisible.Clear();
     }
 
     private IEnumerable<SessionState> OrderedSessions() => _sessions.Values.OrderBy(s => s.SessionId.Value);
@@ -798,6 +799,11 @@ public sealed class ServerHost
 
             if (_world.TryGetEntityZone(new EntityId(session.EntityId.Value), out ZoneId zoneId))
             {
+                if (session.CurrentZoneId is int previousZoneId && previousZoneId != zoneId.Value)
+                {
+                    session.LastVisible.Clear();
+                }
+
                 session.CurrentZoneId = zoneId.Value;
                 if (session.PlayerId is PlayerId playerId)
                 {
@@ -808,6 +814,7 @@ public sealed class ServerHost
             {
                 _playerRegistry.UpdateWorldState(playerId, null, session.CurrentZoneId, isAlive: false);
                 session.EntityId = null;
+                session.LastVisible.Clear();
             }
         }
 
@@ -865,6 +872,61 @@ public sealed class ServerHost
         }
     }
 
+    private sealed record AoiCandidate(EntityState Entity, long DistanceSq, bool IsSelf);
+
+    private static long ComputeDistanceSq(in Vec2Fix from, in Vec2Fix to)
+    {
+        long dx = (long)(to.X.Raw - from.X.Raw);
+        long dy = (long)(to.Y.Raw - from.Y.Raw);
+        return checked((dx * dx) + (dy * dy));
+    }
+
+    private static SnapshotEntity ToSnapshotEntity(EntityState entity)
+    {
+        return new SnapshotEntity(
+            EntityId: entity.Id.Value,
+            PosXRaw: entity.Pos.X.Raw,
+            PosYRaw: entity.Pos.Y.Raw,
+            VelXRaw: entity.Vel.X.Raw,
+            VelYRaw: entity.Vel.Y.Raw,
+            Hp: entity.Hp,
+            Kind: entity.Kind switch
+            {
+                Game.Core.EntityKind.Player => SnapshotEntityKind.Player,
+                Game.Core.EntityKind.Npc => SnapshotEntityKind.Npc,
+                _ => SnapshotEntityKind.Unknown
+            });
+    }
+
+    private List<EntityState> ComputeBudgetedVisibleEntities(ZoneState zone, EntityState self)
+    {
+        VisibleSet visibleSet = _aoiProvider.ComputeVisible(_world, zone.Id, self.Id, Perf);
+        HashSet<int> visibleIds = visibleSet.EntityIds.Select(entityId => entityId.Value).ToHashSet();
+        List<EntityState> visibleEntities = zone.Entities
+            .Where(entity => visibleIds.Contains(entity.Id.Value))
+            .OrderBy(entity => entity.Id.Value)
+            .ToList();
+
+        int maxEntities = Math.Max(1, _serverConfig.MaxEntitiesPerSnapshot);
+        if (visibleEntities.Count <= maxEntities)
+        {
+            return visibleEntities;
+        }
+
+        Vec2Fix selfPos = self.Pos;
+        List<EntityState> budgeted = visibleEntities
+            .Select(entity => new AoiCandidate(entity, ComputeDistanceSq(selfPos, entity.Pos), entity.Id.Value == self.Id.Value))
+            .OrderByDescending(candidate => candidate.IsSelf)
+            .ThenBy(candidate => candidate.DistanceSq)
+            .ThenBy(candidate => candidate.Entity.Id.Value)
+            .Take(maxEntities)
+            .Select(candidate => candidate.Entity)
+            .OrderBy(entity => entity.Id.Value)
+            .ToList();
+
+        return budgeted;
+    }
+
     private void EmitSnapshots()
     {
         int emittedCount = 0;
@@ -897,30 +959,38 @@ public sealed class ServerHost
                     : null;
 
                 SnapshotEntity[] entities;
+                int[] leaves;
+                SnapshotEntity[] enters;
+                SnapshotEntity[] updates;
+                HashSet<int> visibleNowIds;
+
                 if (self is null)
                 {
                     entities = Array.Empty<SnapshotEntity>();
+                    leaves = session.LastVisible.OrderBy(id => id).ToArray();
+                    enters = Array.Empty<SnapshotEntity>();
+                    updates = Array.Empty<SnapshotEntity>();
+                    visibleNowIds = new HashSet<int>();
                 }
                 else
                 {
-                    VisibleSet visibleSet = _aoiProvider.ComputeVisible(_world, zoneId, self.Id, Perf);
-                    HashSet<int> visibleIds = visibleSet.EntityIds.Select(entityId => entityId.Value).ToHashSet();
-                    entities = zone.Entities
-                        .Where(entity => visibleIds.Contains(entity.Id.Value))
+                    List<EntityState> visibleEntities = ComputeBudgetedVisibleEntities(zone, self);
+                    entities = visibleEntities
+                        .Select(ToSnapshotEntity)
+                        .OrderBy(entity => entity.EntityId)
+                        .ToArray();
+
+                    visibleNowIds = visibleEntities.Select(entity => entity.Id.Value).ToHashSet();
+                    leaves = session.LastVisible.Except(visibleNowIds).OrderBy(id => id).ToArray();
+                    enters = visibleEntities
+                        .Where(entity => !session.LastVisible.Contains(entity.Id.Value))
                         .OrderBy(entity => entity.Id.Value)
-                        .Select(entity => new SnapshotEntity(
-                            EntityId: entity.Id.Value,
-                            PosXRaw: entity.Pos.X.Raw,
-                            PosYRaw: entity.Pos.Y.Raw,
-                            VelXRaw: entity.Vel.X.Raw,
-                            VelYRaw: entity.Vel.Y.Raw,
-                            Hp: entity.Hp,
-                            Kind: entity.Kind switch
-                            {
-                                Game.Core.EntityKind.Player => SnapshotEntityKind.Player,
-                                Game.Core.EntityKind.Npc => SnapshotEntityKind.Npc,
-                                _ => SnapshotEntityKind.Unknown
-                            }))
+                        .Select(ToSnapshotEntity)
+                        .ToArray();
+                    updates = visibleEntities
+                        .Where(entity => session.LastVisible.Contains(entity.Id.Value))
+                        .OrderBy(entity => entity.Id.Value)
+                        .Select(ToSnapshotEntity)
                         .ToArray();
                 }
 
@@ -958,7 +1028,10 @@ public sealed class ServerHost
                         ZoneId: zone.Id.Value,
                         SnapshotSeq: snapshotSeq,
                         IsFull: true,
-                        Entities: entities);
+                        Entities: entities,
+                        Leaves: leaves,
+                        Enters: enters,
+                        Updates: updates);
 
                     if (self is not null && !snapshot.Entities.Any(e => e.EntityId == self.Id.Value))
                     {
@@ -974,6 +1047,7 @@ public sealed class ServerHost
                     Metrics.IncrementMessagesOut();
                     emittedCount++;
                     _recentSnapshots.Add(new Snapshot(snapshot.Tick, snapshot.ZoneId, snapshot.Entities));
+                    session.LastVisible = visibleNowIds;
                     continue;
                 }
 
@@ -993,6 +1067,7 @@ public sealed class ServerHost
                 Metrics.IncrementMessagesOut();
                 emittedCount++;
                 _recentSnapshots.Add(legacySnapshot);
+                session.LastVisible = visibleNowIds;
             }
         }
 
@@ -1169,6 +1244,8 @@ public sealed class ServerHost
         public SessionSnapshotCache? LastFullSnapshot { get; set; }
 
         public int LastSnapshotRetryCount { get; set; }
+
+        public HashSet<int> LastVisible { get; set; } = new();
     }
 
     private readonly record struct SessionSnapshotCache(int ZoneId, int SnapshotSeq, byte[] EncodedPayload);

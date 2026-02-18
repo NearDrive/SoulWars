@@ -646,7 +646,15 @@ public static class ProtocolCodec
     private static byte[] EncodeSnapshotV2(SnapshotV2 snapshot)
     {
         SnapshotEntity[] entities = snapshot.Entities ?? Array.Empty<SnapshotEntity>();
-        byte[] data = new byte[1 + 4 + 4 + 4 + 1 + 4 + (entities.Length * ((6 * 4) + 1))];
+        int[] leaves = snapshot.Leaves ?? Array.Empty<int>();
+        SnapshotEntity[] enters = snapshot.Enters ?? Array.Empty<SnapshotEntity>();
+        SnapshotEntity[] updates = snapshot.Updates ?? Array.Empty<SnapshotEntity>();
+
+        byte[] data = new byte[
+            1 + 4 + 4 + 4 + 1 + 4 + (entities.Length * ((6 * 4) + 1)) +
+            4 + (leaves.Length * 4) +
+            4 + (enters.Length * ((6 * 4) + 1)) +
+            4 + (updates.Length * ((6 * 4) + 1))];
         data[0] = ServerSnapshotV2;
         WriteInt32(data, 1, snapshot.Tick);
         WriteInt32(data, 5, snapshot.ZoneId);
@@ -658,6 +666,44 @@ public static class ProtocolCodec
         for (int i = 0; i < entities.Length; i++)
         {
             SnapshotEntity entity = entities[i];
+            WriteInt32(data, offset, entity.EntityId);
+            WriteInt32(data, offset + 4, entity.PosXRaw);
+            WriteInt32(data, offset + 8, entity.PosYRaw);
+            WriteInt32(data, offset + 12, entity.VelXRaw);
+            WriteInt32(data, offset + 16, entity.VelYRaw);
+            WriteInt32(data, offset + 20, entity.Hp);
+            data[offset + 24] = (byte)entity.Kind;
+            offset += 25;
+        }
+
+        WriteInt32(data, offset, leaves.Length);
+        offset += 4;
+        for (int i = 0; i < leaves.Length; i++)
+        {
+            WriteInt32(data, offset, leaves[i]);
+            offset += 4;
+        }
+
+        WriteInt32(data, offset, enters.Length);
+        offset += 4;
+        for (int i = 0; i < enters.Length; i++)
+        {
+            SnapshotEntity entity = enters[i];
+            WriteInt32(data, offset, entity.EntityId);
+            WriteInt32(data, offset + 4, entity.PosXRaw);
+            WriteInt32(data, offset + 8, entity.PosYRaw);
+            WriteInt32(data, offset + 12, entity.VelXRaw);
+            WriteInt32(data, offset + 16, entity.VelYRaw);
+            WriteInt32(data, offset + 20, entity.Hp);
+            data[offset + 24] = (byte)entity.Kind;
+            offset += 25;
+        }
+
+        WriteInt32(data, offset, updates.Length);
+        offset += 4;
+        for (int i = 0; i < updates.Length; i++)
+        {
+            SnapshotEntity entity = updates[i];
             WriteInt32(data, offset, entity.EntityId);
             WriteInt32(data, offset + 4, entity.PosXRaw);
             WriteInt32(data, offset + 8, entity.PosYRaw);
@@ -763,9 +809,124 @@ public static class ProtocolCodec
             offset += 25;
         }
 
-        msg = isV2
-            ? new SnapshotV2(tick, zoneId, snapshotSeq, isFull, entities)
-            : new Snapshot(tick, zoneId, entities);
+        if (!isV2)
+        {
+            msg = new Snapshot(tick, zoneId, entities);
+            error = ProtocolErrorCode.None;
+            return true;
+        }
+
+        int[] leaves = Array.Empty<int>();
+        SnapshotEntity[] enters = Array.Empty<SnapshotEntity>();
+        SnapshotEntity[] updates = Array.Empty<SnapshotEntity>();
+
+        if (offset < data.Length)
+        {
+            if (!TryReadInt32(data, offset, out int leaveCount, out error) || leaveCount < 0)
+            {
+                error = leaveCount < 0 ? ProtocolErrorCode.ValueOutOfRange : error;
+                return false;
+            }
+
+            offset += 4;
+            int leavesBytes = leaveCount * 4;
+            if (offset + leavesBytes > data.Length)
+            {
+                error = ProtocolErrorCode.Truncated;
+                return false;
+            }
+
+            leaves = new int[leaveCount];
+            for (int i = 0; i < leaveCount; i++)
+            {
+                leaves[i] = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset, 4));
+                offset += 4;
+            }
+
+            if (offset >= data.Length)
+            {
+                msg = new SnapshotV2(tick, zoneId, snapshotSeq, isFull, entities, leaves, enters, updates);
+                error = ProtocolErrorCode.None;
+                return true;
+            }
+
+            if (!TryReadInt32(data, offset, out int enterCount, out error) || enterCount < 0)
+            {
+                error = enterCount < 0 ? ProtocolErrorCode.ValueOutOfRange : error;
+                return false;
+            }
+
+            offset += 4;
+            int entersBytes = enterCount * 25;
+            if (offset + entersBytes > data.Length)
+            {
+                error = ProtocolErrorCode.Truncated;
+                return false;
+            }
+
+            enters = new SnapshotEntity[enterCount];
+            for (int i = 0; i < enterCount; i++)
+            {
+                byte rawKind = data[offset + 24];
+                if (!TryDecodeSnapshotEntityKind(rawKind, out SnapshotEntityKind kind, out error))
+                {
+                    return false;
+                }
+
+                enters[i] = new SnapshotEntity(
+                    EntityId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset, 4)),
+                    PosXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 4, 4)),
+                    PosYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 8, 4)),
+                    VelXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 12, 4)),
+                    VelYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 16, 4)),
+                    Hp: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 20, 4)),
+                    Kind: kind);
+                offset += 25;
+            }
+
+            if (offset >= data.Length)
+            {
+                msg = new SnapshotV2(tick, zoneId, snapshotSeq, isFull, entities, leaves, enters, updates);
+                error = ProtocolErrorCode.None;
+                return true;
+            }
+
+            if (!TryReadInt32(data, offset, out int updateCount, out error) || updateCount < 0)
+            {
+                error = updateCount < 0 ? ProtocolErrorCode.ValueOutOfRange : error;
+                return false;
+            }
+
+            offset += 4;
+            int updatesBytes = updateCount * 25;
+            if (offset + updatesBytes > data.Length)
+            {
+                error = ProtocolErrorCode.Truncated;
+                return false;
+            }
+
+            updates = new SnapshotEntity[updateCount];
+            for (int i = 0; i < updateCount; i++)
+            {
+                byte rawKind = data[offset + 24];
+                if (!TryDecodeSnapshotEntityKind(rawKind, out SnapshotEntityKind kind, out error))
+                {
+                    return false;
+                }
+
+                updates[i] = new SnapshotEntity(
+                    EntityId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset, 4)),
+                    PosXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 4, 4)),
+                    PosYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 8, 4)),
+                    VelXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 12, 4)),
+                    VelYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 16, 4)),
+                    Hp: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 20, 4)),
+                    Kind: kind);
+                offset += 25;
+            }
+        }
+
+        msg = new SnapshotV2(tick, zoneId, snapshotSeq, isFull, entities, leaves, enters, updates);
         error = ProtocolErrorCode.None;
         return true;
     }
