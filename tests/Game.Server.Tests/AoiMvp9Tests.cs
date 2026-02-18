@@ -21,22 +21,26 @@ public sealed class AoiMvp9Tests
     [Fact]
     public void AOI_EntersLeaves_Deterministic()
     {
-        Fix32 radius = Fix32.FromInt(2);
-        ServerHost host = new(ServerConfig.Default(9102) with
+        const string accountA = "aoi-enter-a";
+        const string accountB = "aoi-enter-b";
+
+        ServerConfig cfg = ServerConfig.Default(9102) with
         {
             SnapshotEveryTicks = 1,
-            VisionRadius = radius,
-            VisionRadiusSq = radius * radius,
+            VisionRadius = Fix32.FromInt(2),
+            VisionRadiusSq = Fix32.FromInt(4),
             MaxEntitiesPerSnapshot = 32
-        });
+        };
+
+        ServerHost host = CreateHostWithTwoPlayersForAoi(cfg, accountA, accountB);
 
         InMemoryEndpoint endpointA = new();
         InMemoryEndpoint endpointB = new();
         host.Connect(endpointA);
         host.Connect(endpointB);
 
-        endpointA.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("A", "aoi-enter-a")));
-        endpointB.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("B", "aoi-enter-b")));
+        endpointA.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("A", accountA)));
+        endpointB.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("B", accountB)));
         endpointA.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(1)));
         endpointB.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(1)));
         endpointA.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
@@ -45,43 +49,33 @@ public sealed class AoiMvp9Tests
         host.AdvanceTicks(2);
 
         (EnterZoneAck ackA, SnapshotV2 initialA) = ReadEnterAckAndLastSnapshotV2(endpointA);
-        (EnterZoneAck ackB, SnapshotV2 _) = ReadEnterAckAndLastSnapshotV2(endpointB);
+        (EnterZoneAck ackB, SnapshotV2 initialB) = ReadEnterAckAndLastSnapshotV2(endpointB);
         int aId = ackA.EntityId;
         int bId = ackB.EntityId;
 
+        Assert.DoesNotContain(initialB.Entities, entity => entity.EntityId == aId);
+        Assert.DoesNotContain(initialA.Entities, entity => entity.EntityId == bId);
+
         endpointA.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(initialA.Tick + 1, 1, 0)));
-        for (int i = 0; i < 32; i++)
-        {
-            host.StepOnce();
-            SnapshotV2 snapB = ReadLastSnapshotV2(endpointB);
-            endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, snapB.SnapshotSeq)));
-            if (snapB.Enters.Any(e => e.EntityId == aId))
-            {
-                Assert.DoesNotContain(snapB.Leaves, id => id == aId);
-                Assert.Equal(snapB.Enters.OrderBy(e => e.EntityId).Select(e => e.EntityId), snapB.Enters.Select(e => e.EntityId));
-                break;
-            }
+        host.StepOnce();
 
-            endpointA.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(snapB.Tick + 1, 1, 0)));
-        }
+        SnapshotV2 enterViewFromB = ReadLastSnapshotV2(endpointB);
+        endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, enterViewFromB.SnapshotSeq)));
 
-        bool sawLeave = false;
-        for (int i = 0; i < 64; i++)
-        {
-            endpointA.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(host.CurrentWorld.Tick + 1, -1, 0)));
-            host.StepOnce();
-            SnapshotV2 snapB = ReadLastSnapshotV2(endpointB);
-            endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, snapB.SnapshotSeq)));
-            if (snapB.Leaves.Contains(aId))
-            {
-                sawLeave = true;
-                Assert.DoesNotContain(snapB.Enters, e => e.EntityId == aId);
-                Assert.Equal(snapB.Leaves.OrderBy(id => id), snapB.Leaves);
-                break;
-            }
-        }
+        Assert.Contains(enterViewFromB.Enters, entity => entity.EntityId == aId);
+        Assert.DoesNotContain(enterViewFromB.Leaves, id => id == aId);
+        Assert.Equal(enterViewFromB.Enters.OrderBy(entity => entity.EntityId).Select(entity => entity.EntityId),
+            enterViewFromB.Enters.Select(entity => entity.EntityId));
 
-        Assert.True(sawLeave);
+        endpointA.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(enterViewFromB.Tick + 1, -1, 0)));
+        host.StepOnce();
+
+        SnapshotV2 leaveViewFromB = ReadLastSnapshotV2(endpointB);
+        endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, leaveViewFromB.SnapshotSeq)));
+
+        Assert.Contains(leaveViewFromB.Leaves, id => id == aId);
+        Assert.DoesNotContain(leaveViewFromB.Enters, entity => entity.EntityId == aId);
+        Assert.Equal(leaveViewFromB.Leaves.OrderBy(id => id), leaveViewFromB.Leaves);
         Assert.NotEqual(aId, bId);
     }
 
@@ -180,6 +174,74 @@ public sealed class AoiMvp9Tests
         }
 
         return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
+    private static ServerHost CreateHostWithTwoPlayersForAoi(ServerConfig cfg, string accountA, string accountB)
+    {
+        ServerHost baseline = new(cfg);
+        WorldState world = baseline.CurrentWorld;
+        ZoneState zone = world.Zones.Single(z => z.Id.Value == 1);
+
+        (int X, int Y) tileA = default;
+        (int X, int Y) tileB = default;
+        bool found = false;
+        for (int y = 0; y < zone.Map.Height && !found; y++)
+        {
+            for (int x = 0; x <= zone.Map.Width - 4; x++)
+            {
+                if (zone.Map.Get(x, y) == TileKind.Empty &&
+                    zone.Map.Get(x + 1, y) == TileKind.Empty &&
+                    zone.Map.Get(x + 2, y) == TileKind.Empty &&
+                    zone.Map.Get(x + 3, y) == TileKind.Empty)
+                {
+                    tileA = (x, y);
+                    tileB = (x + 3, y);
+                    found = true;
+                    break;
+                }
+            }
+        }
+
+        Assert.True(found, "Expected to find a horizontal run of four empty tiles for deterministic AOI enter/leave movement.");
+
+        EntityState entityA = new(
+            new EntityId(1),
+            new Vec2Fix(Fix32.FromInt(tileA.X), Fix32.FromInt(tileA.Y)),
+            new Vec2Fix(Fix32.Zero, Fix32.Zero),
+            100,
+            100,
+            true,
+            Fix32.One,
+            1,
+            1,
+            0,
+            EntityKind.Player);
+        EntityState entityB = new(
+            new EntityId(2),
+            new Vec2Fix(Fix32.FromInt(tileB.X), Fix32.FromInt(tileB.Y)),
+            new Vec2Fix(Fix32.Zero, Fix32.Zero),
+            100,
+            100,
+            true,
+            Fix32.One,
+            1,
+            1,
+            0,
+            EntityKind.Player);
+
+        ImmutableArray<EntityState> entities = ImmutableArray.Create(entityA, entityB).OrderBy(e => e.Id.Value).ToImmutableArray();
+        ZoneState updatedZone = zone.WithEntities(entities);
+        WorldState updatedWorld = world with
+        {
+            Zones = world.Zones.Select(z => z.Id.Value == 1 ? updatedZone : z).ToImmutableArray(),
+            EntityLocations = entities.Select(e => new EntityLocation(e.Id, new ZoneId(1))).OrderBy(e => e.Id.Value).ToImmutableArray()
+        };
+
+        ImmutableArray<BootstrapPlayerRecord> players = ImmutableArray.Create(
+            new BootstrapPlayerRecord(accountA, 1, 1, 1),
+            new BootstrapPlayerRecord(accountB, 2, 2, 1));
+
+        return new ServerHost(cfg, bootstrap: new ServerBootstrap(updatedWorld, cfg.Seed, players));
     }
 
     private static ServerHost CreateHostWithDenseZone(ServerConfig cfg, int totalEntitiesInZone)
