@@ -22,7 +22,17 @@ public sealed class MultiZoneSnapshotTests
                 return;
             }
 
-            if (msg is SnapshotV2 snap)
+            if (msg is SnapshotV2 snapV2)
+            {
+                lock (syncRoot)
+                {
+                    output.Add(new OutboundSnapshotEvent(sessionId, order, snapV2.Tick, snapV2.ZoneId, snapV2.Entities.Select(e => e.EntityId).ToArray()));
+                }
+
+                return;
+            }
+
+            if (msg is Snapshot snap)
             {
                 lock (syncRoot)
                 {
@@ -44,13 +54,11 @@ public sealed class MultiZoneSnapshotTests
         host.Connect(zone1);
         host.Connect(zone2);
 
-        zone1.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("v", "zone-1-player")));
-        zone1.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(1)));
-        zone1.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
+        zone1.EnqueueToServer(ProtocolCodec.Encode(new Hello("v")));
+        zone1.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
 
-        zone2.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("v", "zone-2-player")));
-        zone2.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(2)));
-        zone2.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(2, 0)));
+        zone2.EnqueueToServer(ProtocolCodec.Encode(new Hello("v")));
+        zone2.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(2)));
 
         host.AdvanceTicks(5);
 
