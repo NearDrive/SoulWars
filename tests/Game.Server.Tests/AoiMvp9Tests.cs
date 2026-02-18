@@ -44,10 +44,10 @@ public sealed class AoiMvp9Tests
 
         host.AdvanceTicks(2);
 
-        SnapshotV2 initialA = ReadLastSnapshotV2(endpointA);
-        SnapshotV2 initialB = ReadLastSnapshotV2(endpointB);
-        int aId = initialA.Entities.Single(e => e.Kind == SnapshotEntityKind.Player).EntityId;
-        int bId = initialB.Entities.Single(e => e.Kind == SnapshotEntityKind.Player).EntityId;
+        (EnterZoneAck ackA, SnapshotV2 initialA) = ReadEnterAckAndLastSnapshotV2(endpointA);
+        (EnterZoneAck ackB, SnapshotV2 _) = ReadEnterAckAndLastSnapshotV2(endpointB);
+        int aId = ackA.EntityId;
+        int bId = ackB.EntityId;
 
         endpointA.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(initialA.Tick + 1, 1, 0)));
         for (int i = 0; i < 32; i++)
@@ -106,23 +106,30 @@ public sealed class AoiMvp9Tests
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
         host.AdvanceTicks(2);
 
-        SnapshotV2 snapshot = ReadLastSnapshotV2(endpoint);
+        (EnterZoneAck ack, SnapshotV2 snapshot) = ReadEnterAckAndLastSnapshotV2(endpoint);
         Assert.True(snapshot.Entities.Length <= maxEntities);
 
-        SnapshotEntity self = snapshot.Entities.Single(e => e.Kind == SnapshotEntityKind.Player);
+        SnapshotEntity self = snapshot.Entities.Single(e => e.EntityId == ack.EntityId);
         Assert.Contains(snapshot.Entities, e => e.EntityId == self.EntityId);
 
-        long[] distances = snapshot.Entities
-            .Select(entity => DistanceSq(entity, self))
-            .ToArray();
+        ZoneState zone = host.CurrentWorld.Zones.Single(z => z.Id.Value == 1);
+        HashSet<int> expectedIds = zone.Entities
+            .Select(entity => new
+            {
+                EntityId = entity.Id.Value,
+                IsSelf = entity.Id.Value == ack.EntityId,
+                DistanceSq = DistanceSq(entity.Pos.X.Raw, entity.Pos.Y.Raw, self.PosXRaw, self.PosYRaw)
+            })
+            .OrderByDescending(candidate => candidate.IsSelf)
+            .ThenBy(candidate => candidate.DistanceSq)
+            .ThenBy(candidate => candidate.EntityId)
+            .Take(maxEntities)
+            .Select(candidate => candidate.EntityId)
+            .ToHashSet();
 
-        Assert.True(distances.SequenceEqual(distances.OrderBy(d => d)), "Selected entities must be nearest first (after canonical id order this must remain monotonic in this setup).");
-
-        SnapshotEntity[] byDistanceThenId = snapshot.Entities
-            .OrderBy(entity => DistanceSq(entity, self))
-            .ThenBy(entity => entity.EntityId)
-            .ToArray();
-        Assert.Equal(byDistanceThenId.Select(e => e.EntityId), snapshot.Entities.Select(e => e.EntityId));
+        int[] actualIds = snapshot.Entities.Select(entity => entity.EntityId).ToArray();
+        Assert.Equal(actualIds.OrderBy(id => id), actualIds);
+        Assert.Equal(expectedIds.OrderBy(id => id), actualIds);
     }
 
     [Fact]
@@ -181,16 +188,24 @@ public sealed class AoiMvp9Tests
         WorldState world = baseline.CurrentWorld;
         ZoneState zone = world.Zones.Single(z => z.Id.Value == 1);
 
+        List<(int X, int Y)> openTiles = CollectOpenTiles(zone.Map, totalEntitiesInZone);
         List<EntityState> entities = new();
-        entities.Add(new EntityState(new EntityId(1), new Vec2Fix(Fix32.Zero, Fix32.Zero), new Vec2Fix(Fix32.Zero, Fix32.Zero), 100, 100, true, Fix32.One, 1, 1, 0, EntityKind.Player));
 
-        for (int i = 2; i <= totalEntitiesInZone; i++)
+        for (int i = 1; i <= totalEntitiesInZone; i++)
         {
-            int ring = (i - 2) / 8;
-            int offset = (i - 2) % 8;
-            int x = ring + 1;
-            int y = offset;
-            entities.Add(new EntityState(new EntityId(i), new Vec2Fix(Fix32.FromInt(x), Fix32.FromInt(y)), new Vec2Fix(Fix32.Zero, Fix32.Zero), 10, 10, true, Fix32.One, 1, 1, 0, EntityKind.Npc));
+            (int tileX, int tileY) = openTiles[i - 1];
+            entities.Add(new EntityState(
+                new EntityId(i),
+                new Vec2Fix(Fix32.FromInt(tileX), Fix32.FromInt(tileY)),
+                new Vec2Fix(Fix32.Zero, Fix32.Zero),
+                100,
+                100,
+                true,
+                Fix32.One,
+                1,
+                1,
+                0,
+                EntityKind.Npc));
         }
 
         ZoneState updatedZone = zone.WithEntities(entities.OrderByDescending(e => e.Id.Value).ToImmutableArray());
@@ -203,10 +218,55 @@ public sealed class AoiMvp9Tests
         return new ServerHost(cfg, bootstrap: new ServerBootstrap(updatedWorld, cfg.Seed, ImmutableArray<BootstrapPlayerRecord>.Empty));
     }
 
-    private static long DistanceSq(SnapshotEntity entity, SnapshotEntity self)
+    private static (EnterZoneAck Ack, SnapshotV2 Snapshot) ReadEnterAckAndLastSnapshotV2(InMemoryEndpoint endpoint)
     {
-        long dx = (long)entity.PosXRaw - self.PosXRaw;
-        long dy = (long)entity.PosYRaw - self.PosYRaw;
+        EnterZoneAck? ack = null;
+        SnapshotV2? snapshot = null;
+
+        while (endpoint.TryDequeueFromServer(out byte[] payload))
+        {
+            if (!ProtocolCodec.TryDecodeServer(payload, out IServerMessage? message, out _))
+            {
+                continue;
+            }
+
+            if (message is EnterZoneAck typedAck)
+            {
+                ack = typedAck;
+            }
+            else if (message is SnapshotV2 typedSnapshot)
+            {
+                snapshot = typedSnapshot;
+            }
+        }
+
+        Assert.NotNull(ack);
+        Assert.NotNull(snapshot);
+        return (ack!, snapshot!);
+    }
+
+    private static List<(int X, int Y)> CollectOpenTiles(TileMap map, int required)
+    {
+        List<(int X, int Y)> openTiles = new(required);
+        for (int y = 0; y < map.Height && openTiles.Count < required; y++)
+        {
+            for (int x = 0; x < map.Width && openTiles.Count < required; x++)
+            {
+                if (map.Get(x, y) == TileKind.Empty)
+                {
+                    openTiles.Add((x, y));
+                }
+            }
+        }
+
+        Assert.True(openTiles.Count >= required, $"Not enough open tiles: required={required} available={openTiles.Count}");
+        return openTiles;
+    }
+
+    private static long DistanceSq(int xRaw, int yRaw, int selfXRaw, int selfYRaw)
+    {
+        long dx = (long)xRaw - selfXRaw;
+        long dy = (long)yRaw - selfYRaw;
         return (dx * dx) + (dy * dy);
     }
 
