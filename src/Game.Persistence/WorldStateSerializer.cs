@@ -136,7 +136,7 @@ public static class WorldStateSerializer
             previousZoneId = zoneIdValue;
 
             TileMap map = ReadMap(reader);
-            ZoneEntities entities = ReadEntities(reader);
+            ZoneEntities entities = ReadEntities(reader, version);
 
             zones.Add(new ZoneState(new ZoneId(zoneIdValue), map, entities));
         }
@@ -192,9 +192,22 @@ public static class WorldStateSerializer
             Zones: payload.Zones.OrderBy(z => z.Id.Value).ToImmutableArray(),
             LootEntities: payload.LootEntities.OrderBy(l => l.Id.Value).ToImmutableArray(),
             PlayerInventories: payload.PlayerInventories.OrderBy(i => i.EntityId.Value).ToImmutableArray(),
-            PlayerWallets: ImmutableArray<PlayerWalletState>.Empty,
-            Vendors: ImmutableArray<VendorDefinition>.Empty,
-            VendorAudit: ImmutableArray<VendorTransactionAuditEntry>.Empty,
+            PlayerWallets: (payload.Version >= 4 ? payload.PlayerWallets : ImmutableArray<PlayerWalletState>.Empty)
+                .OrderBy(w => w.EntityId.Value)
+                .ToImmutableArray(),
+            Vendors: (payload.Version >= 4 ? payload.Vendors : ImmutableArray<VendorDefinition>.Empty)
+                .OrderBy(v => v.ZoneId.Value)
+                .ThenBy(v => v.VendorId, StringComparer.Ordinal)
+                .ToImmutableArray(),
+            VendorAudit: (payload.Version >= 4 ? payload.VendorAudit : ImmutableArray<VendorTransactionAuditEntry>.Empty)
+                .OrderBy(e => e.Tick)
+                .ThenBy(e => e.PlayerEntityId.Value)
+                .ThenBy(e => e.ZoneId.Value)
+                .ThenBy(e => e.VendorId, StringComparer.Ordinal)
+                .ThenBy(e => (int)e.Action)
+                .ThenBy(e => e.ItemId, StringComparer.Ordinal)
+                .ThenBy(e => e.Quantity)
+                .ToImmutableArray(),
             CombatEvents: ImmutableArray<CombatEvent>.Empty);
     }
 
@@ -331,7 +344,7 @@ public static class WorldStateSerializer
         }
     }
 
-    private static ZoneEntities ReadEntities(BinaryReader reader)
+    private static ZoneEntities ReadEntities(BinaryReader reader, int snapshotVersion)
     {
         int entityCount = reader.ReadInt32();
         ValidateCount(entityCount, MaxEntityCountPerZone, nameof(entityCount));
@@ -387,12 +400,18 @@ public static class WorldStateSerializer
 
             if (mask.Has(ComponentMask.CombatBit))
             {
+                Fix32 range = new(reader.ReadInt32());
+                int damage = reader.ReadInt32();
+                int defense = snapshotVersion >= 5 ? reader.ReadInt32() : 0;
+                int cooldownTicks = reader.ReadInt32();
+                int lastAttackTick = reader.ReadInt32();
+
                 entityCombat = new CombatComponent(
-                    Range: new Fix32(reader.ReadInt32()),
-                    Damage: reader.ReadInt32(),
-                    Defense: reader.ReadInt32(),
-                    CooldownTicks: reader.ReadInt32(),
-                    LastAttackTick: reader.ReadInt32());
+                    Range: range,
+                    Damage: damage,
+                    Defense: defense,
+                    CooldownTicks: cooldownTicks,
+                    LastAttackTick: lastAttackTick);
             }
 
             if (mask.Has(ComponentMask.AiBit))
