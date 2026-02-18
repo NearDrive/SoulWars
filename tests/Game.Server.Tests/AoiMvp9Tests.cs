@@ -68,14 +68,17 @@ public sealed class AoiMvp9Tests
         Assert.Equal(leaveViewFromB.Leaves.OrderBy(id => id), leaveViewFromB.Leaves);
 
         endpointA.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(1)));
+        EnterZoneAck reenterAckA = WaitForEnterZoneAck(host, endpointA, maxSteps: 64);
+        int reenterEntityId = reenterAckA.EntityId;
+
         SnapshotV2 enterViewFromB = WaitForSnapshotCondition(
             host,
             endpointB,
-            predicate: snapshot => snapshot.Enters.Any(entity => entity.EntityId == aId),
+            predicate: snapshot => snapshot.Enters.Any(entity => entity.EntityId == reenterEntityId),
             maxSteps: 64);
 
-        Assert.Contains(enterViewFromB.Enters, entity => entity.EntityId == aId);
-        Assert.DoesNotContain(enterViewFromB.Leaves, id => id == aId);
+        Assert.Contains(enterViewFromB.Enters, entity => entity.EntityId == reenterEntityId);
+        Assert.DoesNotContain(enterViewFromB.Leaves, id => id == reenterEntityId);
         Assert.Equal(enterViewFromB.Enters.OrderBy(entity => entity.EntityId).Select(entity => entity.EntityId),
             enterViewFromB.Enters.Select(entity => entity.EntityId));
         Assert.NotEqual(aId, bId);
@@ -176,6 +179,25 @@ public sealed class AoiMvp9Tests
         }
 
         return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
+    private static EnterZoneAck WaitForEnterZoneAck(ServerHost host, InMemoryEndpoint endpoint, int maxSteps)
+    {
+        for (int i = 0; i < maxSteps; i++)
+        {
+            while (endpoint.TryDequeueFromServer(out byte[] payload))
+            {
+                if (ProtocolCodec.TryDecodeServer(payload, out IServerMessage? message, out _) && message is EnterZoneAck ack)
+                {
+                    return ack;
+                }
+            }
+
+            host.StepOnce();
+        }
+
+        Assert.Fail($"EnterZoneAck not observed within {maxSteps} steps.");
+        return null!;
     }
 
     private static SnapshotV2 WaitForSnapshotCondition(
