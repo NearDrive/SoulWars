@@ -88,11 +88,11 @@ public sealed record EntityState(
     int AttackDamage,
     int AttackCooldownTicks,
     int LastAttackTick,
-    int Defense = 0,
     EntityKind Kind = EntityKind.Player,
     int NextWanderChangeTick = 0,
     sbyte WanderX = 0,
-    sbyte WanderY = 0);
+    sbyte WanderY = 0,
+    int Defense = 0);
 
 public sealed record ZoneEntities(
     ImmutableArray<EntityId> AliveIds,
