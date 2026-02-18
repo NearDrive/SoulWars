@@ -11,7 +11,8 @@ public static class CoreInvariants
         ArgumentNullException.ThrowIfNull(world);
 
         Dictionary<int, ZoneState> zonesById = world.Zones.ToDictionary(z => z.Id.Value);
-        HashSet<int> seenEntityIds = new();
+        WorldInvariants.AssertNoEntityDupesAcrossZones(world, tick);
+
         Dictionary<int, int> entityZones = new();
         HashSet<int> seenLootIds = new();
         int lastZoneId = int.MinValue;
@@ -91,11 +92,6 @@ public static class CoreInvariants
 
                 lastEntityId = entity.Id.Value;
 
-                if (!seenEntityIds.Add(entity.Id.Value))
-                {
-                    throw new InvariantViolationException($"invariant=UniqueEntityAcrossZones tick={tick} zoneId={zone.Id.Value} entityId={entity.Id.Value}");
-                }
-
                 entityZones[entity.Id.Value] = zone.Id.Value;
 
                 if (entity.Hp > entity.MaxHp)
@@ -168,7 +164,7 @@ public static class CoreInvariants
                 throw new InvariantViolationException($"invariant=UniqueLootEntityId tick={tick} lootEntityId={loot.Id.Value}");
             }
 
-            if (seenEntityIds.Contains(loot.Id.Value))
+            if (entityZones.ContainsKey(loot.Id.Value))
             {
                 throw new InvariantViolationException($"invariant=LootEntityIdCollision tick={tick} lootEntityId={loot.Id.Value}");
             }

@@ -165,7 +165,11 @@ public static class ReplayRunner
             }
 
             logger.LogInformation(BotRunnerLogEvents.ScenarioEnd, "ScenarioEnd checksum={Checksum} ticks={Ticks}", finalChecksum, header.TickCount);
-            return new ReplayExecutionResult(finalChecksum, expectedChecksum);
+            string finalGlobalChecksum = actualTickReports.Count > 0 ? actualTickReports[^1].GlobalChecksum : string.Empty;
+            ImmutableArray<ZoneChecksum> finalZoneChecksums = actualTickReports.Count > 0 ? actualTickReports[^1].ZoneChecksums : ImmutableArray<ZoneChecksum>.Empty;
+            int finalTick = actualTickReports.Count > 0 ? actualTickReports[^1].Tick : 0;
+
+            return new ReplayExecutionResult(finalChecksum, expectedChecksum, finalGlobalChecksum, finalZoneChecksums, finalTick);
         }
         finally
         {
@@ -391,7 +395,12 @@ public sealed record ReplayMismatchDiffLong(string Key, long Expected, long Actu
     public long Delta => Actual - Expected;
 }
 
-public sealed record ReplayExecutionResult(string Checksum, string? ExpectedChecksum);
+public sealed record ReplayExecutionResult(
+    string Checksum,
+    string? ExpectedChecksum,
+    string FinalGlobalChecksum = "",
+    ImmutableArray<ZoneChecksum> FinalZoneChecksums = default,
+    int FinalTick = 0);
 
 public sealed record ReplayVerifyOptions(string? OutputDir);
 

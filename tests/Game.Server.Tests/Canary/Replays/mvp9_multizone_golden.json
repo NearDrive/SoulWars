@@ -1,0 +1,11 @@
+{
+  "serverSeed": 94217,
+  "tickCount": 96,
+  "snapshotEveryTicks": 2,
+  "botCount": 2,
+  "zoneId": 1,
+  "baseBotSeed": 15000,
+  "zoneCount": 2,
+  "npcCount": 0,
+  "visionRadiusTiles": 12
+}
