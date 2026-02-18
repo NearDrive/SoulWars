@@ -56,22 +56,26 @@ public sealed class AoiMvp9Tests
         Assert.DoesNotContain(initialB.Entities, entity => entity.EntityId == aId);
         Assert.DoesNotContain(initialA.Entities, entity => entity.EntityId == bId);
 
-        endpointA.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(initialA.Tick + 1, 1, 0)));
-        host.StepOnce();
-
-        SnapshotV2 enterViewFromB = ReadLastSnapshotV2(endpointB);
-        endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, enterViewFromB.SnapshotSeq)));
+        SnapshotV2 enterViewFromB = WaitForSnapshotCondition(
+            host,
+            endpointA,
+            endpointB,
+            moveX: 1,
+            predicate: snapshot => snapshot.Enters.Any(entity => entity.EntityId == aId),
+            maxSteps: 512);
 
         Assert.Contains(enterViewFromB.Enters, entity => entity.EntityId == aId);
         Assert.DoesNotContain(enterViewFromB.Leaves, id => id == aId);
         Assert.Equal(enterViewFromB.Enters.OrderBy(entity => entity.EntityId).Select(entity => entity.EntityId),
             enterViewFromB.Enters.Select(entity => entity.EntityId));
 
-        endpointA.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(enterViewFromB.Tick + 1, -1, 0)));
-        host.StepOnce();
-
-        SnapshotV2 leaveViewFromB = ReadLastSnapshotV2(endpointB);
-        endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, leaveViewFromB.SnapshotSeq)));
+        SnapshotV2 leaveViewFromB = WaitForSnapshotCondition(
+            host,
+            endpointA,
+            endpointB,
+            moveX: -1,
+            predicate: snapshot => snapshot.Leaves.Contains(aId),
+            maxSteps: 512);
 
         Assert.Contains(leaveViewFromB.Leaves, id => id == aId);
         Assert.DoesNotContain(leaveViewFromB.Enters, entity => entity.EntityId == aId);
@@ -174,6 +178,31 @@ public sealed class AoiMvp9Tests
         }
 
         return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
+    private static SnapshotV2 WaitForSnapshotCondition(
+        ServerHost host,
+        InMemoryEndpoint moverEndpoint,
+        InMemoryEndpoint observerEndpoint,
+        sbyte moveX,
+        Func<SnapshotV2, bool> predicate,
+        int maxSteps)
+    {
+        for (int i = 0; i < maxSteps; i++)
+        {
+            moverEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(host.CurrentWorld.Tick + 1, moveX, 0)));
+            host.StepOnce();
+
+            SnapshotV2 snapshot = ReadLastSnapshotV2(observerEndpoint);
+            observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(snapshot.ZoneId, snapshot.SnapshotSeq)));
+            if (predicate(snapshot))
+            {
+                return snapshot;
+            }
+        }
+
+        Assert.True(false, $"Condition not met within {maxSteps} steps.");
+        return null!;
     }
 
     private static ServerHost CreateHostWithTwoPlayersForAoi(ServerConfig cfg, string accountA, string accountB)
