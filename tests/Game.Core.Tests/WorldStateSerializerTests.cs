@@ -171,6 +171,7 @@ public sealed class WorldStateSerializerTests
                 CombatComponent combat = entities.Combat[i];
                 writer.Write(combat.Range.Raw);
                 writer.Write(combat.Damage);
+                writer.Write(combat.Defense);
                 writer.Write(combat.CooldownTicks);
                 writer.Write(combat.LastAttackTick);
 

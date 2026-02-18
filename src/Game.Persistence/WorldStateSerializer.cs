@@ -14,19 +14,21 @@ public static class WorldStateSerializer
         ImmutableArray<PlayerInventoryState> PlayerInventories,
         ImmutableArray<PlayerWalletState> PlayerWallets,
         ImmutableArray<VendorDefinition> Vendors,
-        ImmutableArray<VendorTransactionAuditEntry> VendorAudit);
+        ImmutableArray<VendorTransactionAuditEntry> VendorAudit,
+        ImmutableArray<CombatEvent> CombatEvents);
 
-    private sealed record V4SnapshotPayload(
+    private sealed record V5SnapshotPayload(
         int Tick,
         ImmutableArray<ZoneState> Zones,
         ImmutableArray<LootEntityState> LootEntities,
         ImmutableArray<PlayerInventoryState> PlayerInventories,
         ImmutableArray<PlayerWalletState> PlayerWallets,
         ImmutableArray<VendorDefinition> Vendors,
-        ImmutableArray<VendorTransactionAuditEntry> VendorAudit);
+        ImmutableArray<VendorTransactionAuditEntry> VendorAudit,
+        ImmutableArray<CombatEvent> CombatEvents);
 
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 4;
+    private const int CurrentVersion = 5;
     public static int SerializerVersion => CurrentVersion;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
@@ -39,6 +41,7 @@ public static class WorldStateSerializer
     private const int MaxVendorCount = 100_000;
     private const int MaxVendorOffers = 4096;
     private const int MaxVendorAuditCount = 5_000_000;
+    private const int MaxCombatEventCount = 10_000_000;
 
     public static void Save(Stream stream, WorldState world)
     {
@@ -68,6 +71,7 @@ public static class WorldStateSerializer
         WritePlayerWallets(writer, world.PlayerWallets.IsDefault ? ImmutableArray<PlayerWalletState>.Empty : world.PlayerWallets);
         WriteVendors(writer, world.Vendors.IsDefault ? ImmutableArray<VendorDefinition>.Empty : world.Vendors);
         WriteVendorAudit(writer, world.VendorTransactionAuditLog.IsDefault ? ImmutableArray<VendorTransactionAuditEntry>.Empty : world.VendorTransactionAuditLog);
+        WriteCombatEvents(writer, world.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : world.CombatEvents);
     }
 
     public static WorldState Load(Stream stream)
@@ -78,8 +82,8 @@ public static class WorldStateSerializer
         {
             using BinaryReader reader = new(stream, Encoding.UTF8, leaveOpen: true);
             RawSnapshotPayload raw = LoadRaw(reader);
-            V4SnapshotPayload migrated = MigrateToV4(raw);
-            return LoadV4(migrated);
+            V5SnapshotPayload migrated = MigrateToV5(raw);
+            return LoadV5(migrated);
         }
         catch (EndOfStreamException ex)
         {
@@ -109,7 +113,7 @@ public static class WorldStateSerializer
         }
 
         int version = reader.ReadInt32();
-        if (version is not (1 or 2 or 3 or CurrentVersion))
+        if (version is not (1 or 2 or 3 or 4 or CurrentVersion))
         {
             throw new InvalidDataException($"Unsupported world-state version '{version}'.");
         }
@@ -152,6 +156,9 @@ public static class WorldStateSerializer
         ImmutableArray<VendorTransactionAuditEntry> vendorAudit = version >= 4
             ? ReadVendorAudit(reader)
             : ImmutableArray<VendorTransactionAuditEntry>.Empty;
+        ImmutableArray<CombatEvent> combatEvents = version >= 5
+            ? ReadCombatEvents(reader)
+            : ImmutableArray<CombatEvent>.Empty;
 
         return new RawSnapshotPayload(
             Version: version,
@@ -161,34 +168,37 @@ public static class WorldStateSerializer
             PlayerInventories: playerInventories,
             PlayerWallets: playerWallets,
             Vendors: vendors,
-            VendorAudit: vendorAudit);
+            VendorAudit: vendorAudit,
+            CombatEvents: combatEvents);
     }
 
-    private static V4SnapshotPayload MigrateToV4(RawSnapshotPayload payload)
+    private static V5SnapshotPayload MigrateToV5(RawSnapshotPayload payload)
     {
         if (payload.Version == CurrentVersion)
         {
-            return new V4SnapshotPayload(
+            return new V5SnapshotPayload(
                 Tick: payload.Tick,
                 Zones: payload.Zones,
                 LootEntities: payload.LootEntities,
                 PlayerInventories: payload.PlayerInventories,
                 PlayerWallets: payload.PlayerWallets,
                 Vendors: payload.Vendors,
-                VendorAudit: payload.VendorAudit);
+                VendorAudit: payload.VendorAudit,
+                CombatEvents: payload.CombatEvents);
         }
 
-        return new V4SnapshotPayload(
+        return new V5SnapshotPayload(
             Tick: payload.Tick,
             Zones: payload.Zones.OrderBy(z => z.Id.Value).ToImmutableArray(),
             LootEntities: payload.LootEntities.OrderBy(l => l.Id.Value).ToImmutableArray(),
             PlayerInventories: payload.PlayerInventories.OrderBy(i => i.EntityId.Value).ToImmutableArray(),
             PlayerWallets: ImmutableArray<PlayerWalletState>.Empty,
             Vendors: ImmutableArray<VendorDefinition>.Empty,
-            VendorAudit: ImmutableArray<VendorTransactionAuditEntry>.Empty);
+            VendorAudit: ImmutableArray<VendorTransactionAuditEntry>.Empty,
+            CombatEvents: ImmutableArray<CombatEvent>.Empty);
     }
 
-    private static WorldState LoadV4(V4SnapshotPayload payload)
+    private static WorldState LoadV5(V5SnapshotPayload payload)
     {
         ImmutableArray<EntityLocation> locations = BuildEntityLocations(payload.Zones);
         WorldState loaded = new(
@@ -199,7 +209,8 @@ public static class WorldStateSerializer
             payload.PlayerInventories,
             PlayerWallets: payload.PlayerWallets,
             VendorTransactionAuditLog: payload.VendorAudit,
-            Vendors: payload.Vendors);
+            Vendors: payload.Vendors,
+            CombatEvents: payload.CombatEvents);
 
         CoreInvariants.Validate(loaded, payload.Tick);
         return loaded;
@@ -305,6 +316,7 @@ public static class WorldStateSerializer
                 CombatComponent combat = entities.Combat[i];
                 writer.Write(combat.Range.Raw);
                 writer.Write(combat.Damage);
+                writer.Write(combat.Defense);
                 writer.Write(combat.CooldownTicks);
                 writer.Write(combat.LastAttackTick);
             }
@@ -378,6 +390,7 @@ public static class WorldStateSerializer
                 entityCombat = new CombatComponent(
                     Range: new Fix32(reader.ReadInt32()),
                     Damage: reader.ReadInt32(),
+                    Defense: reader.ReadInt32(),
                     CooldownTicks: reader.ReadInt32(),
                     LastAttackTick: reader.ReadInt32());
             }
@@ -567,6 +580,57 @@ public static class WorldStateSerializer
         return inventories.MoveToImmutable();
     }
 
+
+    private static void WriteCombatEvents(BinaryWriter writer, ImmutableArray<CombatEvent> combatEvents)
+    {
+        ImmutableArray<CombatEvent> ordered = combatEvents
+            .OrderBy(e => e.Tick)
+            .ThenBy(e => e.SourceId.Value)
+            .ThenBy(e => e.TargetId.Value)
+            .ThenBy(e => e.SkillId.Value)
+            .ToImmutableArray();
+
+        writer.Write(ordered.Length);
+        foreach (CombatEvent evt in ordered)
+        {
+            writer.Write(evt.Tick);
+            writer.Write(evt.SourceId.Value);
+            writer.Write(evt.TargetId.Value);
+            writer.Write(evt.SkillId.Value);
+            writer.Write((byte)evt.Type);
+            writer.Write(evt.Amount);
+        }
+    }
+
+    private static ImmutableArray<CombatEvent> ReadCombatEvents(BinaryReader reader)
+    {
+        int count = reader.ReadInt32();
+        ValidateCount(count, MaxCombatEventCount, nameof(count));
+
+        ImmutableArray<CombatEvent>.Builder events = ImmutableArray.CreateBuilder<CombatEvent>(count);
+        for (int i = 0; i < count; i++)
+        {
+            int tick = reader.ReadInt32();
+            int sourceId = reader.ReadInt32();
+            int targetId = reader.ReadInt32();
+            int skillId = reader.ReadInt32();
+            byte typeRaw = reader.ReadByte();
+            int amount = reader.ReadInt32();
+            if (!Enum.IsDefined(typeof(CombatEventType), typeRaw))
+            {
+                throw new InvalidDataException($"Unknown CombatEventType value '{typeRaw}'.");
+            }
+
+            events.Add(new CombatEvent(tick, new EntityId(sourceId), new EntityId(targetId), new SkillId(skillId), (CombatEventType)typeRaw, amount));
+        }
+
+        return events
+            .OrderBy(e => e.Tick)
+            .ThenBy(e => e.SourceId.Value)
+            .ThenBy(e => e.TargetId.Value)
+            .ThenBy(e => e.SkillId.Value)
+            .ToImmutableArray();
+    }
     private static ImmutableArray<EntityLocation> BuildEntityLocations(ImmutableArray<ZoneState> zones)
     {
         ImmutableArray<EntityLocation>.Builder builder = ImmutableArray.CreateBuilder<EntityLocation>();
