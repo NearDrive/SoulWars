@@ -31,7 +31,30 @@ public readonly record struct SkillDefinition(
     int RangeQRaw,
     int CooldownTicks,
     int ResourceCost,
-    CastTargetKind TargetKind);
+    CastTargetKind TargetKind,
+    SkillEffectKind EffectKind = SkillEffectKind.Damage,
+    int BaseAmount = 0,
+    int CoefRaw = 0);
+
+public enum SkillEffectKind : byte
+{
+    Damage = 1,
+    Heal = 2
+}
+
+public enum CombatEventType : byte
+{
+    Damage = 1,
+    Heal = 2
+}
+
+public readonly record struct CombatEvent(
+    int Tick,
+    EntityId SourceId,
+    EntityId TargetId,
+    SkillId SkillId,
+    CombatEventType Type,
+    int Amount);
 
 public enum EntityKind : byte
 {
@@ -51,7 +74,7 @@ public readonly record struct ComponentMask(uint Bits)
 
 public readonly record struct PositionComponent(Vec2Fix Pos, Vec2Fix Vel);
 public readonly record struct HealthComponent(int MaxHp, int Hp, bool IsAlive);
-public readonly record struct CombatComponent(Fix32 Range, int Damage, int CooldownTicks, int LastAttackTick);
+public readonly record struct CombatComponent(Fix32 Range, int Damage, int Defense, int CooldownTicks, int LastAttackTick);
 public readonly record struct AiComponent(int NextWanderChangeTick, sbyte WanderX, sbyte WanderY);
 
 public sealed record EntityState(
@@ -68,7 +91,8 @@ public sealed record EntityState(
     EntityKind Kind = EntityKind.Player,
     int NextWanderChangeTick = 0,
     sbyte WanderX = 0,
-    sbyte WanderY = 0);
+    sbyte WanderY = 0,
+    int Defense = 0);
 
 public sealed record ZoneEntities(
     ImmutableArray<EntityId> AliveIds,
@@ -137,6 +161,7 @@ public sealed record ZoneEntities(
                 AttackDamage: combat.Damage,
                 AttackCooldownTicks: combat.CooldownTicks,
                 LastAttackTick: combat.LastAttackTick,
+                Defense: combat.Defense,
                 Kind: Kinds[i],
                 NextWanderChangeTick: ai.NextWanderChangeTick,
                 WanderX: ai.WanderX,
@@ -175,7 +200,7 @@ public sealed record ZoneEntities(
             kinds.Add(entity.Kind);
             positions.Add(new PositionComponent(entity.Pos, entity.Vel));
             health.Add(new HealthComponent(entity.MaxHp, entity.Hp, entity.IsAlive));
-            combat.Add(new CombatComponent(entity.AttackRange, entity.AttackDamage, entity.AttackCooldownTicks, entity.LastAttackTick));
+            combat.Add(new CombatComponent(entity.AttackRange, entity.AttackDamage, entity.Defense, entity.AttackCooldownTicks, entity.LastAttackTick));
             ai.Add(entity.Kind == EntityKind.Npc
                 ? new AiComponent(entity.NextWanderChangeTick, entity.WanderX, entity.WanderY)
                 : default);
@@ -277,7 +302,8 @@ public sealed record WorldState(
     ImmutableArray<PlayerDeathAuditEntry> PlayerDeathAuditLog = default,
     ImmutableArray<PlayerWalletState> PlayerWallets = default,
     ImmutableArray<VendorTransactionAuditEntry> VendorTransactionAuditLog = default,
-    ImmutableArray<VendorDefinition> Vendors = default)
+    ImmutableArray<VendorDefinition> Vendors = default,
+    ImmutableArray<CombatEvent> CombatEvents = default)
 {
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
@@ -451,6 +477,19 @@ public sealed record WorldState(
                 .OrderBy(v => v.ZoneId.Value)
                 .ThenBy(v => v.VendorId, StringComparer.Ordinal)
                 .Select(v => v with { Offers = v.CanonicalOffers })
+                .ToImmutableArray()
+        };
+    }
+
+    public WorldState WithCombatEvents(ImmutableArray<CombatEvent> combatEvents)
+    {
+        return this with
+        {
+            CombatEvents = combatEvents
+                .OrderBy(e => e.Tick)
+                .ThenBy(e => e.SourceId.Value)
+                .ThenBy(e => e.TargetId.Value)
+                .ThenBy(e => e.SkillId.Value)
                 .ToImmutableArray()
         };
     }

@@ -146,6 +146,27 @@ public static class StateChecksum
             }
         }
 
+
+        ImmutableArray<CombatEvent> orderedCombatEvents = (state.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : state.CombatEvents)
+            .OrderBy(e => e.Tick)
+            .ThenBy(e => e.SourceId.Value)
+            .ThenBy(e => e.TargetId.Value)
+            .ThenBy(e => e.SkillId.Value)
+            .ToImmutableArray();
+        if (!orderedCombatEvents.IsDefaultOrEmpty)
+        {
+            writer.Write(unchecked((int)0x43455654)); // "CEVT" marker to keep legacy checksum compatibility when empty
+            writer.Write(orderedCombatEvents.Length);
+            foreach (CombatEvent evt in orderedCombatEvents)
+            {
+                writer.Write(evt.Tick);
+                writer.Write(evt.SourceId.Value);
+                writer.Write(evt.TargetId.Value);
+                writer.Write(evt.SkillId.Value);
+                writer.Write((byte)evt.Type);
+                writer.Write(evt.Amount);
+            }
+        }
         ImmutableArray<VendorTransactionAuditEntry> orderedVendorAudit = (state.VendorTransactionAuditLog.IsDefault ? ImmutableArray<VendorTransactionAuditEntry>.Empty : state.VendorTransactionAuditLog)
             .OrderBy(e => e.Tick)
             .ThenBy(e => e.PlayerEntityId.Value)
