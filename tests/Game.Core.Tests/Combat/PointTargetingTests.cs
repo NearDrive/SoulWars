@@ -39,8 +39,8 @@ public sealed class PointTargetingTests
             ZoneId: new ZoneId(1),
             SkillId: new SkillId(20),
             TargetKind: CastTargetKind.Point,
-            TargetPosXRaw: Fix32.FromInt(11).Raw,
-            TargetPosYRaw: Fix32.FromInt(11).Raw);
+            TargetPosXRaw: Fix32.FromInt(8).Raw,
+            TargetPosYRaw: Fix32.FromInt(2).Raw);
 
         ZoneState zone = Assert.Single(state.Zones);
         CastResult result = Simulation.ValidateCastSkill(config, state.Tick + 1, zone, cast);
