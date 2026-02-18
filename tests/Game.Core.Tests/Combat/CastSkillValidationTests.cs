@@ -10,7 +10,7 @@ public sealed class CastSkillValidationTests
     public void CastSkill_OutOfRange_Rejected_Fix32()
     {
         SimulationConfig config = CreateConfigWithSkill(range: Fix32.FromInt(4));
-        WorldState state = SpawnDuel(config, new Vec2Fix(Fix32.Zero, Fix32.Zero), new Vec2Fix(Fix32.FromInt(5), Fix32.Zero));
+        WorldState state = SpawnDuel(config, new Vec2Fix(Fix32.FromInt(2), Fix32.FromInt(2)), new Vec2Fix(Fix32.FromInt(7), Fix32.FromInt(2)));
 
         WorldCommand cast = new(
             Kind: WorldCommandKind.CastSkill,
@@ -30,7 +30,7 @@ public sealed class CastSkillValidationTests
     public void CastSkill_InRange_Accepted_Fix32()
     {
         SimulationConfig config = CreateConfigWithSkill(range: Fix32.FromInt(4));
-        WorldState state = SpawnDuel(config, new Vec2Fix(Fix32.Zero, Fix32.Zero), new Vec2Fix(Fix32.FromInt(3), Fix32.Zero));
+        WorldState state = SpawnDuel(config, new Vec2Fix(Fix32.FromInt(2), Fix32.FromInt(2)), new Vec2Fix(Fix32.FromInt(5), Fix32.FromInt(2)));
 
         WorldCommand cast = new(
             Kind: WorldCommandKind.CastSkill,
@@ -57,8 +57,8 @@ public sealed class CastSkillValidationTests
     public void CastSkill_OrderCanonical_SameTick()
     {
         SimulationConfig config = CreateConfigWithSkill(range: Fix32.FromInt(6));
-        WorldState state = SpawnDuel(config, new Vec2Fix(Fix32.Zero, Fix32.Zero), new Vec2Fix(Fix32.FromInt(1), Fix32.Zero));
-        state = AddCaster(config, state, new EntityId(3), new Vec2Fix(Fix32.FromInt(2), Fix32.Zero));
+        WorldState state = SpawnDuel(config, new Vec2Fix(Fix32.FromInt(2), Fix32.FromInt(2)), new Vec2Fix(Fix32.FromInt(3), Fix32.FromInt(2)));
+        state = AddCaster(config, state, new EntityId(3), new Vec2Fix(Fix32.FromInt(4), Fix32.FromInt(2)));
 
         WorldCommand castFrom3 = new(
             Kind: WorldCommandKind.CastSkill,
@@ -96,7 +96,7 @@ public sealed class CastSkillValidationTests
 
     private static string RunCastSkillSequence(SimulationConfig config)
     {
-        WorldState state = SpawnDuel(config, new Vec2Fix(Fix32.Zero, Fix32.Zero), new Vec2Fix(Fix32.FromInt(3), Fix32.Zero));
+        WorldState state = SpawnDuel(config, new Vec2Fix(Fix32.FromInt(2), Fix32.FromInt(2)), new Vec2Fix(Fix32.FromInt(5), Fix32.FromInt(2)));
 
         WorldCommand castAtEntity = new(
             Kind: WorldCommandKind.CastSkill,
