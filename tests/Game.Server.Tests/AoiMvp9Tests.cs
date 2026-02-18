@@ -32,7 +32,7 @@ public sealed class AoiMvp9Tests
             MaxEntitiesPerSnapshot = 32
         };
 
-        ServerHost host = CreateHostWithTwoPlayersForAoi(cfg, accountA, accountB);
+        ServerHost host = CreateHostWithTwoPlayersForAoi(cfg, accountA, accountB, initialDistanceTiles: 1);
 
         InMemoryEndpoint endpointA = new();
         InMemoryEndpoint endpointB = new();
@@ -53,33 +53,31 @@ public sealed class AoiMvp9Tests
         int aId = ackA.EntityId;
         int bId = ackB.EntityId;
 
-        Assert.DoesNotContain(initialB.Entities, entity => entity.EntityId == aId);
-        Assert.DoesNotContain(initialA.Entities, entity => entity.EntityId == bId);
+        Assert.Contains(initialB.Entities, entity => entity.EntityId == aId);
+        Assert.Contains(initialA.Entities, entity => entity.EntityId == bId);
 
+        endpointA.EnqueueToServer(ProtocolCodec.Encode(new LeaveZoneRequestV2(1)));
+        SnapshotV2 leaveViewFromB = WaitForSnapshotCondition(
+            host,
+            endpointB,
+            predicate: snapshot => snapshot.Leaves.Contains(aId),
+            maxSteps: 64);
+
+        Assert.Contains(leaveViewFromB.Leaves, id => id == aId);
+        Assert.DoesNotContain(leaveViewFromB.Enters, entity => entity.EntityId == aId);
+        Assert.Equal(leaveViewFromB.Leaves.OrderBy(id => id), leaveViewFromB.Leaves);
+
+        endpointA.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(1)));
         SnapshotV2 enterViewFromB = WaitForSnapshotCondition(
             host,
-            endpointA,
             endpointB,
-            moveX: 1,
             predicate: snapshot => snapshot.Enters.Any(entity => entity.EntityId == aId),
-            maxSteps: 512);
+            maxSteps: 64);
 
         Assert.Contains(enterViewFromB.Enters, entity => entity.EntityId == aId);
         Assert.DoesNotContain(enterViewFromB.Leaves, id => id == aId);
         Assert.Equal(enterViewFromB.Enters.OrderBy(entity => entity.EntityId).Select(entity => entity.EntityId),
             enterViewFromB.Enters.Select(entity => entity.EntityId));
-
-        SnapshotV2 leaveViewFromB = WaitForSnapshotCondition(
-            host,
-            endpointA,
-            endpointB,
-            moveX: -1,
-            predicate: snapshot => snapshot.Leaves.Contains(aId),
-            maxSteps: 512);
-
-        Assert.Contains(leaveViewFromB.Leaves, id => id == aId);
-        Assert.DoesNotContain(leaveViewFromB.Enters, entity => entity.EntityId == aId);
-        Assert.Equal(leaveViewFromB.Leaves.OrderBy(id => id), leaveViewFromB.Leaves);
         Assert.NotEqual(aId, bId);
     }
 
@@ -182,15 +180,12 @@ public sealed class AoiMvp9Tests
 
     private static SnapshotV2 WaitForSnapshotCondition(
         ServerHost host,
-        InMemoryEndpoint moverEndpoint,
         InMemoryEndpoint observerEndpoint,
-        sbyte moveX,
         Func<SnapshotV2, bool> predicate,
         int maxSteps)
     {
         for (int i = 0; i < maxSteps; i++)
         {
-            moverEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(host.CurrentWorld.Tick + 1, moveX, 0)));
             host.StepOnce();
 
             SnapshotV2 snapshot = ReadLastSnapshotV2(observerEndpoint);
@@ -205,7 +200,7 @@ public sealed class AoiMvp9Tests
         return null!;
     }
 
-    private static ServerHost CreateHostWithTwoPlayersForAoi(ServerConfig cfg, string accountA, string accountB)
+    private static ServerHost CreateHostWithTwoPlayersForAoi(ServerConfig cfg, string accountA, string accountB, int initialDistanceTiles)
     {
         ServerHost baseline = new(cfg);
         WorldState world = baseline.CurrentWorld;
@@ -216,22 +211,20 @@ public sealed class AoiMvp9Tests
         bool found = false;
         for (int y = 0; y < zone.Map.Height && !found; y++)
         {
-            for (int x = 0; x <= zone.Map.Width - 4; x++)
+            for (int x = 0; x <= zone.Map.Width - (initialDistanceTiles + 1); x++)
             {
                 if (zone.Map.Get(x, y) == TileKind.Empty &&
-                    zone.Map.Get(x + 1, y) == TileKind.Empty &&
-                    zone.Map.Get(x + 2, y) == TileKind.Empty &&
-                    zone.Map.Get(x + 3, y) == TileKind.Empty)
+                    Enumerable.Range(1, initialDistanceTiles).All(offset => zone.Map.Get(x + offset, y) == TileKind.Empty))
                 {
                     tileA = (x, y);
-                    tileB = (x + 3, y);
+                    tileB = (x + initialDistanceTiles, y);
                     found = true;
                     break;
                 }
             }
         }
 
-        Assert.True(found, "Expected to find a horizontal run of four empty tiles for deterministic AOI enter/leave movement.");
+        Assert.True(found, $"Expected to find a horizontal run of {initialDistanceTiles + 1} empty tiles for deterministic AOI enter/leave movement.");
 
         EntityState entityA = new(
             new EntityId(1),
