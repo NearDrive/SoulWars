@@ -116,7 +116,7 @@ public sealed class Mvp9InvariantsTests
 
             CorruptLatestSnapshotBlob(dbPath);
 
-            SnapshotChecksumMismatchException ex = Assert.Throws<SnapshotChecksumMismatchException>(() => store.LoadLatest());
+            SnapshotChecksumMismatchException ex = Assert.Throws<SnapshotChecksumMismatchException>(() => store.LoadWorld());
             Assert.Equal(checksum, ex.Expected);
             Assert.NotEqual(ex.Expected, ex.Actual);
             Assert.Contains($"expected={ex.Expected}", ex.Message, StringComparison.Ordinal);
