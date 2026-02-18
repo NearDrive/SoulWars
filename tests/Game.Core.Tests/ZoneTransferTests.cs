@@ -78,8 +78,8 @@ public sealed class ZoneTransferTests
     {
         SimulationConfig config = CreateConfig(seed: 2112) with { ZoneCount = 2 };
 
-        (ImmutableArray<ZoneTransferEvent> applied, _) runA = RunSameTickTransfers(config);
-        (ImmutableArray<ZoneTransferEvent> applied, _) runB = RunSameTickTransfers(config);
+        (ImmutableArray<ZoneTransferEvent> applied, string checksum) runA = RunSameTickTransfers(config);
+        (ImmutableArray<ZoneTransferEvent> applied, string checksum) runB = RunSameTickTransfers(config);
 
         Assert.Equal(runA.applied.ToArray(), runB.applied.ToArray());
     }

@@ -152,7 +152,7 @@ public sealed class MultiZoneSnapshotTests
         byte[] snapshot = WorldStateSerializer.SaveToBytes(baseline.CurrentWorld);
 
         WorldState resumeState = WorldStateSerializer.LoadFromBytes(snapshot);
-        ServerHost restarted = new(cfg, bootstrap: new ServerBootstrap(resumeState, ImmutableArray<BootstrapPlayerRecord>.Empty));
+        ServerHost restarted = new(cfg, bootstrap: new ServerBootstrap(resumeState, cfg.Seed, ImmutableArray<BootstrapPlayerRecord>.Empty));
 
         baseline.AdvanceTicks(8);
         restarted.AdvanceTicks(8);
