@@ -174,9 +174,9 @@ public sealed class CastSkillValidationTests
             NpcWanderPeriodTicks: 30,
             NpcAggroRange: Fix32.FromInt(6),
             SkillDefinitions: ImmutableArray.Create(
-                new SkillDefinition(new SkillId(10), range.Raw, CooldownTicks: 6, ResourceCost: 0, TargetKind: CastTargetKind.Entity),
-                new SkillDefinition(new SkillId(11), range.Raw, CooldownTicks: 4, ResourceCost: 0, TargetKind: CastTargetKind.Point),
-                new SkillDefinition(new SkillId(12), range.Raw, CooldownTicks: 2, ResourceCost: 0, TargetKind: CastTargetKind.Self)),
+                new SkillDefinition(new SkillId(10), range.Raw, HitRadiusRaw: Fix32.OneRaw, CooldownTicks: 6, ResourceCost: 0, TargetKind: CastTargetKind.Entity),
+                new SkillDefinition(new SkillId(11), range.Raw, HitRadiusRaw: Fix32.FromInt(2).Raw, CooldownTicks: 4, ResourceCost: 0, TargetKind: CastTargetKind.Point),
+                new SkillDefinition(new SkillId(12), range.Raw, HitRadiusRaw: Fix32.OneRaw, CooldownTicks: 2, ResourceCost: 0, TargetKind: CastTargetKind.Self)),
             Invariants: InvariantOptions.Enabled);
     }
 }
