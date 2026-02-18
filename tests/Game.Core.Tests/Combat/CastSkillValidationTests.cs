@@ -125,10 +125,31 @@ public sealed class CastSkillValidationTests
 
     private static WorldState SpawnDuel(SimulationConfig config, Vec2Fix p1, Vec2Fix p2)
     {
-        WorldState state = Simulation.CreateInitialState(config);
+        TileMap map = BuildOpenMap(config.MapWidth, config.MapHeight);
+        WorldState state = new(
+            Tick: 0,
+            Zones: ImmutableArray.Create(new ZoneState(new ZoneId(1), map, ImmutableArray<EntityState>.Empty)),
+            EntityLocations: ImmutableArray<EntityLocation>.Empty,
+            LootEntities: ImmutableArray<LootEntityState>.Empty);
+
         return Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
             new WorldCommand(WorldCommandKind.EnterZone, new EntityId(1), new ZoneId(1), SpawnPos: p1),
             new WorldCommand(WorldCommandKind.EnterZone, new EntityId(2), new ZoneId(1), SpawnPos: p2))));
+    }
+
+    private static TileMap BuildOpenMap(int width, int height)
+    {
+        ImmutableArray<TileKind>.Builder tiles = ImmutableArray.CreateBuilder<TileKind>(width * height);
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                bool border = x == 0 || y == 0 || x == width - 1 || y == height - 1;
+                tiles.Add(border ? TileKind.Solid : TileKind.Empty);
+            }
+        }
+
+        return new TileMap(width, height, tiles.MoveToImmutable());
     }
 
     private static WorldState AddCaster(SimulationConfig config, WorldState state, EntityId entityId, Vec2Fix pos)
