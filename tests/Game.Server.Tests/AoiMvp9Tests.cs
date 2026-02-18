@@ -201,7 +201,7 @@ public sealed class AoiMvp9Tests
             }
         }
 
-        Assert.True(false, $"Condition not met within {maxSteps} steps.");
+        Assert.Fail($"Condition not met within {maxSteps} steps.");
         return null!;
     }
 
