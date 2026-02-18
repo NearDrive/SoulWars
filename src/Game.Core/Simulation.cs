@@ -1607,13 +1607,13 @@ public static class Simulation
         }
         else
         {
-            targetPos = new Vec2Fix(Fix32.FromRaw(command.TargetPosXRaw), Fix32.FromRaw(command.TargetPosYRaw));
+            targetPos = new Vec2Fix(new Fix32(command.TargetPosXRaw), new Fix32(command.TargetPosYRaw));
         }
 
         Fix32 dx = caster.Pos.X - targetPos.X;
         Fix32 dy = caster.Pos.Y - targetPos.Y;
         Fix32 distSq = (dx * dx) + (dy * dy);
-        Fix32 range = Fix32.FromRaw(skill.Value.RangeQRaw);
+        Fix32 range = new Fix32(skill.Value.RangeQRaw);
         Fix32 rangeSq = range * range;
 
         if (distSq > rangeSq)
