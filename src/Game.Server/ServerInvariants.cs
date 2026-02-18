@@ -53,18 +53,20 @@ public static class ServerInvariants
             }
         }
 
+        WorldInvariants.AssertSortedAscending(
+            view.Snapshots,
+            snapshot => snapshot.ZoneId,
+            arrayName: "snapshots.zones",
+            tick: view.CurrentTick);
+
         foreach (Snapshot snapshot in view.Snapshots)
         {
-            int lastEntityId = int.MinValue;
-            foreach (SnapshotEntity entity in snapshot.Entities)
-            {
-                if (entity.EntityId < lastEntityId)
-                {
-                    throw new InvariantViolationException($"invariant=SnapshotEntitiesOrdered tick={snapshot.Tick} zoneId={snapshot.ZoneId} entityId={entity.EntityId} lastEntityId={lastEntityId}");
-                }
-
-                lastEntityId = entity.EntityId;
-            }
+            WorldInvariants.AssertSortedAscending(
+                snapshot.Entities,
+                entity => entity.EntityId,
+                arrayName: "snapshot.entities",
+                tick: snapshot.Tick,
+                zoneId: snapshot.ZoneId);
         }
 
         PersistenceInvariants.Validate(
