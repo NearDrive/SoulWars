@@ -1566,9 +1566,11 @@ public static class Simulation
         for (int i = 0; i < targetIndices.Length; i++)
         {
             int targetIndex = targetIndices[i];
-            EntityState target = targetUpdates.TryGetValue(targetIndex, out EntityState alreadyUpdated)
-                ? alreadyUpdated
-                : entities[targetIndex];
+            EntityState target = entities[targetIndex];
+            if (targetUpdates.TryGetValue(targetIndex, out EntityState? alreadyUpdated) && alreadyUpdated is not null)
+            {
+                target = alreadyUpdated;
+            }
 
             int amount = skill.Value.BaseAmount;
             if (skill.Value.CoefRaw != 0)
@@ -1621,7 +1623,7 @@ public static class Simulation
             {
                 builder.Add(updatedCaster);
             }
-            else if (targetUpdates.TryGetValue(i, out EntityState updatedTarget))
+            else if (targetUpdates.TryGetValue(i, out EntityState? updatedTarget) && updatedTarget is not null)
             {
                 builder.Add(updatedTarget);
             }
