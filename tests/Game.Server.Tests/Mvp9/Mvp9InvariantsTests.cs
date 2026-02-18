@@ -11,7 +11,7 @@ namespace Game.Server.Tests.Mvp9;
 public sealed class Mvp9InvariantsTests
 {
     [Fact]
-    public void Invariant_EntityIdUniqueAcrossZones()
+    public void Invariant_EntityIdUniqueAcrossZones_FailsFast()
     {
         EntityState shared = CreateEntity(101, 2, 2);
         WorldState world = new(
@@ -34,7 +34,7 @@ public sealed class Mvp9InvariantsTests
     }
 
     [Fact]
-    public void Invariant_CanonicalOrdering_SnapshotListsAreSorted()
+    public void Invariant_SnapshotCanonicalOrdering_FailsFastWhenUnsorted()
     {
         ServerHost host = new(ServerConfig.Default(seed: 52001) with
         {
@@ -83,18 +83,24 @@ public sealed class Mvp9InvariantsTests
             WorldInvariants.AssertSortedAscending(snapshot.Entities, e => e.EntityId, "snapshot.entities", snapshot.Tick, snapshot.ZoneId);
         }
 
+        Snapshot first = snapshots[0];
+        SnapshotEntity[] unsorted = first.Entities
+            .OrderByDescending(e => e.EntityId)
+            .ToArray();
 
         InvariantViolationException ex = Assert.Throws<InvariantViolationException>(() =>
-            WorldInvariants.AssertSortedAscending(new[] { 9, 4, 12 }, x => x, "snapshot.entities", tick: 9, zoneId: 1));
+            WorldInvariants.AssertSortedAscending(unsorted, x => x.EntityId, "snapshot.entities", tick: first.Tick, zoneId: first.ZoneId));
 
         Assert.Contains("array=snapshot.entities", ex.Message, StringComparison.Ordinal);
         Assert.Contains("index=1", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("prev=9", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("curr=4", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("prev=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("curr=", ex.Message, StringComparison.Ordinal);
+        Assert.Contains($"tick={first.Tick}", ex.Message, StringComparison.Ordinal);
+        Assert.Contains($"zoneId={first.ZoneId}", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Invariant_ChecksumMismatch_LoadFailsFastWithExpectedActual()
+    public void Invariant_SnapshotLoad_ChecksumMismatch_ShowsExpectedActual()
     {
         string dbPath = Path.Combine(Path.GetTempPath(), $"mvp9-checksum-{Guid.NewGuid():N}.db");
 

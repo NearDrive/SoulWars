@@ -25,6 +25,10 @@ public static class WorldInvariants
         }
     }
 
+
+    public static void AssertNoCrossZoneDupes(WorldState world, int tick)
+        => AssertNoEntityDupesAcrossZones(world, tick);
+
     public static void AssertSortedAscending<T>(
         IReadOnlyList<T> values,
         Func<T, int> keySelector,

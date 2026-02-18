@@ -9,6 +9,7 @@ public static class ServerInvariants
     {
         EnsureWorldEntityIdsUnique(view.World, view.CurrentTick);
         EnsureWorldPositionsFinite(view.World, view.CurrentTick);
+        WorldInvariants.AssertNoCrossZoneDupes(view.World, view.CurrentTick);
 
         int lastSessionId = 0;
         HashSet<int> sessionIds = new();
@@ -53,21 +54,7 @@ public static class ServerInvariants
             }
         }
 
-        WorldInvariants.AssertSortedAscending(
-            view.Snapshots,
-            snapshot => snapshot.ZoneId,
-            arrayName: "snapshots.zones",
-            tick: view.CurrentTick);
-
-        foreach (Snapshot snapshot in view.Snapshots)
-        {
-            WorldInvariants.AssertSortedAscending(
-                snapshot.Entities,
-                entity => entity.EntityId,
-                arrayName: "snapshot.entities",
-                tick: snapshot.Tick,
-                zoneId: snapshot.ZoneId);
-        }
+        AssertCanonicalOrders(view.Snapshots, view.CurrentTick);
 
         PersistenceInvariants.Validate(
             view.World,
@@ -80,6 +67,26 @@ public static class ServerInvariants
         if (view.CurrentTick < view.LastTick)
         {
             throw new InvariantViolationException($"invariant=ServerTickMonotonic currentTick={view.CurrentTick} lastTick={view.LastTick}");
+        }
+    }
+
+
+    private static void AssertCanonicalOrders(IReadOnlyList<Snapshot> snapshots, int tick)
+    {
+        WorldInvariants.AssertSortedAscending(
+            snapshots,
+            snapshot => snapshot.ZoneId,
+            arrayName: "snapshots.zones",
+            tick: tick);
+
+        foreach (Snapshot snapshot in snapshots)
+        {
+            WorldInvariants.AssertSortedAscending(
+                snapshot.Entities,
+                entity => entity.EntityId,
+                arrayName: "snapshot.entities",
+                tick: snapshot.Tick,
+                zoneId: snapshot.ZoneId);
         }
     }
 

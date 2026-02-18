@@ -6,7 +6,10 @@ namespace Game.Server.Tests.Canary;
 
 public sealed class Mvp9GoldenReplayTests
 {
+    private const string ExpectedFinalGlobalChecksum = "3eaf0f0f8a7b2f6ef43b48f95f6f2e7d8d1f7f861f7e0dcfcb1f8f5a6ce2a5c1";
+
     [Fact]
+    [Trait("Category", "ReplayVerify")]
     public void ReplayVerify_Mvp9MultiZone_Canary_Golden()
     {
         ScenarioConfig scenario = LoadScenario();
@@ -22,6 +25,7 @@ public sealed class Mvp9GoldenReplayTests
         Assert.Equal(
             result.FinalZoneChecksums.OrderBy(z => z.ZoneId).Select(z => z.ZoneId),
             result.FinalZoneChecksums.Select(z => z.ZoneId));
+        Assert.Equal(ExpectedFinalGlobalChecksum, result.FinalGlobalChecksum);
     }
 
     private static ScenarioConfig LoadScenario()
