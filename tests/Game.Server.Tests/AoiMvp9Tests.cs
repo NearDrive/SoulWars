@@ -141,6 +141,64 @@ public sealed class AoiMvp9Tests
         Assert.Equal(TestChecksum.NormalizeFullHex(run1.Checksum), TestChecksum.NormalizeFullHex(run2.Checksum));
     }
 
+    [Fact]
+    public void Session_ReceivesOnlySubscribedZone()
+    {
+        ServerHost host = new(ServerConfig.Default(seed: 9105) with
+        {
+            ZoneCount = 2,
+            SnapshotEveryTicks = 1,
+            NpcCountPerZone = 0
+        });
+
+        InMemoryEndpoint zone1Endpoint = new();
+        InMemoryEndpoint zone2Endpoint = new();
+        host.Connect(zone1Endpoint);
+        host.Connect(zone2Endpoint);
+
+        zone1Endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("v", "sub-z1")));
+        zone1Endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(1)));
+        zone1Endpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
+
+        zone2Endpoint.EnqueueToServer(ProtocolCodec.Encode(new HelloV2("v", "sub-z2")));
+        zone2Endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(2)));
+        zone2Endpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(2, 0)));
+
+        host.AdvanceTicks(4);
+
+        SnapshotV2[] zone1Snapshots = DrainSnapshots(zone1Endpoint);
+        SnapshotV2[] zone2Snapshots = DrainSnapshots(zone2Endpoint);
+
+        Assert.NotEmpty(zone1Snapshots);
+        Assert.NotEmpty(zone2Snapshots);
+        Assert.All(zone1Snapshots, snapshot => Assert.Equal(1, snapshot.ZoneId));
+        Assert.All(zone2Snapshots, snapshot => Assert.Equal(2, snapshot.ZoneId));
+    }
+
+    [Fact]
+    public void ReplayVerify_MultiZone_WithSessions_Passes()
+    {
+        DoDRunConfig cfg = new(Seed: 9106, ZoneCount: 2, BotCount: 12, TickCount: 400);
+        DoDRunResult run1 = DoDRunner.Run(cfg);
+        DoDRunResult run2 = DoDRunner.Run(cfg);
+
+        Assert.Equal(TestChecksum.NormalizeFullHex(run1.Checksum), TestChecksum.NormalizeFullHex(run2.Checksum));
+    }
+
+    private static SnapshotV2[] DrainSnapshots(InMemoryEndpoint endpoint)
+    {
+        List<SnapshotV2> snapshots = new();
+        while (endpoint.TryDequeueFromServer(out byte[] payload))
+        {
+            if (ProtocolCodec.TryDecodeServer(payload, out IServerMessage? message, out _) && message is SnapshotV2 snapshot)
+            {
+                snapshots.Add(snapshot);
+            }
+        }
+
+        return snapshots.ToArray();
+    }
+
     private static string CaptureSnapshotPayloadHash(int seed)
     {
         ServerHost host = new(ServerConfig.Default(seed) with

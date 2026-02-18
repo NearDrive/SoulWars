@@ -28,6 +28,35 @@ public sealed class HierarchicalChecksumTests
         Assert.Equal(globalA, globalB);
     }
 
+    [Fact]
+    public void GlobalChecksum_EqualsHashOfOrderedZoneChecksums()
+    {
+        SimulationConfig config = CreateConfig(seed: 9876);
+        WorldState state = Simulation.CreateInitialState(config);
+
+        for (int i = 0; i < 10; i++)
+        {
+            state = Simulation.Step(config, state, new Inputs(ImmutableArray<WorldCommand>.Empty));
+        }
+
+        ImmutableArray<ZoneChecksum> orderedZones = StateChecksum.ComputeZoneChecksums(state);
+        string expectedGlobal = StateChecksum.ComputeGlobalChecksum(state);
+
+        using MemoryStream stream = new();
+        using BinaryWriter writer = new(stream);
+        writer.Write(orderedZones.Length);
+        foreach (ZoneChecksum zoneChecksum in orderedZones)
+        {
+            writer.Write(zoneChecksum.ZoneId);
+            writer.Write(zoneChecksum.Value);
+        }
+
+        writer.Flush();
+        string recomputed = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream.ToArray())).ToLowerInvariant();
+
+        Assert.Equal(expectedGlobal, recomputed);
+    }
+
     private static ImmutableArray<ZoneChecksum> RunTicksAndGetZoneChecksums(int ticks)
     {
         SimulationConfig config = CreateConfig(seed: 4321);

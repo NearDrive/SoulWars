@@ -1,6 +1,9 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using Game.BotRunner;
+using Game.Core;
+using Game.Persistence;
 using Game.Protocol;
 using Game.Server;
 using Xunit;
@@ -114,6 +117,48 @@ public sealed class MultiZoneSnapshotTests
 
         ReplayExecutionResult result = ReplayRunner.RunReplayWithExpected(replay);
         Assert.Equal(TestChecksum.NormalizeFullHex(result.ExpectedChecksum!), TestChecksum.NormalizeFullHex(result.Checksum));
+    }
+
+    [Fact]
+    public void Snapshot_MultiZone_Roundtrip_ChecksumMatches()
+    {
+        ServerHost host = new(ServerConfig.Default(seed: 6301) with
+        {
+            ZoneCount = 2,
+            NpcCountPerZone = 0
+        });
+
+        host.AdvanceTicks(12);
+
+        WorldState original = host.CurrentWorld;
+        byte[] bytes = WorldStateSerializer.SaveToBytes(original);
+        WorldState loaded = WorldStateSerializer.LoadFromBytes(bytes);
+
+        Assert.Equal(StateChecksum.ComputeZoneChecksums(original), StateChecksum.ComputeZoneChecksums(loaded));
+        Assert.Equal(StateChecksum.ComputeGlobalChecksum(original), StateChecksum.ComputeGlobalChecksum(loaded));
+    }
+
+    [Fact]
+    public void Restart_FromMultiZone_NoDrift()
+    {
+        ServerConfig cfg = ServerConfig.Default(seed: 6302) with
+        {
+            ZoneCount = 2,
+            NpcCountPerZone = 0
+        };
+
+        ServerHost baseline = new(cfg);
+        baseline.AdvanceTicks(8);
+        byte[] snapshot = WorldStateSerializer.SaveToBytes(baseline.CurrentWorld);
+
+        WorldState resumeState = WorldStateSerializer.LoadFromBytes(snapshot);
+        ServerHost restarted = new(cfg, bootstrap: new ServerBootstrap(resumeState, ImmutableArray<BootstrapPlayerRecord>.Empty));
+
+        baseline.AdvanceTicks(8);
+        restarted.AdvanceTicks(8);
+
+        Assert.Equal(StateChecksum.ComputeGlobalChecksum(baseline.CurrentWorld), StateChecksum.ComputeGlobalChecksum(restarted.CurrentWorld));
+        Assert.Equal(StateChecksum.Compute(baseline.CurrentWorld), StateChecksum.Compute(restarted.CurrentWorld));
     }
 
     private static string RunAndHashSnapshots(int seed)
