@@ -23,8 +23,7 @@ public sealed class PointTargetingTests
 
         state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(cast)));
 
-        CombatEvent evt = Assert.Single(state.CombatEvents);
-        Assert.Equal(2, evt.TargetId.Value);
+        Assert.Equal(new[] { 2, 3 }, state.CombatEvents.Select(e => e.TargetId.Value).ToArray());
     }
 
     [Fact]
@@ -81,8 +80,7 @@ public sealed class PointTargetingTests
                 TargetPosXRaw: Fix32.FromInt(6).Raw,
                 TargetPosYRaw: Fix32.FromInt(6).Raw))));
 
-        CombatEvent evt = Assert.Single(state.CombatEvents);
-        return $"{evt.Tick}|{evt.SourceId.Value}|{evt.TargetId.Value}|{evt.SkillId.Value}|{(byte)evt.Type}|{evt.Amount}";
+        return string.Join(",", state.CombatEvents.Select(evt => $"{evt.Tick}|{evt.SourceId.Value}|{evt.TargetId.Value}|{evt.SkillId.Value}|{(byte)evt.Type}|{evt.Amount}"));
     }
 
     private static string RunPointReplayChecksum(SimulationConfig config)

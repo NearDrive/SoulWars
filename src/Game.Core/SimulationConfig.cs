@@ -16,7 +16,8 @@ public readonly record struct SimulationConfig(
     int NpcWanderPeriodTicks,
     Fix32 NpcAggroRange,
     InvariantOptions Invariants,
-    ImmutableArray<SkillDefinition> SkillDefinitions = default)
+    ImmutableArray<SkillDefinition> SkillDefinitions = default,
+    int MaxCombatEventsPerTick = 0)
 {
     public static SimulationConfig Default(int seed) => new(
         Seed: seed,
@@ -32,5 +33,6 @@ public readonly record struct SimulationConfig(
         NpcWanderPeriodTicks: 30,
         NpcAggroRange: Fix32.FromInt(6),
         SkillDefinitions: ImmutableArray<SkillDefinition>.Empty,
-        Invariants: InvariantOptions.Enabled);
+        Invariants: InvariantOptions.Enabled,
+        MaxCombatEventsPerTick: 0);
 }
