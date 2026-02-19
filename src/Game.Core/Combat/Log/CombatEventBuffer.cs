@@ -39,7 +39,8 @@ public static class CombatEventBuffer
             .ThenBy(e => e.TargetId.Value)
             .ThenBy(e => e.SkillId.Value)
             .ThenBy(e => (int)e.Kind)
-            .ThenBy(e => e.Amount)
+            .ThenBy(e => e.RawAmount)
+            .ThenBy(e => e.FinalAmount)
             .ToImmutableArray();
 
         if (maxRetained <= 0 || ordered.Length <= maxRetained)

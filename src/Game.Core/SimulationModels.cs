@@ -199,7 +199,7 @@ public readonly record struct ComponentMask(uint Bits)
 
 public readonly record struct PositionComponent(Vec2Fix Pos, Vec2Fix Vel);
 public readonly record struct HealthComponent(int MaxHp, int Hp, bool IsAlive);
-public readonly record struct CombatComponent(Fix32 Range, int Damage, int Defense, int CooldownTicks, int LastAttackTick);
+public readonly record struct CombatComponent(Fix32 Range, int Damage, int Defense, int MagicResist, int CooldownTicks, int LastAttackTick);
 public readonly record struct AiComponent(int NextWanderChangeTick, sbyte WanderX, sbyte WanderY);
 
 public sealed record EntityState(
@@ -217,7 +217,7 @@ public sealed record EntityState(
     int NextWanderChangeTick = 0,
     sbyte WanderX = 0,
     sbyte WanderY = 0,
-    int Defense = 0,
+    DefenseStatsComponent DefenseStats = default,
     StatusEffectsComponent StatusEffects = default,
     SkillCooldownsComponent SkillCooldowns = default);
 
@@ -296,7 +296,7 @@ public sealed record ZoneEntities(
                 AttackDamage: combat.Damage,
                 AttackCooldownTicks: combat.CooldownTicks,
                 LastAttackTick: combat.LastAttackTick,
-                Defense: combat.Defense,
+                DefenseStats: new DefenseStatsComponent(combat.Defense, combat.MagicResist),
                 Kind: Kinds[i],
                 NextWanderChangeTick: ai.NextWanderChangeTick,
                 WanderX: ai.WanderX,
@@ -339,7 +339,7 @@ public sealed record ZoneEntities(
             kinds.Add(entity.Kind);
             positions.Add(new PositionComponent(entity.Pos, entity.Vel));
             health.Add(new HealthComponent(entity.MaxHp, entity.Hp, entity.IsAlive));
-            combat.Add(new CombatComponent(entity.AttackRange, entity.AttackDamage, entity.Defense, entity.AttackCooldownTicks, entity.LastAttackTick));
+            combat.Add(new CombatComponent(entity.AttackRange, entity.AttackDamage, entity.DefenseStats.Armor, entity.DefenseStats.MagicResist, entity.AttackCooldownTicks, entity.LastAttackTick));
             ai.Add(entity.Kind == EntityKind.Npc
                 ? new AiComponent(entity.NextWanderChangeTick, entity.WanderX, entity.WanderY)
                 : default);
@@ -669,7 +669,8 @@ public sealed record WorldState(
                 .ThenBy(e => e.TargetId.Value)
                 .ThenBy(e => e.SkillId.Value)
                 .ThenBy(e => (int)e.Kind)
-                .ThenBy(e => e.Amount)
+                .ThenBy(e => e.RawAmount)
+            .ThenBy(e => e.FinalAmount)
                 .ToImmutableArray()
         };
     }

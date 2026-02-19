@@ -172,6 +172,7 @@ public sealed class WorldStateSerializerTests
                 writer.Write(combat.Range.Raw);
                 writer.Write(combat.Damage);
                 writer.Write(combat.Defense);
+                writer.Write(combat.MagicResist);
                 writer.Write(combat.CooldownTicks);
                 writer.Write(combat.LastAttackTick);
 

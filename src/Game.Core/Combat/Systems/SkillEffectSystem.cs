@@ -56,8 +56,15 @@ public static class SkillEffectSystem
                 continue;
             }
 
-            int damage = Math.Max(0, skill.Value.BaseDamage);
-            int nextHp = Math.Max(0, target.Hp - damage);
+            int rawAmount = Math.Max(0, skill.Value.BaseDamage);
+            int defense = skill.Value.DamageType switch
+            {
+                DamageType.Physical => Math.Max(0, target.DefenseStats.Armor),
+                DamageType.Magical => Math.Max(0, target.DefenseStats.MagicResist),
+                _ => 0
+            };
+            int finalAmount = Math.Max(0, rawAmount - defense);
+            int nextHp = Math.Max(0, target.Hp - finalAmount);
             int appliedDamage = target.Hp - nextHp;
             bool killed = target.IsAlive && nextHp == 0;
             EntityState updatedTarget = target with { Hp = nextHp, IsAlive = nextHp > 0 };
@@ -79,10 +86,10 @@ public static class SkillEffectSystem
             }
 
             current = current.WithEntities(builder.ToImmutable().OrderBy(e => e.Id.Value).ToImmutableArray());
-            events.Add(new CombatLogEvent(tick, intent.CasterId, intent.TargetEntityId, intent.SkillId, appliedDamage, CombatLogKind.Damage));
+            events.Add(new CombatLogEvent(tick, intent.CasterId, intent.TargetEntityId, intent.SkillId, rawAmount, finalAmount, CombatLogKind.Damage));
             if (killed)
             {
-                events.Add(new CombatLogEvent(tick, intent.CasterId, intent.TargetEntityId, intent.SkillId, appliedDamage, CombatLogKind.Kill));
+                events.Add(new CombatLogEvent(tick, intent.CasterId, intent.TargetEntityId, intent.SkillId, rawAmount, finalAmount, CombatLogKind.Kill));
             }
 
             if (events.Count >= MaxCombatLogEventsPerTick)
