@@ -110,11 +110,11 @@ public sealed class ProjectileSystemTests
             NpcCountPerZone = 0,
             SkillDefinitions = ImmutableArray.Create(new SkillDefinition(
                 new SkillId(10),
-                RangeRaw: Fix32.FromInt(8).Raw,
+                RangeQRaw: Fix32.FromInt(8).Raw,
                 HitRadiusRaw: Fix32.OneRaw,
                 CooldownTicks: 1,
                 ResourceCost: 0,
-                TargetType: SkillTargetType.Entity,
+                TargetKind: CastTargetKind.Entity,
                 BaseDamage: 11,
                 ProjectileSpeedRaw: Fix32.FromInt(1).Raw,
                 UsesProjectile: true,
