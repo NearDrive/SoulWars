@@ -58,20 +58,31 @@ public static class SkillEffectSystem
 
             int damage = Math.Max(0, skill.Value.BaseDamage);
             int nextHp = Math.Max(0, target.Hp - damage);
+            int appliedDamage = target.Hp - nextHp;
             bool killed = target.IsAlive && nextHp == 0;
             EntityState updatedTarget = target with { Hp = nextHp, IsAlive = nextHp > 0 };
 
             ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
             for (int i = 0; i < entities.Length; i++)
             {
-                builder.Add(i == targetIndex ? updatedTarget : entities[i]);
+                if (i == targetIndex)
+                {
+                    if (updatedTarget.IsAlive)
+                    {
+                        builder.Add(updatedTarget);
+                    }
+
+                    continue;
+                }
+
+                builder.Add(entities[i]);
             }
 
             current = current.WithEntities(builder.ToImmutable().OrderBy(e => e.Id.Value).ToImmutableArray());
-            events.Add(new CombatLogEvent(tick, intent.CasterId, intent.TargetEntityId, intent.SkillId, damage, CombatLogKind.Damage));
+            events.Add(new CombatLogEvent(tick, intent.CasterId, intent.TargetEntityId, intent.SkillId, appliedDamage, CombatLogKind.Damage));
             if (killed)
             {
-                events.Add(new CombatLogEvent(tick, intent.CasterId, intent.TargetEntityId, intent.SkillId, damage, CombatLogKind.Kill));
+                events.Add(new CombatLogEvent(tick, intent.CasterId, intent.TargetEntityId, intent.SkillId, appliedDamage, CombatLogKind.Kill));
             }
 
             if (events.Count >= MaxCombatLogEventsPerTick)

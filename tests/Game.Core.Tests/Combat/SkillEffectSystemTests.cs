@@ -36,8 +36,7 @@ public sealed class SkillEffectSystemTests
         state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
             new WorldCommand(WorldCommandKind.CastSkill, new EntityId(1), new ZoneId(1), SkillId: new SkillId(80), TargetKind: CastTargetKind.Entity, TargetEntityId: new EntityId(2)))));
 
-        EntityState target = Assert.Single(state.Zones).Entities.Single(e => e.Id.Value == 2);
-        Assert.Equal(0, target.Hp);
+        Assert.DoesNotContain(Assert.Single(state.Zones).Entities, e => e.Id.Value == 2);
     }
 
     [Fact]
@@ -49,8 +48,7 @@ public sealed class SkillEffectSystemTests
         state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
             new WorldCommand(WorldCommandKind.CastSkill, new EntityId(1), new ZoneId(1), SkillId: new SkillId(80), TargetKind: CastTargetKind.Entity, TargetEntityId: new EntityId(2)))));
 
-        EntityState target = Assert.Single(state.Zones).Entities.Single(e => e.Id.Value == 2);
-        Assert.False(target.IsAlive);
+        Assert.DoesNotContain(Assert.Single(state.Zones).Entities, e => e.Id.Value == 2);
         Assert.Contains(state.CombatLogEvents, e => e.Kind == CombatLogKind.Kill && e.TargetId.Value == 2);
     }
 
