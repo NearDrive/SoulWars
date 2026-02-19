@@ -234,6 +234,26 @@ public static class CoreInvariants
             lastCombatSourceId = combatEvent.SourceId.Value;
         }
 
+        int lastStatusTick = int.MinValue;
+        int lastStatusSourceId = int.MinValue;
+        int lastStatusTargetId = int.MinValue;
+        int lastStatusEffectType = int.MinValue;
+        foreach (StatusEvent statusEvent in (world.StatusEvents.IsDefault ? ImmutableArray<StatusEvent>.Empty : world.StatusEvents))
+        {
+            if (statusEvent.Tick < lastStatusTick
+                || (statusEvent.Tick == lastStatusTick && statusEvent.SourceId.Value < lastStatusSourceId)
+                || (statusEvent.Tick == lastStatusTick && statusEvent.SourceId.Value == lastStatusSourceId && statusEvent.TargetId.Value < lastStatusTargetId)
+                || (statusEvent.Tick == lastStatusTick && statusEvent.SourceId.Value == lastStatusSourceId && statusEvent.TargetId.Value == lastStatusTargetId && (int)statusEvent.EffectType < lastStatusEffectType))
+            {
+                throw new InvariantViolationException($"invariant=StatusEventsOrdered tick={tick} eventTick={statusEvent.Tick} source={statusEvent.SourceId.Value} target={statusEvent.TargetId.Value} effectType={statusEvent.EffectType}");
+            }
+
+            lastStatusTick = statusEvent.Tick;
+            lastStatusSourceId = statusEvent.SourceId.Value;
+            lastStatusTargetId = statusEvent.TargetId.Value;
+            lastStatusEffectType = (int)statusEvent.EffectType;
+        }
+
         int lastInventoryEntityId = int.MinValue;
         foreach (PlayerInventoryState playerInventory in (world.PlayerInventories.IsDefault ? ImmutableArray<PlayerInventoryState>.Empty : world.PlayerInventories))
         {

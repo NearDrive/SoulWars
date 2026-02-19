@@ -54,7 +54,8 @@ public static class Simulation
             PlayerWallets: ImmutableArray<PlayerWalletState>.Empty,
             VendorTransactionAuditLog: ImmutableArray<VendorTransactionAuditEntry>.Empty,
             Vendors: ImmutableArray<VendorDefinition>.Empty,
-            CombatEvents: ImmutableArray<CombatEvent>.Empty);
+            CombatEvents: ImmutableArray<CombatEvent>.Empty,
+            StatusEvents: ImmutableArray<StatusEvent>.Empty);
     }
 
     private static WorldState CreateInitialStateFromManualDefinitions(SimulationConfig config, ZoneDefinitions definitions)
@@ -81,7 +82,8 @@ public static class Simulation
             PlayerWallets: ImmutableArray<PlayerWalletState>.Empty,
             VendorTransactionAuditLog: ImmutableArray<VendorTransactionAuditEntry>.Empty,
             Vendors: ImmutableArray<VendorDefinition>.Empty,
-            CombatEvents: ImmutableArray<CombatEvent>.Empty);
+            CombatEvents: ImmutableArray<CombatEvent>.Empty,
+            StatusEvents: ImmutableArray<StatusEvent>.Empty);
     }
 
     public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs, SimulationInstrumentation? instrumentation = null)
@@ -96,9 +98,21 @@ public static class Simulation
         WorldState updated = state with
         {
             Tick = state.Tick + 1,
-            CombatEvents = ImmutableArray<CombatEvent>.Empty
+            CombatEvents = ImmutableArray<CombatEvent>.Empty,
+            StatusEvents = ImmutableArray<StatusEvent>.Empty
         };
         List<ZoneTransferEvent> pendingTransfers = new();
+        ImmutableArray<StatusEvent>.Builder tickStatusEvents = ImmutableArray.CreateBuilder<StatusEvent>();
+
+        foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
+        {
+            (ZoneState nextZone, ImmutableArray<StatusEvent> expireEvents) = ExpireZoneStatuses(updated.Tick, zone);
+            updated = updated.WithZoneUpdated(nextZone);
+            if (!expireEvents.IsDefaultOrEmpty)
+            {
+                tickStatusEvents.AddRange(expireEvents);
+            }
+        }
 
         ImmutableArray<(WorldCommand Command, int Index)> orderedCommands = commands
             .Select((command, index) => (Command: command, Index: index))
@@ -132,7 +146,7 @@ public static class Simulation
                 continue;
             }
 
-            (ZoneState nextZone, ImmutableArray<CombatEvent> zoneEvents) = ProcessZoneCommands(config, updated.Tick, zone, zoneCommands, instrumentation);
+            (ZoneState nextZone, ImmutableArray<CombatEvent> zoneEvents, ImmutableArray<StatusEvent> zoneStatusEvents) = ProcessZoneCommands(config, updated.Tick, zone, zoneCommands, instrumentation);
             updated = updated.WithZoneUpdated(nextZone);
             if (!zoneEvents.IsDefaultOrEmpty)
             {
@@ -145,6 +159,12 @@ public static class Simulation
 
                 updated = updated.WithCombatEvents(combined);
             }
+
+            if (!zoneStatusEvents.IsDefaultOrEmpty)
+            {
+                tickStatusEvents.AddRange(zoneStatusEvents);
+            }
+
             updated = RebuildEntityLocations(updated);
         }
 
@@ -161,6 +181,7 @@ public static class Simulation
         updated = ProcessLootIntents(updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
         updated = ProcessVendorIntents(updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
         updated = EnsureWalletsForPlayers(updated);
+        updated = updated.WithStatusEvents(tickStatusEvents.ToImmutable());
 
         if (config.Invariants.EnableCoreInvariants)
         {
@@ -1244,10 +1265,11 @@ public static class Simulation
             .ToImmutableArray();
     }
 
-    private static (ZoneState Zone, ImmutableArray<CombatEvent> Events) ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<(WorldCommand Command, int CommandIndex)> zoneCommands, SimulationInstrumentation? instrumentation)
+    private static (ZoneState Zone, ImmutableArray<CombatEvent> Events, ImmutableArray<StatusEvent> StatusEvents) ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<(WorldCommand Command, int CommandIndex)> zoneCommands, SimulationInstrumentation? instrumentation)
     {
         ZoneState current = zone;
         ImmutableArray<CombatEvent>.Builder combatEvents = ImmutableArray.CreateBuilder<CombatEvent>();
+        ImmutableArray<StatusEvent>.Builder statusEvents = ImmutableArray.CreateBuilder<StatusEvent>();
 
         foreach ((WorldCommand command, _) in zoneCommands.Where(c => c.Command.Kind is WorldCommandKind.EnterZone))
         {
@@ -1291,11 +1313,16 @@ public static class Simulation
                 continue;
             }
 
-            (ZoneState next, ImmutableArray<CombatEvent> castEvents) = ApplyCastSkill(config, tick, current, command);
+            (ZoneState next, ImmutableArray<CombatEvent> castEvents, ImmutableArray<StatusEvent> castStatusEvents) = ApplyCastSkill(config, tick, current, command);
             current = next;
             for (int targetOrder = 0; targetOrder < castEvents.Length; targetOrder++)
             {
                 combatEvents.Add(castEvents[targetOrder]);
+            }
+
+            for (int statusOrder = 0; statusOrder < castStatusEvents.Length; statusOrder++)
+            {
+                statusEvents.Add(castStatusEvents[statusOrder]);
             }
         }
 
@@ -1309,7 +1336,7 @@ public static class Simulation
             current = ApplyLeaveZone(current, command);
         }
 
-        return (current, combatEvents.ToImmutable());
+        return (current, combatEvents.ToImmutable(), statusEvents.ToImmutable());
     }
 
     private static bool IsValidCommand(WorldCommand command)
@@ -1420,28 +1447,25 @@ public static class Simulation
             return zone;
         }
 
+        if (entity.StatusEffects.HasStun)
+        {
+            EntityState stunned = entity with { Vel = Vec2Fix.Zero };
+            return ReplaceEntity(zone, entityIndex, stunned);
+        }
+
         PlayerInput playerInput = new(entity.Id, command.MoveX, command.MoveY);
+        Fix32 slowMultiplier = entity.StatusEffects.GetSlowMultiplier();
 
         EntityState updated = Physics2D.Integrate(
             entity,
             playerInput,
             zone.Map,
             config.DtFix,
-            config.MoveSpeed,
+            config.MoveSpeed * slowMultiplier,
             config.Radius,
             instrumentation?.CountCollisionChecks);
 
-        ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
-
-        for (int i = 0; i < entities.Length; i++)
-        {
-            builder.Add(i == entityIndex ? updated : entities[i]);
-        }
-
-        return zone.WithEntities(builder
-            .ToImmutable()
-            .OrderBy(e => e.Id.Value)
-            .ToImmutableArray());
+        return ReplaceEntity(zone, entityIndex, updated);
     }
 
     private static ZoneState ApplyAttackIntent(int tick, ZoneState zone, WorldCommand command)
@@ -1521,30 +1545,30 @@ public static class Simulation
             .ToImmutableArray());
     }
 
-    private static (ZoneState Zone, ImmutableArray<CombatEvent> Events) ApplyCastSkill(SimulationConfig config, int tick, ZoneState zone, WorldCommand command)
+    private static (ZoneState Zone, ImmutableArray<CombatEvent> Events, ImmutableArray<StatusEvent> StatusEvents) ApplyCastSkill(SimulationConfig config, int tick, ZoneState zone, WorldCommand command)
     {
         CastResult result = ValidateCastSkill(config, tick, zone, command);
         if (result != CastResult.Ok)
         {
-            return (zone, ImmutableArray<CombatEvent>.Empty);
+            return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
         }
 
         if (command.SkillId is null)
         {
-            return (zone, ImmutableArray<CombatEvent>.Empty);
+            return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
         }
 
         SkillDefinition? skill = FindSkill(config, command.SkillId.Value);
         if (skill is null)
         {
-            return (zone, ImmutableArray<CombatEvent>.Empty);
+            return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
         }
 
         ImmutableArray<EntityState> entities = zone.Entities;
         int casterIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.EntityId);
         if (casterIndex < 0)
         {
-            return (zone, ImmutableArray<CombatEvent>.Empty);
+            return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
         }
 
         EntityState caster = entities[casterIndex];
@@ -1557,11 +1581,12 @@ public static class Simulation
         ImmutableArray<int> targetIndices = ResolveCastTargetIndices(zone, casterIndex, command, skill.Value);
         if (targetIndices.IsDefaultOrEmpty)
         {
-            return (zone, ImmutableArray<CombatEvent>.Empty);
+            return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
         }
 
         Dictionary<int, EntityState> targetUpdates = new();
         ImmutableArray<CombatEvent>.Builder combatEvents = ImmutableArray.CreateBuilder<CombatEvent>(targetIndices.Length);
+        ImmutableArray<StatusEvent>.Builder statusEvents = ImmutableArray.CreateBuilder<StatusEvent>(targetIndices.Length);
 
         for (int i = 0; i < targetIndices.Length; i++)
         {
@@ -1607,6 +1632,18 @@ public static class Simulation
 
             targetUpdates[targetIndex] = updatedTarget;
 
+            if (skill.Value.StatusEffect is OptionalStatusEffect statusDefinition)
+            {
+                StatusEffectInstance incomingStatus = new(
+                    statusDefinition.Type,
+                    caster.Id,
+                    tick + statusDefinition.DurationTicks,
+                    statusDefinition.MagnitudeRaw);
+
+                StatusEffectsComponent applied = updatedTarget.StatusEffects.ApplyOrRefresh(incomingStatus, tick, updatedTarget.Id, statusEvents);
+                targetUpdates[targetIndex] = updatedTarget with { StatusEffects = applied };
+            }
+
             combatEvents.Add(new CombatEvent(
                 Tick: tick,
                 SourceId: caster.Id,
@@ -1638,7 +1675,7 @@ public static class Simulation
             .OrderBy(e => e.Id.Value)
             .ToImmutableArray());
 
-        return (updatedZone, combatEvents.ToImmutable());
+        return (updatedZone, combatEvents.ToImmutable(), statusEvents.ToImmutable());
     }
 
     public static CastResult ValidateCastSkill(SimulationConfig config, int tick, ZoneState zone, WorldCommand command)
@@ -1666,6 +1703,11 @@ public static class Simulation
         if (!caster.IsAlive)
         {
             return CastResult.Rejected_NoSuchCaster;
+        }
+
+        if (caster.StatusEffects.HasStun)
+        {
+            return CastResult.Rejected_Stunned;
         }
 
         if (tick - caster.LastAttackTick < caster.AttackCooldownTicks)
@@ -1721,6 +1763,32 @@ public static class Simulation
         return CastResult.Ok;
     }
 
+    private static (ZoneState Zone, ImmutableArray<StatusEvent> StatusEvents) ExpireZoneStatuses(int tick, ZoneState zone)
+    {
+        ImmutableArray<EntityState> entities = zone.Entities;
+        ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
+        ImmutableArray<StatusEvent>.Builder statusEvents = ImmutableArray.CreateBuilder<StatusEvent>();
+        for (int i = 0; i < entities.Length; i++)
+        {
+            EntityState entity = entities[i];
+            StatusEffectsComponent next = entity.StatusEffects.TickExpire(tick, entity.Id, statusEvents);
+            builder.Add(entity with { StatusEffects = next });
+        }
+
+        return (zone.WithEntities(builder.ToImmutable().OrderBy(e => e.Id.Value).ToImmutableArray()), statusEvents.ToImmutable());
+    }
+
+    private static ZoneState ReplaceEntity(ZoneState zone, int index, EntityState entity)
+    {
+        ImmutableArray<EntityState> entities = zone.Entities;
+        ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
+        for (int i = 0; i < entities.Length; i++)
+        {
+            builder.Add(i == index ? entity : entities[i]);
+        }
+
+        return zone.WithEntities(builder.ToImmutable().OrderBy(e => e.Id.Value).ToImmutableArray());
+    }
 
     private static ImmutableArray<int> ResolveCastTargetIndices(ZoneState zone, int casterIndex, WorldCommand command, SkillDefinition skill)
     {

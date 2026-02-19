@@ -23,7 +23,128 @@ public enum CastResult : byte
     Rejected_OnCooldown = 3,
     Rejected_NotEnoughResource = 4,
     Rejected_InvalidTarget = 5,
-    Rejected_OutOfRange = 6
+    Rejected_OutOfRange = 6,
+    Rejected_Stunned = 7
+}
+
+public enum StatusEffectType : byte
+{
+    Slow = 1,
+    Stun = 2
+}
+
+public enum StatusEventType : byte
+{
+    Applied = 1,
+    Refreshed = 2,
+    Expired = 3
+}
+
+public readonly record struct StatusEffectInstance(
+    StatusEffectType Type,
+    EntityId SourceEntityId,
+    int ExpiresAtTick,
+    int MagnitudeRaw);
+
+public readonly record struct OptionalStatusEffect(
+    StatusEffectType Type,
+    int DurationTicks,
+    int MagnitudeRaw);
+
+public readonly record struct StatusEvent(
+    int Tick,
+    EntityId SourceId,
+    EntityId TargetId,
+    StatusEventType Type,
+    StatusEffectType EffectType,
+    int ExpiresAtTick,
+    int MagnitudeRaw);
+
+public readonly record struct StatusEffectsComponent(ImmutableArray<StatusEffectInstance> Effects)
+{
+    public static StatusEffectsComponent Empty => new(ImmutableArray<StatusEffectInstance>.Empty);
+
+    public bool Has(StatusEffectType type) => OrderedEffects().Any(effect => effect.Type == type);
+
+    public bool HasStun => Has(StatusEffectType.Stun);
+
+    public Fix32 GetSlowMultiplier()
+    {
+        foreach (StatusEffectInstance effect in OrderedEffects())
+        {
+            if (effect.Type == StatusEffectType.Slow)
+            {
+                return new Fix32(effect.MagnitudeRaw);
+            }
+        }
+
+        return Fix32.One;
+    }
+
+    public StatusEffectsComponent TickExpire(int currentTick, EntityId targetId, ImmutableArray<StatusEvent>.Builder statusEvents)
+    {
+        ImmutableArray<StatusEffectInstance> kept = OrderedEffects().Where(effect => effect.ExpiresAtTick > currentTick).ToImmutableArray();
+        foreach (StatusEffectInstance expired in OrderedEffects().Where(effect => effect.ExpiresAtTick <= currentTick))
+        {
+            statusEvents.Add(new StatusEvent(currentTick, expired.SourceEntityId, targetId, StatusEventType.Expired, expired.Type, expired.ExpiresAtTick, expired.MagnitudeRaw));
+        }
+
+        return new StatusEffectsComponent(kept);
+    }
+
+    public StatusEffectsComponent ApplyOrRefresh(StatusEffectInstance incoming, int currentTick, EntityId targetId, ImmutableArray<StatusEvent>.Builder statusEvents)
+    {
+        ImmutableArray<StatusEffectInstance> effects = OrderedEffects().Where(effect => effect.ExpiresAtTick > currentTick).ToImmutableArray();
+        StatusEffectInstance? existing = effects.FirstOrDefault(effect => effect.Type == incoming.Type);
+        if (incoming.Type == StatusEffectType.Stun)
+        {
+            if (existing is null)
+            {
+                statusEvents.Add(new StatusEvent(currentTick, incoming.SourceEntityId, targetId, StatusEventType.Applied, incoming.Type, incoming.ExpiresAtTick, incoming.MagnitudeRaw));
+                return new StatusEffectsComponent(effects.Add(incoming).OrderBy(e => e.Type).ThenBy(e => e.SourceEntityId.Value).ToImmutableArray());
+            }
+
+            StatusEffectInstance resolved = existing.Value with { ExpiresAtTick = Math.Max(existing.Value.ExpiresAtTick, incoming.ExpiresAtTick) };
+            statusEvents.Add(new StatusEvent(currentTick, incoming.SourceEntityId, targetId, StatusEventType.Refreshed, incoming.Type, resolved.ExpiresAtTick, resolved.MagnitudeRaw));
+            return Replace(effects, resolved);
+        }
+
+        if (incoming.Type == StatusEffectType.Slow)
+        {
+            if (existing is null)
+            {
+                statusEvents.Add(new StatusEvent(currentTick, incoming.SourceEntityId, targetId, StatusEventType.Applied, incoming.Type, incoming.ExpiresAtTick, incoming.MagnitudeRaw));
+                return new StatusEffectsComponent(effects.Add(incoming).OrderBy(e => e.Type).ThenBy(e => e.SourceEntityId.Value).ToImmutableArray());
+            }
+
+            bool stronger = incoming.MagnitudeRaw < existing.Value.MagnitudeRaw;
+            bool tieAndPreferredSource = incoming.MagnitudeRaw == existing.Value.MagnitudeRaw && incoming.SourceEntityId.Value < existing.Value.SourceEntityId.Value;
+            if (stronger || tieAndPreferredSource)
+            {
+                statusEvents.Add(new StatusEvent(currentTick, incoming.SourceEntityId, targetId, StatusEventType.Refreshed, incoming.Type, incoming.ExpiresAtTick, incoming.MagnitudeRaw));
+                return Replace(effects, incoming);
+            }
+
+            return new StatusEffectsComponent(effects);
+        }
+
+        return new StatusEffectsComponent(effects);
+    }
+
+    private ImmutableArray<StatusEffectInstance> OrderedEffects() => (Effects.IsDefault ? ImmutableArray<StatusEffectInstance>.Empty : Effects)
+        .OrderBy(effect => effect.Type)
+        .ThenBy(effect => effect.SourceEntityId.Value)
+        .ToImmutableArray();
+
+    private static StatusEffectsComponent Replace(ImmutableArray<StatusEffectInstance> effects, StatusEffectInstance replacement)
+    {
+        return new StatusEffectsComponent(effects
+            .Where(effect => effect.Type != replacement.Type)
+            .Append(replacement)
+            .OrderBy(effect => effect.Type)
+            .ThenBy(effect => effect.SourceEntityId.Value)
+            .ToImmutableArray());
+    }
 }
 
 public readonly record struct SkillDefinition(
@@ -36,7 +157,8 @@ public readonly record struct SkillDefinition(
     CastTargetKind TargetKind,
     SkillEffectKind EffectKind = SkillEffectKind.Damage,
     int BaseAmount = 0,
-    int CoefRaw = 0)
+    int CoefRaw = 0,
+    OptionalStatusEffect? StatusEffect = null)
 {
     public SkillDefinition(
         SkillId Id,
@@ -47,8 +169,9 @@ public readonly record struct SkillDefinition(
         CastTargetKind TargetKind,
         SkillEffectKind EffectKind = SkillEffectKind.Damage,
         int BaseAmount = 0,
-        int CoefRaw = 0)
-        : this(Id, RangeQRaw, HitRadiusRaw, MaxTargets: 8, CooldownTicks, ResourceCost, TargetKind, EffectKind, BaseAmount, CoefRaw)
+        int CoefRaw = 0,
+        OptionalStatusEffect? StatusEffect = null)
+        : this(Id, RangeQRaw, HitRadiusRaw, MaxTargets: 8, CooldownTicks, ResourceCost, TargetKind, EffectKind, BaseAmount, CoefRaw, StatusEffect)
     {
     }
 }
@@ -109,7 +232,8 @@ public sealed record EntityState(
     int NextWanderChangeTick = 0,
     sbyte WanderX = 0,
     sbyte WanderY = 0,
-    int Defense = 0);
+    int Defense = 0,
+    StatusEffectsComponent StatusEffects = default);
 
 public sealed record ZoneEntities(
     ImmutableArray<EntityId> AliveIds,
@@ -118,7 +242,8 @@ public sealed record ZoneEntities(
     ImmutableArray<PositionComponent> Positions,
     ImmutableArray<HealthComponent> Health,
     ImmutableArray<CombatComponent> Combat,
-    ImmutableArray<AiComponent> Ai)
+    ImmutableArray<AiComponent> Ai,
+    ImmutableArray<StatusEffectsComponent> StatusEffects = default)
 {
     public static ZoneEntities Empty => new(
         ImmutableArray<EntityId>.Empty,
@@ -127,7 +252,8 @@ public sealed record ZoneEntities(
         ImmutableArray<PositionComponent>.Empty,
         ImmutableArray<HealthComponent>.Empty,
         ImmutableArray<CombatComponent>.Empty,
-        ImmutableArray<AiComponent>.Empty);
+        ImmutableArray<AiComponent>.Empty,
+        ImmutableArray<StatusEffectsComponent>.Empty);
 
     public static int FindIndex(ImmutableArray<EntityId> ids, EntityId id)
     {
@@ -167,6 +293,7 @@ public sealed record ZoneEntities(
             HealthComponent health = Health[i];
             CombatComponent combat = Combat[i];
             AiComponent ai = Ai[i];
+            StatusEffectsComponent status = i < StatusEffects.Length ? StatusEffects[i] : StatusEffectsComponent.Empty;
             builder.Add(new EntityState(
                 Id: AliveIds[i],
                 Pos: position.Pos,
@@ -182,7 +309,8 @@ public sealed record ZoneEntities(
                 Kind: Kinds[i],
                 NextWanderChangeTick: ai.NextWanderChangeTick,
                 WanderX: ai.WanderX,
-                WanderY: ai.WanderY));
+                WanderY: ai.WanderY,
+                StatusEffects: status));
         }
 
         return builder.MoveToImmutable();
@@ -201,6 +329,7 @@ public sealed record ZoneEntities(
         ImmutableArray<HealthComponent>.Builder health = ImmutableArray.CreateBuilder<HealthComponent>(ordered.Length);
         ImmutableArray<CombatComponent>.Builder combat = ImmutableArray.CreateBuilder<CombatComponent>(ordered.Length);
         ImmutableArray<AiComponent>.Builder ai = ImmutableArray.CreateBuilder<AiComponent>(ordered.Length);
+        ImmutableArray<StatusEffectsComponent>.Builder statusEffects = ImmutableArray.CreateBuilder<StatusEffectsComponent>(ordered.Length);
 
         foreach (EntityState entity in ordered)
         {
@@ -221,6 +350,7 @@ public sealed record ZoneEntities(
             ai.Add(entity.Kind == EntityKind.Npc
                 ? new AiComponent(entity.NextWanderChangeTick, entity.WanderX, entity.WanderY)
                 : default);
+            statusEffects.Add(entity.StatusEffects);
         }
 
         return new ZoneEntities(
@@ -230,7 +360,8 @@ public sealed record ZoneEntities(
             positions.MoveToImmutable(),
             health.MoveToImmutable(),
             combat.MoveToImmutable(),
-            ai.MoveToImmutable());
+            ai.MoveToImmutable(),
+            statusEffects.MoveToImmutable());
     }
 }
 
@@ -320,7 +451,8 @@ public sealed record WorldState(
     ImmutableArray<PlayerWalletState> PlayerWallets = default,
     ImmutableArray<VendorTransactionAuditEntry> VendorTransactionAuditLog = default,
     ImmutableArray<VendorDefinition> Vendors = default,
-    ImmutableArray<CombatEvent> CombatEvents = default)
+    ImmutableArray<CombatEvent> CombatEvents = default,
+    ImmutableArray<StatusEvent> StatusEvents = default)
 {
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
@@ -503,6 +635,19 @@ public sealed record WorldState(
         return this with
         {
             CombatEvents = combatEvents.ToImmutableArray()
+        };
+    }
+
+    public WorldState WithStatusEvents(ImmutableArray<StatusEvent> statusEvents)
+    {
+        return this with
+        {
+            StatusEvents = statusEvents
+                .OrderBy(e => e.Tick)
+                .ThenBy(e => e.SourceId.Value)
+                .ThenBy(e => e.TargetId.Value)
+                .ThenBy(e => e.EffectType)
+                .ToImmutableArray()
         };
     }
 }
