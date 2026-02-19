@@ -149,7 +149,7 @@ public static class BotCombatScenario
         foreach (ZoneState zone in spawned.Zones)
         {
             ZoneState updatedZone = zone.WithEntities(zone.Entities
-                .Select(entity => entity with { MaxHp = 120, Hp = 120 })
+                .Select(entity => entity with { MaxHp = 5000, Hp = 5000 })
                 .OrderBy(entity => entity.Id.Value)
                 .ToImmutableArray());
             spawned = spawned.WithZoneUpdated(updatedZone);
