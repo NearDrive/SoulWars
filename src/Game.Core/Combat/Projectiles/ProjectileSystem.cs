@@ -129,7 +129,9 @@ public static class ProjectileSystem
                 int targetIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, projectile.TargetId);
                 if (targetIndex >= 0)
                 {
-                    EntityState target = updates.TryGetValue(targetIndex, out EntityState updated) ? updated : entities[targetIndex];
+                    EntityState target = (updates.TryGetValue(targetIndex, out EntityState? updated) && updated is not null)
+                        ? updated
+                        : entities[targetIndex];
                     if (target.IsAlive)
                     {
                         int rawAmount = Math.Max(0, skill.Value.BaseDamage);
@@ -160,7 +162,7 @@ public static class ProjectileSystem
         ImmutableArray<EntityState>.Builder rebuiltEntities = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
         for (int i = 0; i < entities.Length; i++)
         {
-            rebuiltEntities.Add(updates.TryGetValue(i, out EntityState next) ? next : entities[i]);
+            rebuiltEntities.Add((updates.TryGetValue(i, out EntityState? next) && next is not null) ? next : entities[i]);
         }
 
         ZoneState updatedZone = zone
