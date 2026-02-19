@@ -30,7 +30,7 @@ public static class WorldStateSerializer
         ImmutableArray<StatusEvent> StatusEvents);
 
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 6;
+    private const int CurrentVersion = 4;
     public static int SerializerVersion => CurrentVersion;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
@@ -117,7 +117,7 @@ public static class WorldStateSerializer
         }
 
         int version = reader.ReadInt32();
-        if (version is not (1 or 2 or 3 or 4 or 5 or CurrentVersion))
+        if (version is not (1 or 2 or 3 or 4 or CurrentVersion))
         {
             throw new InvalidDataException($"Unsupported world-state version '{version}'.");
         }
@@ -371,7 +371,6 @@ public static class WorldStateSerializer
                 writer.Write(combat.Range.Raw);
                 writer.Write(combat.Damage);
                 writer.Write(combat.Defense);
-                writer.Write(combat.MagicResist);
                 writer.Write(combat.CooldownTicks);
                 writer.Write(combat.LastAttackTick);
             }
@@ -446,7 +445,7 @@ public static class WorldStateSerializer
                 Fix32 range = new(reader.ReadInt32());
                 int damage = reader.ReadInt32();
                 int defense = (snapshotVersion >= 5 || (snapshotVersion == CurrentVersion && readDefenseForV4)) ? reader.ReadInt32() : 0;
-                int magicResist = (snapshotVersion >= 6 || (snapshotVersion == CurrentVersion && readDefenseForV4)) ? reader.ReadInt32() : defense;
+                int magicResist = defense;
                 int cooldownTicks = reader.ReadInt32();
                 int lastAttackTick = reader.ReadInt32();
 
