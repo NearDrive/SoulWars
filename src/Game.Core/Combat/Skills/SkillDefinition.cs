@@ -20,6 +20,25 @@ public readonly record struct SkillDefinition(
 
     public CastTargetKind TargetKind => (CastTargetKind)TargetType;
 
+
+    public SkillDefinition(
+        SkillId Id,
+        int RangeQRaw,
+        int HitRadiusRaw,
+        int MaxTargets,
+        int CooldownTicks,
+        int CastTimeTicks,
+        int GlobalCooldownTicks,
+        int ResourceCost,
+        CastTargetKind TargetKind,
+        SkillEffectKind EffectKind = SkillEffectKind.Damage,
+        int BaseAmount = 0,
+        int CoefRaw = 0,
+        OptionalStatusEffect? StatusEffect = null)
+        : this(Id, RangeQRaw, HitRadiusRaw, MaxTargets, CooldownTicks, CastTimeTicks, GlobalCooldownTicks, ResourceCost, (SkillTargetType)TargetKind, SkillFlags.None, EffectKind, BaseAmount, CoefRaw, StatusEffect)
+    {
+    }
+
     public SkillDefinition(
         SkillId Id,
         int RangeQRaw,
