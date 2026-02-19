@@ -304,7 +304,8 @@ public sealed record ZoneEntities(
             HealthComponent health = Health[i];
             CombatComponent combat = Combat[i];
             AiComponent ai = Ai[i];
-            StatusEffectsComponent status = i < StatusEffects.Length ? StatusEffects[i] : StatusEffectsComponent.Empty;
+            int statusCount = StatusEffects.IsDefault ? 0 : StatusEffects.Length;
+            StatusEffectsComponent status = i < statusCount ? StatusEffects[i] : StatusEffectsComponent.Empty;
             builder.Add(new EntityState(
                 Id: AliveIds[i],
                 Pos: position.Pos,
