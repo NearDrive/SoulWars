@@ -44,6 +44,7 @@ public sealed class CastSkillCommandTests
 
         ZoneState zoneBefore = Assert.Single(state.Zones);
         EntityState casterBefore = Assert.Single(zoneBefore.Entities.Where(e => e.Id.Value == 1));
+        int beforeRemaining = Assert.Single(casterBefore.SkillCooldowns.CooldownRemainingBySkillId).RemainingTicks;
 
         WorldCommand cast = new(
             Kind: WorldCommandKind.CastSkill,
@@ -58,7 +59,8 @@ public sealed class CastSkillCommandTests
         Assert.Empty(state.SkillCastIntents);
         ZoneState zoneAfter = Assert.Single(state.Zones);
         EntityState casterAfter = Assert.Single(zoneAfter.Entities.Where(e => e.Id.Value == 1));
-        Assert.Equal(casterBefore.SkillCooldowns, casterAfter.SkillCooldowns);
+        int afterRemaining = Assert.Single(casterAfter.SkillCooldowns.CooldownRemainingBySkillId).RemainingTicks;
+        Assert.Equal(beforeRemaining - 1, afterRemaining);
     }
 
     [Fact]
@@ -69,6 +71,7 @@ public sealed class CastSkillCommandTests
 
         ZoneState zoneBefore = Assert.Single(state.Zones);
         EntityState casterBefore = Assert.Single(zoneBefore.Entities.Where(e => e.Id.Value == 1));
+        Assert.True(casterBefore.SkillCooldowns.IsReady(new SkillId(10)));
 
         WorldCommand cast = new(
             Kind: WorldCommandKind.CastSkill,
@@ -83,7 +86,7 @@ public sealed class CastSkillCommandTests
         Assert.Empty(state.SkillCastIntents);
         ZoneState zoneAfter = Assert.Single(state.Zones);
         EntityState casterAfter = Assert.Single(zoneAfter.Entities.Where(e => e.Id.Value == 1));
-        Assert.Equal(casterBefore.SkillCooldowns, casterAfter.SkillCooldowns);
+        Assert.True(casterAfter.SkillCooldowns.IsReady(new SkillId(10)));
     }
 
     [Fact]
