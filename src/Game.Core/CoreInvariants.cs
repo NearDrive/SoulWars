@@ -217,14 +217,10 @@ public static class CoreInvariants
 
         int lastCombatEventTick = int.MinValue;
         int lastCombatSourceId = int.MinValue;
-        int lastCombatTargetId = int.MinValue;
-        int lastCombatSkillId = int.MinValue;
         foreach (CombatEvent combatEvent in (world.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : world.CombatEvents))
         {
             if (combatEvent.Tick < lastCombatEventTick
-                || (combatEvent.Tick == lastCombatEventTick && combatEvent.SourceId.Value < lastCombatSourceId)
-                || (combatEvent.Tick == lastCombatEventTick && combatEvent.SourceId.Value == lastCombatSourceId && combatEvent.TargetId.Value < lastCombatTargetId)
-                || (combatEvent.Tick == lastCombatEventTick && combatEvent.SourceId.Value == lastCombatSourceId && combatEvent.TargetId.Value == lastCombatTargetId && combatEvent.SkillId.Value < lastCombatSkillId))
+                || (combatEvent.Tick == lastCombatEventTick && combatEvent.SourceId.Value < lastCombatSourceId))
             {
                 throw new InvariantViolationException($"invariant=CombatEventsOrdered tick={tick} eventTick={combatEvent.Tick} source={combatEvent.SourceId.Value} target={combatEvent.TargetId.Value} skill={combatEvent.SkillId.Value}");
             }
@@ -236,8 +232,6 @@ public static class CoreInvariants
 
             lastCombatEventTick = combatEvent.Tick;
             lastCombatSourceId = combatEvent.SourceId.Value;
-            lastCombatTargetId = combatEvent.TargetId.Value;
-            lastCombatSkillId = combatEvent.SkillId.Value;
         }
 
         int lastInventoryEntityId = int.MinValue;

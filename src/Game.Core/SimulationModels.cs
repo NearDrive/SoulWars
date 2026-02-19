@@ -30,12 +30,28 @@ public readonly record struct SkillDefinition(
     SkillId Id,
     int RangeQRaw,
     int HitRadiusRaw,
+    int MaxTargets,
     int CooldownTicks,
     int ResourceCost,
     CastTargetKind TargetKind,
     SkillEffectKind EffectKind = SkillEffectKind.Damage,
     int BaseAmount = 0,
-    int CoefRaw = 0);
+    int CoefRaw = 0)
+{
+    public SkillDefinition(
+        SkillId Id,
+        int RangeQRaw,
+        int HitRadiusRaw,
+        int CooldownTicks,
+        int ResourceCost,
+        CastTargetKind TargetKind,
+        SkillEffectKind EffectKind = SkillEffectKind.Damage,
+        int BaseAmount = 0,
+        int CoefRaw = 0)
+        : this(Id, RangeQRaw, HitRadiusRaw, MaxTargets: 8, CooldownTicks, ResourceCost, TargetKind, EffectKind, BaseAmount, CoefRaw)
+    {
+    }
+}
 
 public enum SkillEffectKind : byte
 {
@@ -486,12 +502,7 @@ public sealed record WorldState(
     {
         return this with
         {
-            CombatEvents = combatEvents
-                .OrderBy(e => e.Tick)
-                .ThenBy(e => e.SourceId.Value)
-                .ThenBy(e => e.TargetId.Value)
-                .ThenBy(e => e.SkillId.Value)
-                .ToImmutableArray()
+            CombatEvents = combatEvents.ToImmutableArray()
         };
     }
 }

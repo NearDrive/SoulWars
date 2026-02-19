@@ -121,11 +121,11 @@ public static class Simulation
             QueueTeleportIntent(config, updated, command, pendingTransfers, projectedTeleportZones, instrumentation);
         }
 
-        foreach ((ZoneId zoneId, ImmutableArray<WorldCommand> zoneCommands) in orderedCommands
+        foreach ((ZoneId zoneId, ImmutableArray<(WorldCommand Command, int CommandIndex)> zoneCommands) in orderedCommands
                      .Where(x => x.Command.Kind is WorldCommandKind.EnterZone or WorldCommandKind.MoveIntent or WorldCommandKind.AttackIntent or WorldCommandKind.CastSkill or WorldCommandKind.LeaveZone or WorldCommandKind.LootIntent)
                      .GroupBy(x => x.Command.ZoneId.Value)
                      .OrderBy(g => g.Key)
-                     .Select(g => (new ZoneId(g.Key), g.Select(v => v.Command).ToImmutableArray())))
+                     .Select(g => (new ZoneId(g.Key), g.Select(v => (v.Command, v.Index)).ToImmutableArray())))
         {
             if (!updated.TryGetZone(zoneId, out ZoneState zone))
             {
@@ -138,6 +138,11 @@ public static class Simulation
             {
                 ImmutableArray<CombatEvent> combined = (updated.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : updated.CombatEvents)
                     .AddRange(zoneEvents);
+                if (config.MaxCombatEventsPerTick > 0 && combined.Length > config.MaxCombatEventsPerTick)
+                {
+                    throw new InvariantViolationException($"invariant=MaxCombatEventsPerTickExceeded tick={updated.Tick} max={config.MaxCombatEventsPerTick} actual={combined.Length}");
+                }
+
                 updated = updated.WithCombatEvents(combined);
             }
             updated = RebuildEntityLocations(updated);
@@ -1239,12 +1244,12 @@ public static class Simulation
             .ToImmutableArray();
     }
 
-    private static (ZoneState Zone, ImmutableArray<CombatEvent> Events) ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<WorldCommand> zoneCommands, SimulationInstrumentation? instrumentation)
+    private static (ZoneState Zone, ImmutableArray<CombatEvent> Events) ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<(WorldCommand Command, int CommandIndex)> zoneCommands, SimulationInstrumentation? instrumentation)
     {
         ZoneState current = zone;
         ImmutableArray<CombatEvent>.Builder combatEvents = ImmutableArray.CreateBuilder<CombatEvent>();
 
-        foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.EnterZone))
+        foreach ((WorldCommand command, _) in zoneCommands.Where(c => c.Command.Kind is WorldCommandKind.EnterZone))
         {
             if (!IsValidCommand(command))
             {
@@ -1254,7 +1259,7 @@ public static class Simulation
             current = ApplyEnterZone(config, current, command);
         }
 
-        foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.MoveIntent))
+        foreach ((WorldCommand command, _) in zoneCommands.Where(c => c.Command.Kind is WorldCommandKind.MoveIntent))
         {
             if (!IsValidCommand(command))
             {
@@ -1264,7 +1269,7 @@ public static class Simulation
             current = ApplyMoveIntent(config, current, command, instrumentation: instrumentation);
         }
 
-        foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.AttackIntent))
+        foreach ((WorldCommand command, _) in zoneCommands.Where(c => c.Command.Kind is WorldCommandKind.AttackIntent))
         {
             if (!IsValidCommand(command))
             {
@@ -1274,26 +1279,27 @@ public static class Simulation
             current = ApplyAttackIntent(tick, current, command);
         }
 
-        foreach (WorldCommand command in zoneCommands
-                     .Where(c => c.Kind is WorldCommandKind.CastSkill)
-                     .OrderBy(c => c.EntityId.Value)
-                     .ThenBy(c => c.SkillId?.Value ?? int.MinValue)
-                     .ThenBy(c => c.TargetEntityId?.Value ?? int.MinValue))
+        foreach ((WorldCommand command, int commandIndex) in zoneCommands
+                     .Where(c => c.Command.Kind is WorldCommandKind.CastSkill)
+                     .OrderBy(c => c.Command.EntityId.Value)
+                     .ThenBy(c => c.Command.SkillId?.Value ?? int.MinValue)
+                     .ThenBy(c => c.Command.TargetEntityId?.Value ?? int.MinValue)
+                     .ThenBy(c => c.CommandIndex))
         {
             if (!IsValidCommand(command))
             {
                 continue;
             }
 
-            (ZoneState next, CombatEvent? evt) = ApplyCastSkill(config, tick, current, command);
+            (ZoneState next, ImmutableArray<CombatEvent> castEvents) = ApplyCastSkill(config, tick, current, command);
             current = next;
-            if (evt is not null)
+            for (int targetOrder = 0; targetOrder < castEvents.Length; targetOrder++)
             {
-                combatEvents.Add(evt.Value);
+                combatEvents.Add(castEvents[targetOrder]);
             }
         }
 
-        foreach (WorldCommand command in zoneCommands.Where(c => c.Kind is WorldCommandKind.LeaveZone))
+        foreach ((WorldCommand command, _) in zoneCommands.Where(c => c.Command.Kind is WorldCommandKind.LeaveZone))
         {
             if (!IsValidCommand(command))
             {
@@ -1303,12 +1309,7 @@ public static class Simulation
             current = ApplyLeaveZone(current, command);
         }
 
-        return (current, combatEvents
-            .OrderBy(e => e.Tick)
-            .ThenBy(e => e.SourceId.Value)
-            .ThenBy(e => e.TargetId.Value)
-            .ThenBy(e => e.SkillId.Value)
-            .ToImmutableArray());
+        return (current, combatEvents.ToImmutable());
     }
 
     private static bool IsValidCommand(WorldCommand command)
@@ -1520,30 +1521,30 @@ public static class Simulation
             .ToImmutableArray());
     }
 
-    private static (ZoneState Zone, CombatEvent? Event) ApplyCastSkill(SimulationConfig config, int tick, ZoneState zone, WorldCommand command)
+    private static (ZoneState Zone, ImmutableArray<CombatEvent> Events) ApplyCastSkill(SimulationConfig config, int tick, ZoneState zone, WorldCommand command)
     {
         CastResult result = ValidateCastSkill(config, tick, zone, command);
         if (result != CastResult.Ok)
         {
-            return (zone, null);
+            return (zone, ImmutableArray<CombatEvent>.Empty);
         }
 
         if (command.SkillId is null)
         {
-            return (zone, null);
+            return (zone, ImmutableArray<CombatEvent>.Empty);
         }
 
         SkillDefinition? skill = FindSkill(config, command.SkillId.Value);
         if (skill is null)
         {
-            return (zone, null);
+            return (zone, ImmutableArray<CombatEvent>.Empty);
         }
 
         ImmutableArray<EntityState> entities = zone.Entities;
         int casterIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.EntityId);
         if (casterIndex < 0)
         {
-            return (zone, null);
+            return (zone, ImmutableArray<CombatEvent>.Empty);
         }
 
         EntityState caster = entities[casterIndex];
@@ -1553,45 +1554,66 @@ public static class Simulation
             AttackCooldownTicks = skill.Value.CooldownTicks
         };
 
-        int targetIndex = ResolveCastTargetIndex(zone, casterIndex, command, skill.Value);
-
-        if (targetIndex < 0)
+        ImmutableArray<int> targetIndices = ResolveCastTargetIndices(zone, casterIndex, command, skill.Value);
+        if (targetIndices.IsDefaultOrEmpty)
         {
-            return (zone, null);
+            return (zone, ImmutableArray<CombatEvent>.Empty);
         }
 
-        EntityState target = entities[targetIndex];
-        int amount = skill.Value.BaseAmount;
-        if (skill.Value.CoefRaw != 0)
-        {
-            amount += Fix32.FloorToInt(Fix32.FromInt(caster.AttackDamage) * new Fix32(skill.Value.CoefRaw));
-        }
+        Dictionary<int, EntityState> targetUpdates = new();
+        ImmutableArray<CombatEvent>.Builder combatEvents = ImmutableArray.CreateBuilder<CombatEvent>(targetIndices.Length);
 
-        int finalAmount;
-        CombatEventType eventType;
-        EntityState updatedTarget;
-
-        if (skill.Value.EffectKind == SkillEffectKind.Heal)
+        for (int i = 0; i < targetIndices.Length; i++)
         {
-            finalAmount = Math.Min(Math.Max(0, target.MaxHp - target.Hp), Math.Max(0, amount));
-            eventType = CombatEventType.Heal;
-            updatedTarget = target with
+            int targetIndex = targetIndices[i];
+            EntityState target = entities[targetIndex];
+            if (targetUpdates.TryGetValue(targetIndex, out EntityState? alreadyUpdated) && alreadyUpdated is not null)
             {
-                Hp = target.Hp + finalAmount,
-                IsAlive = target.Hp + finalAmount > 0
-            };
-        }
-        else
-        {
-            finalAmount = Math.Max(1, amount - target.Defense);
-            finalAmount = Math.Min(finalAmount, target.Hp);
-            eventType = CombatEventType.Damage;
-            int nextHp = Math.Max(0, target.Hp - finalAmount);
-            updatedTarget = target with
+                target = alreadyUpdated;
+            }
+
+            int amount = skill.Value.BaseAmount;
+            if (skill.Value.CoefRaw != 0)
             {
-                Hp = nextHp,
-                IsAlive = nextHp > 0
-            };
+                amount += Fix32.FloorToInt(Fix32.FromInt(caster.AttackDamage) * new Fix32(skill.Value.CoefRaw));
+            }
+
+            int finalAmount;
+            CombatEventType eventType;
+            EntityState updatedTarget;
+
+            if (skill.Value.EffectKind == SkillEffectKind.Heal)
+            {
+                finalAmount = Math.Min(Math.Max(0, target.MaxHp - target.Hp), Math.Max(0, amount));
+                eventType = CombatEventType.Heal;
+                updatedTarget = target with
+                {
+                    Hp = target.Hp + finalAmount,
+                    IsAlive = target.Hp + finalAmount > 0
+                };
+            }
+            else
+            {
+                finalAmount = Math.Max(1, amount - target.Defense);
+                finalAmount = Math.Min(finalAmount, target.Hp);
+                eventType = CombatEventType.Damage;
+                int nextHp = Math.Max(0, target.Hp - finalAmount);
+                updatedTarget = target with
+                {
+                    Hp = nextHp,
+                    IsAlive = nextHp > 0
+                };
+            }
+
+            targetUpdates[targetIndex] = updatedTarget;
+
+            combatEvents.Add(new CombatEvent(
+                Tick: tick,
+                SourceId: caster.Id,
+                TargetId: target.Id,
+                SkillId: skill.Value.Id,
+                Type: eventType,
+                Amount: finalAmount));
         }
 
         ImmutableArray<EntityState>.Builder builder = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
@@ -1601,7 +1623,7 @@ public static class Simulation
             {
                 builder.Add(updatedCaster);
             }
-            else if (i == targetIndex)
+            else if (targetUpdates.TryGetValue(i, out EntityState? updatedTarget) && updatedTarget is not null)
             {
                 builder.Add(updatedTarget);
             }
@@ -1616,15 +1638,7 @@ public static class Simulation
             .OrderBy(e => e.Id.Value)
             .ToImmutableArray());
 
-        CombatEvent combatEvent = new(
-            Tick: tick,
-            SourceId: caster.Id,
-            TargetId: target.Id,
-            SkillId: skill.Value.Id,
-            Type: eventType,
-            Amount: finalAmount);
-
-        return (updatedZone, combatEvent);
+        return (updatedZone, combatEvents.ToImmutable());
     }
 
     public static CastResult ValidateCastSkill(SimulationConfig config, int tick, ZoneState zone, WorldCommand command)
@@ -1675,13 +1689,13 @@ public static class Simulation
 
         if (command.TargetKind != CastTargetKind.Point)
         {
-            int resolvedIndex = ResolveCastTargetIndex(zone, casterIndex, command, skill.Value);
-            if (resolvedIndex < 0)
+            ImmutableArray<int> resolvedIndices = ResolveCastTargetIndices(zone, casterIndex, command, skill.Value);
+            if (resolvedIndices.IsDefaultOrEmpty)
             {
                 return CastResult.Rejected_InvalidTarget;
             }
 
-            targetPos = entities[resolvedIndex].Pos;
+            targetPos = entities[resolvedIndices[0]].Pos;
         }
 
         Fix32 dx = caster.Pos.X - targetPos.X;
@@ -1697,8 +1711,8 @@ public static class Simulation
 
         if (command.TargetKind == CastTargetKind.Point)
         {
-            int pointTargetIndex = ResolveCastTargetIndex(zone, casterIndex, command, skill.Value);
-            if (pointTargetIndex < 0)
+            ImmutableArray<int> pointTargetIndices = ResolveCastTargetIndices(zone, casterIndex, command, skill.Value);
+            if (pointTargetIndices.IsDefaultOrEmpty)
             {
                 return CastResult.Rejected_InvalidTarget;
             }
@@ -1708,50 +1722,50 @@ public static class Simulation
     }
 
 
-    private static int ResolveCastTargetIndex(ZoneState zone, int casterIndex, WorldCommand command, SkillDefinition skill)
+    private static ImmutableArray<int> ResolveCastTargetIndices(ZoneState zone, int casterIndex, WorldCommand command, SkillDefinition skill)
     {
         if (command.TargetKind == CastTargetKind.Self)
         {
-            return casterIndex;
+            return ImmutableArray.Create(casterIndex);
         }
 
         if (command.TargetKind == CastTargetKind.Entity)
         {
             if (command.TargetEntityId is null)
             {
-                return -1;
+                return ImmutableArray<int>.Empty;
             }
 
             int targetIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.TargetEntityId.Value);
             if (targetIndex < 0)
             {
-                return -1;
+                return ImmutableArray<int>.Empty;
             }
 
-            return zone.Entities[targetIndex].IsAlive ? targetIndex : -1;
+            return zone.Entities[targetIndex].IsAlive
+                ? ImmutableArray.Create(targetIndex)
+                : ImmutableArray<int>.Empty;
         }
 
         if (command.TargetKind != CastTargetKind.Point)
         {
-            return -1;
+            return ImmutableArray<int>.Empty;
         }
 
         Vec2Fix point = new(new Fix32(command.TargetPosXRaw), new Fix32(command.TargetPosYRaw));
-        return ResolvePointTargetIndex(zone, casterIndex, point, new Fix32(skill.HitRadiusRaw));
+        return ResolveAoeTargets(zone, casterIndex, point, new Fix32(skill.HitRadiusRaw), skill.MaxTargets);
     }
 
-    private static int ResolvePointTargetIndex(ZoneState zone, int casterIndex, Vec2Fix point, Fix32 hitRadius)
+    private static ImmutableArray<int> ResolveAoeTargets(ZoneState zone, int casterIndex, Vec2Fix point, Fix32 hitRadius, int maxTargets)
     {
         if (hitRadius.Raw <= 0)
         {
-            return -1;
+            return ImmutableArray<int>.Empty;
         }
 
         ImmutableArray<EntityState> entities = zone.Entities;
         Fix32 radiusSq = hitRadius * hitRadius;
-        int bestIndex = -1;
-        Fix32 bestDistSq = new(int.MaxValue);
-        EntityId bestEntityId = default;
+        List<(int Index, Fix32 DistSq, int EntityId)> eligible = new();
 
         for (int i = 0; i < entities.Length; i++)
         {
@@ -1773,21 +1787,26 @@ public static class Simulation
                 continue;
             }
 
-            bool better = bestIndex < 0
-                || distSq < bestDistSq
-                || (distSq == bestDistSq && candidate.Id.Value < bestEntityId.Value);
-
-            if (!better)
-            {
-                continue;
-            }
-
-            bestIndex = i;
-            bestDistSq = distSq;
-            bestEntityId = candidate.Id;
+            eligible.Add((i, distSq, candidate.Id.Value));
         }
 
-        return bestIndex;
+        if (eligible.Count == 0)
+        {
+            return ImmutableArray<int>.Empty;
+        }
+
+        IEnumerable<(int Index, Fix32 DistSq, int EntityId)> ordered = eligible
+            .OrderBy(e => e.DistSq)
+            .ThenBy(e => e.EntityId);
+
+        if (maxTargets > 0)
+        {
+            ordered = ordered.Take(maxTargets);
+        }
+
+        return ordered
+            .Select(e => e.Index)
+            .ToImmutableArray();
     }
 
     private static SkillDefinition? FindSkill(SimulationConfig config, SkillId skillId)
