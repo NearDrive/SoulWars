@@ -415,6 +415,11 @@ public sealed record ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData
     {
     }
 
+    public ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData)
+        : this(Id, Map, EntitiesData, ImmutableArray<PendingCastComponent>.Empty)
+    {
+    }
+
     public ImmutableArray<EntityState> Entities => EntitiesData.ToEntityStates();
 
     public ZoneState WithEntities(ImmutableArray<EntityState> entities) => this with
