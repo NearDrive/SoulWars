@@ -82,7 +82,7 @@ public sealed class CastSkillValidationTests
         Assert.True(next.TryGetZone(new ZoneId(1), out ZoneState afterZone));
         EntityState afterCaster = afterZone.Entities.Single(e => e.Id.Value == 1);
         Assert.Equal(beforeCaster.LastAttackTick, afterCaster.LastAttackTick);
-        Assert.True(afterCaster.SkillCooldowns.IsReady(10));
+        Assert.True(afterCaster.SkillCooldowns.IsReady(new SkillId(10)));
     }
 
     [Fact]
