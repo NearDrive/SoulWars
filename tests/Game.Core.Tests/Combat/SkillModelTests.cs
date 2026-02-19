@@ -66,7 +66,16 @@ public sealed class SkillModelTests
         Type type = typeof(SkillDefinition);
         PropertyInfo[] properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
 
-        Assert.All(properties, property => Assert.False(property.SetMethod?.IsPublic ?? false));
+        Assert.All(properties, property =>
+        {
+            MethodInfo? setMethod = property.SetMethod;
+            if (setMethod is null)
+            {
+                return;
+            }
+
+            Assert.True(IsInitOnlySetter(setMethod), $"Property '{property.Name}' must be get-only or init-only.");
+        });
         Assert.DoesNotContain(properties, p => p.PropertyType == typeof(Random));
         Assert.DoesNotContain(properties, p => p.PropertyType == typeof(DateTime));
 
@@ -88,6 +97,12 @@ public sealed class SkillModelTests
         Assert.Equal(CastTargetKind.Entity, skill.TargetKind);
     }
 
+
+    private static bool IsInitOnlySetter(MethodInfo setMethod)
+    {
+        Type[] requiredModifiers = setMethod.ReturnParameter.GetRequiredCustomModifiers();
+        return requiredModifiers.Contains(typeof(System.Runtime.CompilerServices.IsExternalInit));
+    }
     private static SimulationConfig CreateConfig() => new(
         Seed: 123,
         TickHz: 20,
