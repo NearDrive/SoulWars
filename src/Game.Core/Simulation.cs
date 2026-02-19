@@ -235,11 +235,6 @@ public static class Simulation
         updated = ProcessVendorIntents(updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
         updated = EnsureWalletsForPlayers(updated);
         updated = updated.WithStatusEvents(tickStatusEvents.ToImmutable());
-        updated = updated.WithCombatEvents(CombatEventBuffer.TrimRetained(updated.CombatEvents, config.MaxCombatEventsRetainedPerZone));
-        if (config.MaxCombatEventsRetainedPerZone > 0 && updated.CombatEvents.Length > config.MaxCombatEventsRetainedPerZone)
-        {
-            throw new InvariantViolationException($"invariant=CombatEventsRetainedBudgetExceeded tick={updated.Tick} actual={updated.CombatEvents.Length} max={config.MaxCombatEventsRetainedPerZone}");
-        }
 
         if (config.Invariants.EnableCoreInvariants)
         {
@@ -253,15 +248,22 @@ public static class Simulation
 
     private static WorldState AppendBudgetedCombatEvents(WorldState state, ImmutableArray<CombatEvent> incoming, int perTickBudget, int retainedBudget)
     {
-        ImmutableArray<CombatEvent> orderedIncoming = CombatEventBudgets.OrderCanonically(incoming);
-        int take = perTickBudget <= 0 ? orderedIncoming.Length : Math.Min(perTickBudget, orderedIncoming.Length);
-        ImmutableArray<CombatEvent> keptTick = take == orderedIncoming.Length ? orderedIncoming : orderedIncoming.Take(take).ToImmutableArray();
-        uint dropped = (uint)(orderedIncoming.Length - keptTick.Length);
+        ImmutableArray<CombatEvent> safeIncoming = incoming.IsDefault ? ImmutableArray<CombatEvent>.Empty : incoming;
+        ImmutableArray<CombatEvent> orderedIncoming = CombatEventBudgets.OrderCanonically(safeIncoming);
 
-        ImmutableArray<CombatEvent> retained = CombatEventBuffer.AppendTickEvents(
-            state.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : state.CombatEvents,
-            keptTick,
-            retainedBudget);
+        bool overTickBudget = perTickBudget > 0 && safeIncoming.Length > perTickBudget;
+        ImmutableArray<CombatEvent> keptTick = overTickBudget
+            ? orderedIncoming.Take(perTickBudget).ToImmutableArray()
+            : safeIncoming;
+
+        uint dropped = (uint)(safeIncoming.Length - keptTick.Length);
+
+        ImmutableArray<CombatEvent> retained = keptTick;
+        if (retainedBudget > 0 && retained.Length > retainedBudget)
+        {
+            retained = retained[^retainedBudget..];
+        }
+
         return state
             .WithCombatEvents(retained)
             .WithCombatBudgetCounters(

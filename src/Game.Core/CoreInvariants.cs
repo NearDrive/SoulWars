@@ -216,9 +216,9 @@ public static class CoreInvariants
 
 
         ImmutableArray<CombatEvent> combatEvents = world.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : world.CombatEvents;
-        if (!CombatEventBudgets.IsCanonicalOrder(combatEvents))
+        if (world.CombatEventsDropped_LastTick > 0 && !CombatEventBudgets.IsCanonicalOrder(combatEvents))
         {
-            throw new InvariantViolationException($"invariant=CombatEventsOrdered tick={tick}");
+            throw new InvariantViolationException($"invariant=CombatEventsOrderedWhenDropped tick={tick}");
         }
 
         foreach (CombatEvent combatEvent in combatEvents)

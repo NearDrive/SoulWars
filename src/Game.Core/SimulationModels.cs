@@ -655,7 +655,7 @@ public sealed record WorldState(
     {
         return this with
         {
-            CombatEvents = CombatEventBudgets.OrderCanonically(combatEvents)
+            CombatEvents = combatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : combatEvents.ToImmutableArray()
         };
     }
 

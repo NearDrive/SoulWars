@@ -49,7 +49,7 @@ public sealed class CombatBudgetsTests
         ImmutableArray<CombatEvent> capped = CombatEventBudgets.TakeSnapshotEvents(events, 4);
         ImmutableArray<CombatEvent> expected = CombatEventBudgets.OrderCanonically(events).Take(4).ToImmutableArray();
 
-        Assert.Equal(expected, capped);
+        Assert.True(expected.SequenceEqual(capped));
     }
 
     [Fact]
