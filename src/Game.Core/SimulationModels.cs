@@ -459,7 +459,10 @@ public sealed record WorldState(
     ImmutableArray<CombatEvent> CombatEvents = default,
     ImmutableArray<CombatLogEvent> CombatLogEvents = default,
     ImmutableArray<StatusEvent> StatusEvents = default,
-    ImmutableArray<SkillCastIntent> SkillCastIntents = default)
+    ImmutableArray<SkillCastIntent> SkillCastIntents = default,
+    uint CombatEventsDropped_Total = 0,
+    uint CombatEventsDropped_LastTick = 0,
+    uint CombatEventsEmitted_LastTick = 0)
 {
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
@@ -637,11 +640,22 @@ public sealed record WorldState(
         };
     }
 
+
+    public WorldState WithCombatBudgetCounters(uint droppedTotal, uint droppedLastTick, uint emittedLastTick)
+    {
+        return this with
+        {
+            CombatEventsDropped_Total = droppedTotal,
+            CombatEventsDropped_LastTick = droppedLastTick,
+            CombatEventsEmitted_LastTick = emittedLastTick
+        };
+    }
+
     public WorldState WithCombatEvents(ImmutableArray<CombatEvent> combatEvents)
     {
         return this with
         {
-            CombatEvents = combatEvents.ToImmutableArray()
+            CombatEvents = combatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : combatEvents.ToImmutableArray()
         };
     }
 
@@ -649,7 +663,14 @@ public sealed record WorldState(
     {
         return this with
         {
-            CombatLogEvents = combatLogEvents.ToImmutableArray()
+            CombatLogEvents = (combatLogEvents.IsDefault ? ImmutableArray<CombatLogEvent>.Empty : combatLogEvents)
+                .OrderBy(e => e.Tick)
+                .ThenBy(e => e.SourceId.Value)
+                .ThenBy(e => e.TargetId.Value)
+                .ThenBy(e => e.SkillId.Value)
+                .ThenBy(e => (int)e.Kind)
+                .ThenBy(e => e.Amount)
+                .ToImmutableArray()
         };
     }
 

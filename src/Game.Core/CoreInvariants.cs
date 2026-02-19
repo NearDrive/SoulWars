@@ -215,23 +215,23 @@ public static class CoreInvariants
         }
 
 
-        int lastCombatEventTick = int.MinValue;
-        int lastCombatSourceId = int.MinValue;
-        foreach (CombatEvent combatEvent in (world.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : world.CombatEvents))
+        ImmutableArray<CombatEvent> combatEvents = world.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : world.CombatEvents;
+        if (world.CombatEventsDropped_LastTick > 0 && !CombatEventBudgets.IsCanonicalOrder(combatEvents))
         {
-            if (combatEvent.Tick < lastCombatEventTick
-                || (combatEvent.Tick == lastCombatEventTick && combatEvent.SourceId.Value < lastCombatSourceId))
-            {
-                throw new InvariantViolationException($"invariant=CombatEventsOrdered tick={tick} eventTick={combatEvent.Tick} source={combatEvent.SourceId.Value} target={combatEvent.TargetId.Value} skill={combatEvent.SkillId.Value}");
-            }
+            throw new InvariantViolationException($"invariant=CombatEventsOrderedWhenDropped tick={tick}");
+        }
 
+        foreach (CombatEvent combatEvent in combatEvents)
+        {
             if (combatEvent.Amount < 0)
             {
                 throw new InvariantViolationException($"invariant=CombatEventAmountNonNegative tick={tick} amount={combatEvent.Amount}");
             }
+        }
 
-            lastCombatEventTick = combatEvent.Tick;
-            lastCombatSourceId = combatEvent.SourceId.Value;
+        if (world.CombatEventsDropped_LastTick > world.CombatEventsDropped_Total)
+        {
+            throw new InvariantViolationException($"invariant=CombatEventsDroppedCounterMonotonic tick={tick} droppedLast={world.CombatEventsDropped_LastTick} droppedTotal={world.CombatEventsDropped_Total}");
         }
 
         int lastStatusTick = int.MinValue;
