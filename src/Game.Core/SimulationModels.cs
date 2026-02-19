@@ -6,15 +6,6 @@ public readonly record struct EntityId(int Value);
 
 public readonly record struct ZoneId(int Value);
 
-public readonly record struct SkillId(int Value);
-
-public enum CastTargetKind : byte
-{
-    Self = 1,
-    Entity = 2,
-    Point = 3
-}
-
 public enum CastResult : byte
 {
     Ok = 0,
@@ -158,54 +149,6 @@ public readonly record struct StatusEffectsComponent(ImmutableArray<StatusEffect
     }
 }
 
-public readonly record struct SkillDefinition(
-    SkillId Id,
-    int RangeQRaw,
-    int HitRadiusRaw,
-    int MaxTargets,
-    int CooldownTicks,
-    int CastTimeTicks,
-    int GlobalCooldownTicks,
-    int ResourceCost,
-    CastTargetKind TargetKind,
-    SkillEffectKind EffectKind = SkillEffectKind.Damage,
-    int BaseAmount = 0,
-    int CoefRaw = 0,
-    OptionalStatusEffect? StatusEffect = null)
-{
-    public SkillDefinition(
-        SkillId Id,
-        int RangeQRaw,
-        int HitRadiusRaw,
-        int CooldownTicks,
-        int CastTimeTicks,
-        int GlobalCooldownTicks,
-        int ResourceCost,
-        CastTargetKind TargetKind,
-        SkillEffectKind EffectKind = SkillEffectKind.Damage,
-        int BaseAmount = 0,
-        int CoefRaw = 0,
-        OptionalStatusEffect? StatusEffect = null)
-        : this(Id, RangeQRaw, HitRadiusRaw, MaxTargets: 8, CooldownTicks, CastTimeTicks, GlobalCooldownTicks, ResourceCost, TargetKind, EffectKind, BaseAmount, CoefRaw, StatusEffect)
-    {
-    }
-
-    public SkillDefinition(
-        SkillId Id,
-        int RangeQRaw,
-        int HitRadiusRaw,
-        int CooldownTicks,
-        int ResourceCost,
-        CastTargetKind TargetKind,
-        SkillEffectKind EffectKind = SkillEffectKind.Damage,
-        int BaseAmount = 0,
-        int CoefRaw = 0,
-        OptionalStatusEffect? StatusEffect = null)
-        : this(Id, RangeQRaw, HitRadiusRaw, CooldownTicks, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost, TargetKind, EffectKind, BaseAmount, CoefRaw, StatusEffect)
-    {
-    }
-}
-
 public enum SkillEffectKind : byte
 {
     Damage = 1,
@@ -275,7 +218,8 @@ public sealed record EntityState(
     sbyte WanderX = 0,
     sbyte WanderY = 0,
     int Defense = 0,
-    StatusEffectsComponent StatusEffects = default);
+    StatusEffectsComponent StatusEffects = default,
+    SkillCooldownsComponent SkillCooldowns = default);
 
 public sealed record ZoneEntities(
     ImmutableArray<EntityId> AliveIds,
@@ -285,7 +229,8 @@ public sealed record ZoneEntities(
     ImmutableArray<HealthComponent> Health,
     ImmutableArray<CombatComponent> Combat,
     ImmutableArray<AiComponent> Ai,
-    ImmutableArray<StatusEffectsComponent> StatusEffects = default)
+    ImmutableArray<StatusEffectsComponent> StatusEffects = default,
+    ImmutableArray<SkillCooldownsComponent> SkillCooldowns = default)
 {
     public static ZoneEntities Empty => new(
         ImmutableArray<EntityId>.Empty,
@@ -295,7 +240,8 @@ public sealed record ZoneEntities(
         ImmutableArray<HealthComponent>.Empty,
         ImmutableArray<CombatComponent>.Empty,
         ImmutableArray<AiComponent>.Empty,
-        ImmutableArray<StatusEffectsComponent>.Empty);
+        ImmutableArray<StatusEffectsComponent>.Empty,
+        ImmutableArray<SkillCooldownsComponent>.Empty);
 
     public static int FindIndex(ImmutableArray<EntityId> ids, EntityId id)
     {
@@ -337,6 +283,8 @@ public sealed record ZoneEntities(
             AiComponent ai = Ai[i];
             int statusCount = StatusEffects.IsDefault ? 0 : StatusEffects.Length;
             StatusEffectsComponent status = i < statusCount ? StatusEffects[i] : StatusEffectsComponent.Empty;
+            int skillCooldownCount = SkillCooldowns.IsDefault ? 0 : SkillCooldowns.Length;
+            SkillCooldownsComponent skillCooldowns = i < skillCooldownCount ? SkillCooldowns[i] : SkillCooldownsComponent.Empty;
             builder.Add(new EntityState(
                 Id: AliveIds[i],
                 Pos: position.Pos,
@@ -353,7 +301,8 @@ public sealed record ZoneEntities(
                 NextWanderChangeTick: ai.NextWanderChangeTick,
                 WanderX: ai.WanderX,
                 WanderY: ai.WanderY,
-                StatusEffects: status));
+                StatusEffects: status,
+                SkillCooldowns: skillCooldowns));
         }
 
         return builder.MoveToImmutable();
@@ -373,6 +322,7 @@ public sealed record ZoneEntities(
         ImmutableArray<CombatComponent>.Builder combat = ImmutableArray.CreateBuilder<CombatComponent>(ordered.Length);
         ImmutableArray<AiComponent>.Builder ai = ImmutableArray.CreateBuilder<AiComponent>(ordered.Length);
         ImmutableArray<StatusEffectsComponent>.Builder statusEffects = ImmutableArray.CreateBuilder<StatusEffectsComponent>(ordered.Length);
+        ImmutableArray<SkillCooldownsComponent>.Builder skillCooldowns = ImmutableArray.CreateBuilder<SkillCooldownsComponent>(ordered.Length);
 
         foreach (EntityState entity in ordered)
         {
@@ -394,6 +344,7 @@ public sealed record ZoneEntities(
                 ? new AiComponent(entity.NextWanderChangeTick, entity.WanderX, entity.WanderY)
                 : default);
             statusEffects.Add(entity.StatusEffects);
+            skillCooldowns.Add(entity.SkillCooldowns);
         }
 
         return new ZoneEntities(
@@ -404,7 +355,8 @@ public sealed record ZoneEntities(
             health.MoveToImmutable(),
             combat.MoveToImmutable(),
             ai.MoveToImmutable(),
-            statusEffects.MoveToImmutable());
+            statusEffects.MoveToImmutable(),
+            skillCooldowns.MoveToImmutable());
     }
 }
 

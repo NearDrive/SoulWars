@@ -114,6 +114,12 @@ public static class Simulation
             }
         }
 
+        foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
+        {
+            ZoneState nextZone = TickDownZoneSkillCooldowns(zone);
+            updated = updated.WithZoneUpdated(nextZone);
+        }
+
         ImmutableArray<(WorldCommand Command, int Index)> orderedCommands = commands
             .Select((command, index) => (Command: command, Index: index))
             .OrderBy(x => x.Command.ZoneId.Value)
@@ -319,6 +325,35 @@ public static class Simulation
         }
 
         return updatedZone;
+    }
+
+    private static ZoneState TickDownZoneSkillCooldowns(ZoneState zone)
+    {
+        ImmutableArray<EntityState> entities = zone.Entities;
+        ImmutableArray<EntityState>.Builder next = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
+        bool anyChanged = false;
+
+        for (int i = 0; i < entities.Length; i++)
+        {
+            EntityState current = entities[i];
+            SkillCooldownsComponent cooldowns = current.SkillCooldowns;
+            SkillCooldownsComponent ticked = cooldowns.TickDown();
+            if (!Equals(cooldowns, ticked))
+            {
+                anyChanged = true;
+                next.Add(current with { SkillCooldowns = ticked });
+                continue;
+            }
+
+            next.Add(current);
+        }
+
+        if (!anyChanged)
+        {
+            return zone;
+        }
+
+        return zone.WithEntities(next.MoveToImmutable());
     }
 
 
