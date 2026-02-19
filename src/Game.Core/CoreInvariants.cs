@@ -82,6 +82,17 @@ public static class CoreInvariants
                 }
             }
 
+            int lastProjectileId = int.MinValue;
+            foreach (ProjectileComponent projectile in (zone.Projectiles.IsDefault ? ImmutableArray<ProjectileComponent>.Empty : zone.Projectiles))
+            {
+                if (projectile.ProjectileId <= lastProjectileId)
+                {
+                    throw new InvariantViolationException($"invariant=ProjectilesOrdered tick={tick} zoneId={zone.Id.Value} projectileId={projectile.ProjectileId} lastProjectileId={lastProjectileId}");
+                }
+
+                lastProjectileId = projectile.ProjectileId;
+            }
+
             int lastEntityId = int.MinValue;
             foreach (EntityState entity in zone.Entities)
             {
@@ -252,6 +263,29 @@ public static class CoreInvariants
             lastStatusSourceId = statusEvent.SourceId.Value;
             lastStatusTargetId = statusEvent.TargetId.Value;
             lastStatusEffectType = (int)statusEvent.EffectType;
+        }
+
+
+        if (world.ProjectileSpawnsDropped_LastTick > world.ProjectileSpawnsDropped_Total)
+        {
+            throw new InvariantViolationException($"invariant=ProjectileSpawnsDroppedCounterMonotonic tick={tick} droppedLast={world.ProjectileSpawnsDropped_LastTick} droppedTotal={world.ProjectileSpawnsDropped_Total}");
+        }
+
+        int lastProjectileEventTick = int.MinValue;
+        int lastProjectileEventId = int.MinValue;
+        int lastProjectileEventKind = int.MinValue;
+        foreach (ProjectileEvent projectileEvent in (world.ProjectileEvents.IsDefault ? ImmutableArray<ProjectileEvent>.Empty : world.ProjectileEvents))
+        {
+            if (projectileEvent.Tick < lastProjectileEventTick
+                || (projectileEvent.Tick == lastProjectileEventTick && projectileEvent.ProjectileId < lastProjectileEventId)
+                || (projectileEvent.Tick == lastProjectileEventTick && projectileEvent.ProjectileId == lastProjectileEventId && (int)projectileEvent.Kind < lastProjectileEventKind))
+            {
+                throw new InvariantViolationException($"invariant=ProjectileEventsOrdered tick={tick} eventTick={projectileEvent.Tick} projectileId={projectileEvent.ProjectileId} kind={projectileEvent.Kind}");
+            }
+
+            lastProjectileEventTick = projectileEvent.Tick;
+            lastProjectileEventId = projectileEvent.ProjectileId;
+            lastProjectileEventKind = (int)projectileEvent.Kind;
         }
 
         int lastInventoryEntityId = int.MinValue;

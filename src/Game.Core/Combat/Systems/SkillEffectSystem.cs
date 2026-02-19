@@ -37,7 +37,7 @@ public static class SkillEffectSystem
             }
 
             SkillDefinition? skill = FindSkill(config, intent.SkillId);
-            if (skill is null)
+            if (skill is null || ProjectileSystem.IsProjectileSkill(skill.Value))
             {
                 continue;
             }

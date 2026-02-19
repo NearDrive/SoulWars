@@ -46,8 +46,10 @@ public static class BotCombatScenario
                     ResourceCost: 0,
                     TargetType: SkillTargetType.Entity,
                     EffectKind: SkillEffectKind.Damage,
-                    BaseAmount: 14,
-                    CoefRaw: Fix32.OneRaw))
+                    BaseDamage: 14,
+                    ProjectileSpeedRaw: Fix32.FromInt(1).Raw,
+                    UsesProjectile: true,
+                    CollidesWithWorld: false))
         };
 
         ImmutableArray<BotSpec> bots = ImmutableArray.Create(

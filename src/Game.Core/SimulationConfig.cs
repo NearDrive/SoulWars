@@ -20,7 +20,9 @@ public readonly record struct SimulationConfig(
     int MaxCombatEventsPerTickPerZone = CombatEventBudgets.DefaultMaxCombatEventsPerTickPerZone,
     int MaxCombatEventsRetainedPerZone = CombatEventBudgets.DefaultMaxCombatEventsRetainedPerZone,
     int MaxCombatEventsPerSnapshot = CombatEventBudgets.DefaultMaxCombatEventsPerSnapshot,
-    int MaxCombatLogEventsRetained = CombatEventBudgets.DefaultMaxCombatLogEventsRetained)
+    int MaxCombatLogEventsRetained = CombatEventBudgets.DefaultMaxCombatLogEventsRetained,
+    int MaxProjectilesPerZone = 128,
+    int MaxProjectileLifetimeTicks = 300)
 {
     public static SimulationConfig Default(int seed) => new(
         Seed: seed,
@@ -40,5 +42,7 @@ public readonly record struct SimulationConfig(
         MaxCombatEventsPerTickPerZone: CombatEventBudgets.DefaultMaxCombatEventsPerTickPerZone,
         MaxCombatEventsRetainedPerZone: CombatEventBudgets.DefaultMaxCombatEventsRetainedPerZone,
         MaxCombatEventsPerSnapshot: CombatEventBudgets.DefaultMaxCombatEventsPerSnapshot,
-        MaxCombatLogEventsRetained: CombatEventBudgets.DefaultMaxCombatLogEventsRetained);
+        MaxCombatLogEventsRetained: CombatEventBudgets.DefaultMaxCombatLogEventsRetained,
+        MaxProjectilesPerZone: 128,
+        MaxProjectileLifetimeTicks: 300);
 }

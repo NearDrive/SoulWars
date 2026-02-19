@@ -16,7 +16,10 @@ public readonly record struct SkillDefinition(
     int CoefRaw = 0,
     OptionalStatusEffect? StatusEffect = null,
     int BaseDamage = 0,
-    DamageType DamageType = DamageType.Physical)
+    DamageType DamageType = DamageType.Physical,
+    int ProjectileSpeedRaw = 0,
+    bool UsesProjectile = false,
+    bool CollidesWithWorld = false)
 {
     public int RangeQRaw => RangeRaw;
 
@@ -38,8 +41,11 @@ public readonly record struct SkillDefinition(
         int CoefRaw = 0,
         OptionalStatusEffect? StatusEffect = null,
         int BaseDamage = 0,
-        DamageType DamageType = DamageType.Physical)
-        : this(Id, RangeQRaw, HitRadiusRaw, MaxTargets, CooldownTicks, CastTimeTicks, GlobalCooldownTicks, ResourceCost, (SkillTargetType)TargetKind, SkillFlags.None, EffectKind, BaseAmount, CoefRaw, StatusEffect, BaseDamage, DamageType)
+        DamageType DamageType = DamageType.Physical,
+        int ProjectileSpeedRaw = 0,
+        bool UsesProjectile = false,
+        bool CollidesWithWorld = false)
+        : this(Id, RangeQRaw, HitRadiusRaw, MaxTargets, CooldownTicks, CastTimeTicks, GlobalCooldownTicks, ResourceCost, (SkillTargetType)TargetKind, SkillFlags.None, EffectKind, BaseAmount, CoefRaw, StatusEffect, BaseDamage, DamageType, ProjectileSpeedRaw, UsesProjectile, CollidesWithWorld)
     {
     }
 
@@ -57,8 +63,11 @@ public readonly record struct SkillDefinition(
         int CoefRaw = 0,
         OptionalStatusEffect? StatusEffect = null,
         int BaseDamage = 0,
-        DamageType DamageType = DamageType.Physical)
-        : this(Id, RangeQRaw, HitRadiusRaw, MaxTargets: 8, CooldownTicks, CastTimeTicks, GlobalCooldownTicks, ResourceCost, (SkillTargetType)TargetKind, SkillFlags.None, EffectKind, BaseAmount, CoefRaw, StatusEffect, BaseDamage, DamageType)
+        DamageType DamageType = DamageType.Physical,
+        int ProjectileSpeedRaw = 0,
+        bool UsesProjectile = false,
+        bool CollidesWithWorld = false)
+        : this(Id, RangeQRaw, HitRadiusRaw, MaxTargets: 8, CooldownTicks, CastTimeTicks, GlobalCooldownTicks, ResourceCost, (SkillTargetType)TargetKind, SkillFlags.None, EffectKind, BaseAmount, CoefRaw, StatusEffect, BaseDamage, DamageType, ProjectileSpeedRaw, UsesProjectile, CollidesWithWorld)
     {
     }
 
@@ -74,8 +83,11 @@ public readonly record struct SkillDefinition(
         int CoefRaw = 0,
         OptionalStatusEffect? StatusEffect = null,
         int BaseDamage = 0,
-        DamageType DamageType = DamageType.Physical)
-        : this(Id, RangeQRaw, HitRadiusRaw, CooldownTicks, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost, TargetKind, EffectKind, BaseAmount, CoefRaw, StatusEffect, BaseDamage, DamageType)
+        DamageType DamageType = DamageType.Physical,
+        int ProjectileSpeedRaw = 0,
+        bool UsesProjectile = false,
+        bool CollidesWithWorld = false)
+        : this(Id, RangeQRaw, HitRadiusRaw, CooldownTicks, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost, TargetKind, EffectKind, BaseAmount, CoefRaw, StatusEffect, BaseDamage, DamageType, ProjectileSpeedRaw, UsesProjectile, CollidesWithWorld)
     {
     }
 }
