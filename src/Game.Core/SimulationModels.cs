@@ -95,30 +95,41 @@ public readonly record struct StatusEffectsComponent(ImmutableArray<StatusEffect
     public StatusEffectsComponent ApplyOrRefresh(StatusEffectInstance incoming, int currentTick, EntityId targetId, ImmutableArray<StatusEvent>.Builder statusEvents)
     {
         ImmutableArray<StatusEffectInstance> effects = OrderedEffects().Where(effect => effect.ExpiresAtTick > currentTick).ToImmutableArray();
-        StatusEffectInstance? existing = effects.FirstOrDefault(effect => effect.Type == incoming.Type);
+        bool hasExisting = false;
+        StatusEffectInstance existing = default;
+        for (int i = 0; i < effects.Length; i++)
+        {
+            if (effects[i].Type == incoming.Type)
+            {
+                hasExisting = true;
+                existing = effects[i];
+                break;
+            }
+        }
+
         if (incoming.Type == StatusEffectType.Stun)
         {
-            if (existing is null)
+            if (!hasExisting)
             {
                 statusEvents.Add(new StatusEvent(currentTick, incoming.SourceEntityId, targetId, StatusEventType.Applied, incoming.Type, incoming.ExpiresAtTick, incoming.MagnitudeRaw));
                 return new StatusEffectsComponent(effects.Add(incoming).OrderBy(e => e.Type).ThenBy(e => e.SourceEntityId.Value).ToImmutableArray());
             }
 
-            StatusEffectInstance resolved = existing.Value with { ExpiresAtTick = Math.Max(existing.Value.ExpiresAtTick, incoming.ExpiresAtTick) };
+            StatusEffectInstance resolved = existing with { ExpiresAtTick = Math.Max(existing.ExpiresAtTick, incoming.ExpiresAtTick) };
             statusEvents.Add(new StatusEvent(currentTick, incoming.SourceEntityId, targetId, StatusEventType.Refreshed, incoming.Type, resolved.ExpiresAtTick, resolved.MagnitudeRaw));
             return Replace(effects, resolved);
         }
 
         if (incoming.Type == StatusEffectType.Slow)
         {
-            if (existing is null)
+            if (!hasExisting)
             {
                 statusEvents.Add(new StatusEvent(currentTick, incoming.SourceEntityId, targetId, StatusEventType.Applied, incoming.Type, incoming.ExpiresAtTick, incoming.MagnitudeRaw));
                 return new StatusEffectsComponent(effects.Add(incoming).OrderBy(e => e.Type).ThenBy(e => e.SourceEntityId.Value).ToImmutableArray());
             }
 
-            bool stronger = incoming.MagnitudeRaw < existing.Value.MagnitudeRaw;
-            bool tieAndPreferredSource = incoming.MagnitudeRaw == existing.Value.MagnitudeRaw && incoming.SourceEntityId.Value < existing.Value.SourceEntityId.Value;
+            bool stronger = incoming.MagnitudeRaw < existing.MagnitudeRaw;
+            bool tieAndPreferredSource = incoming.MagnitudeRaw == existing.MagnitudeRaw && incoming.SourceEntityId.Value < existing.SourceEntityId.Value;
             if (stronger || tieAndPreferredSource)
             {
                 statusEvents.Add(new StatusEvent(currentTick, incoming.SourceEntityId, targetId, StatusEventType.Refreshed, incoming.Type, incoming.ExpiresAtTick, incoming.MagnitudeRaw));

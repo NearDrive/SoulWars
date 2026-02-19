@@ -30,7 +30,7 @@ public static class WorldStateSerializer
         ImmutableArray<StatusEvent> StatusEvents);
 
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 5;
+    private const int CurrentVersion = 4;
     public static int SerializerVersion => CurrentVersion;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
@@ -193,7 +193,7 @@ public static class WorldStateSerializer
         ImmutableArray<CombatEvent> combatEvents = version >= 4 && HasRemainingData(reader)
             ? ReadCombatEvents(reader)
             : ImmutableArray<CombatEvent>.Empty;
-        ImmutableArray<StatusEvent> statusEvents = version >= 5 && HasRemainingData(reader)
+        ImmutableArray<StatusEvent> statusEvents = version >= 4 && HasRemainingData(reader)
             ? ReadStatusEvents(reader)
             : ImmutableArray<StatusEvent>.Empty;
 
@@ -383,19 +383,6 @@ public static class WorldStateSerializer
                 writer.Write(ai.WanderY);
             }
 
-            StatusEffectsComponent status = i < entities.StatusEffects.Length ? entities.StatusEffects[i] : StatusEffectsComponent.Empty;
-            ImmutableArray<StatusEffectInstance> orderedEffects = (status.Effects.IsDefault ? ImmutableArray<StatusEffectInstance>.Empty : status.Effects)
-                .OrderBy(e => e.Type)
-                .ThenBy(e => e.SourceEntityId.Value)
-                .ToImmutableArray();
-            writer.Write(orderedEffects.Length);
-            foreach (StatusEffectInstance effect in orderedEffects)
-            {
-                writer.Write((byte)effect.Type);
-                writer.Write(effect.SourceEntityId.Value);
-                writer.Write(effect.ExpiresAtTick);
-                writer.Write(effect.MagnitudeRaw);
-            }
         }
     }
 
@@ -411,7 +398,6 @@ public static class WorldStateSerializer
         ImmutableArray<HealthComponent>.Builder health = ImmutableArray.CreateBuilder<HealthComponent>(entityCount);
         ImmutableArray<CombatComponent>.Builder combat = ImmutableArray.CreateBuilder<CombatComponent>(entityCount);
         ImmutableArray<AiComponent>.Builder ai = ImmutableArray.CreateBuilder<AiComponent>(entityCount);
-        ImmutableArray<StatusEffectsComponent>.Builder statusEffects = ImmutableArray.CreateBuilder<StatusEffectsComponent>(entityCount);
 
         int previousEntityId = int.MinValue;
 
@@ -478,23 +464,6 @@ public static class WorldStateSerializer
                     WanderY: reader.ReadSByte());
             }
 
-            StatusEffectsComponent status = StatusEffectsComponent.Empty;
-            if (snapshotVersion >= 5 || (snapshotVersion == CurrentVersion && readDefenseForV4))
-            {
-                int statusCount = reader.ReadInt32();
-                ImmutableArray<StatusEffectInstance>.Builder effects = ImmutableArray.CreateBuilder<StatusEffectInstance>(statusCount);
-                for (int statusIndex = 0; statusIndex < statusCount; statusIndex++)
-                {
-                    StatusEffectType type = (StatusEffectType)reader.ReadByte();
-                    EntityId sourceId = new(reader.ReadInt32());
-                    int expiresAtTick = reader.ReadInt32();
-                    int magnitudeRaw = reader.ReadInt32();
-                    effects.Add(new StatusEffectInstance(type, sourceId, expiresAtTick, magnitudeRaw));
-                }
-
-                status = new StatusEffectsComponent(effects.MoveToImmutable());
-            }
-
             ids.Add(new EntityId(entityIdValue));
             masks.Add(mask);
             kinds.Add((EntityKind)kindRaw);
@@ -502,7 +471,6 @@ public static class WorldStateSerializer
             health.Add(entityHealth);
             combat.Add(entityCombat);
             ai.Add(entityAi);
-            statusEffects.Add(status);
         }
 
         return new ZoneEntities(
@@ -512,8 +480,7 @@ public static class WorldStateSerializer
             positions.MoveToImmutable(),
             health.MoveToImmutable(),
             combat.MoveToImmutable(),
-            ai.MoveToImmutable(),
-            statusEffects.MoveToImmutable());
+            ai.MoveToImmutable());
     }
 
     private static void WriteLootEntities(BinaryWriter writer, ImmutableArray<LootEntityState> lootEntities)
