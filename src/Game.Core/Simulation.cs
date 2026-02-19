@@ -170,6 +170,29 @@ public static class Simulation
 
         foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
         {
+            (ZoneState nextZone, ImmutableArray<CombatEvent> pendingEvents, ImmutableArray<StatusEvent> pendingStatusEvents) = ProcessPendingCasts(config, updated.Tick, zone);
+            updated = updated.WithZoneUpdated(nextZone);
+
+            if (!pendingEvents.IsDefaultOrEmpty)
+            {
+                ImmutableArray<CombatEvent> combined = (updated.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : updated.CombatEvents)
+                    .AddRange(pendingEvents);
+                if (config.MaxCombatEventsPerTick > 0 && combined.Length > config.MaxCombatEventsPerTick)
+                {
+                    throw new InvariantViolationException($"invariant=MaxCombatEventsPerTickExceeded tick={updated.Tick} max={config.MaxCombatEventsPerTick} actual={combined.Length}");
+                }
+
+                updated = updated.WithCombatEvents(combined);
+            }
+
+            if (!pendingStatusEvents.IsDefaultOrEmpty)
+            {
+                tickStatusEvents.AddRange(pendingStatusEvents);
+            }
+        }
+
+        foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
+        {
             ZoneState nextZone = RunNpcAiAndApply(config, updated.Tick, zone, instrumentation);
             updated = updated.WithZoneUpdated(nextZone);
         }
