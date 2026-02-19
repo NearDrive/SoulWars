@@ -1,4 +1,5 @@
 # SoulWars -- MVP10 Combat Core (Server-First, Deterministic)
+> **CANONICAL**: this is the authoritative MVP10 plan for governance and CI gating.
 
 ## Context
 
