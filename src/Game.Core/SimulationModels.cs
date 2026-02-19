@@ -457,6 +457,7 @@ public sealed record WorldState(
     int Tick,
     ImmutableArray<ZoneState> Zones,
     ImmutableArray<EntityLocation> EntityLocations,
+    PartyRegistry? PartyRegistry = null,
     ImmutableArray<LootEntityState> LootEntities = default,
     ImmutableArray<PlayerInventoryState> PlayerInventories = default,
     ImmutableArray<PlayerDeathAuditEntry> PlayerDeathAuditLog = default,
@@ -475,6 +476,8 @@ public sealed record WorldState(
     uint ProjectileSpawnsDropped_Total = 0,
     uint ProjectileSpawnsDropped_LastTick = 0)
 {
+    public PartyRegistry PartyRegistryOrEmpty => PartyRegistry ?? Game.Core.PartyRegistry.Empty;
+
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
         for (int i = 0; i < Zones.Length; i++)
