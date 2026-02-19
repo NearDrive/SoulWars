@@ -457,6 +457,7 @@ public sealed record WorldState(
     ImmutableArray<VendorTransactionAuditEntry> VendorTransactionAuditLog = default,
     ImmutableArray<VendorDefinition> Vendors = default,
     ImmutableArray<CombatEvent> CombatEvents = default,
+    ImmutableArray<CombatLogEvent> CombatLogEvents = default,
     ImmutableArray<StatusEvent> StatusEvents = default,
     ImmutableArray<SkillCastIntent> SkillCastIntents = default)
 {
@@ -641,6 +642,14 @@ public sealed record WorldState(
         return this with
         {
             CombatEvents = combatEvents.ToImmutableArray()
+        };
+    }
+
+    public WorldState WithCombatLogEvents(ImmutableArray<CombatLogEvent> combatLogEvents)
+    {
+        return this with
+        {
+            CombatLogEvents = combatLogEvents.ToImmutableArray()
         };
     }
 
