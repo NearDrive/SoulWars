@@ -179,7 +179,7 @@ public sealed class AoeTests
             NpcWanderPeriodTicks: 30,
             NpcAggroRange: Fix32.FromInt(6),
             SkillDefinitions: ImmutableArray.Create(
-                new SkillDefinition(new SkillId(40), RangeQRaw: Fix32.FromInt(16).Raw, HitRadiusRaw: Fix32.FromInt(3).Raw, MaxTargets: maxTargets, CooldownTicks: 1, ResourceCost: 0, TargetKind: CastTargetKind.Point, EffectKind: SkillEffectKind.Damage, BaseAmount: 5, CoefRaw: Fix32.OneRaw)),
+                new SkillDefinition(new SkillId(40), RangeQRaw: Fix32.FromInt(16).Raw, HitRadiusRaw: Fix32.FromInt(3).Raw, MaxTargets: maxTargets, CooldownTicks: 1, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, TargetKind: CastTargetKind.Point, EffectKind: SkillEffectKind.Damage, BaseAmount: 5, CoefRaw: Fix32.OneRaw)),
             Invariants: InvariantOptions.Enabled,
             MaxCombatEventsPerTick: 64);
     }

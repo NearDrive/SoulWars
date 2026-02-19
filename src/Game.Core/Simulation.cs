@@ -170,6 +170,29 @@ public static class Simulation
 
         foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
         {
+            (ZoneState nextZone, ImmutableArray<CombatEvent> pendingEvents, ImmutableArray<StatusEvent> pendingStatusEvents) = ProcessPendingCasts(config, updated.Tick, zone);
+            updated = updated.WithZoneUpdated(nextZone);
+
+            if (!pendingEvents.IsDefaultOrEmpty)
+            {
+                ImmutableArray<CombatEvent> combined = (updated.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : updated.CombatEvents)
+                    .AddRange(pendingEvents);
+                if (config.MaxCombatEventsPerTick > 0 && combined.Length > config.MaxCombatEventsPerTick)
+                {
+                    throw new InvariantViolationException($"invariant=MaxCombatEventsPerTickExceeded tick={updated.Tick} max={config.MaxCombatEventsPerTick} actual={combined.Length}");
+                }
+
+                updated = updated.WithCombatEvents(combined);
+            }
+
+            if (!pendingStatusEvents.IsDefaultOrEmpty)
+            {
+                tickStatusEvents.AddRange(pendingStatusEvents);
+            }
+        }
+
+        foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
+        {
             ZoneState nextZone = RunNpcAiAndApply(config, updated.Tick, zone, instrumentation);
             updated = updated.WithZoneUpdated(nextZone);
         }
@@ -1326,6 +1349,18 @@ public static class Simulation
             }
         }
 
+        (ZoneState afterPending, ImmutableArray<CombatEvent> pendingEvents, ImmutableArray<StatusEvent> pendingStatusEvents) = ProcessPendingCasts(config, tick, current);
+        current = afterPending;
+        if (!pendingEvents.IsDefaultOrEmpty)
+        {
+            combatEvents.AddRange(pendingEvents);
+        }
+
+        if (!pendingStatusEvents.IsDefaultOrEmpty)
+        {
+            statusEvents.AddRange(pendingStatusEvents);
+        }
+
         foreach ((WorldCommand command, _) in zoneCommands.Where(c => c.Command.Kind is WorldCommandKind.LeaveZone))
         {
             if (!IsValidCommand(command))
@@ -1548,12 +1583,7 @@ public static class Simulation
     private static (ZoneState Zone, ImmutableArray<CombatEvent> Events, ImmutableArray<StatusEvent> StatusEvents) ApplyCastSkill(SimulationConfig config, int tick, ZoneState zone, WorldCommand command)
     {
         CastResult result = ValidateCastSkill(config, tick, zone, command);
-        if (result != CastResult.Ok)
-        {
-            return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
-        }
-
-        if (command.SkillId is null)
+        if (result != CastResult.Ok || command.SkillId is null)
         {
             return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
         }
@@ -1564,8 +1594,175 @@ public static class Simulation
             return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
         }
 
-        ImmutableArray<EntityState> entities = zone.Entities;
+        if (skill.Value.CastTimeTicks <= 0)
+        {
+            return ExecuteCastNow(config, tick, zone, command.EntityId, command, skill.Value);
+        }
+
+        if (zone.PendingCasts.Any(p => p.CasterId.Value == command.EntityId.Value))
+        {
+            return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
+        }
+
+        uint nextSeq = 1;
+        foreach (PendingCastComponent pending in zone.PendingCasts)
+        {
+            if (pending.CasterId.Value == command.EntityId.Value && pending.CastSeq >= nextSeq)
+            {
+                nextSeq = pending.CastSeq + 1;
+            }
+        }
+
+        PendingCastComponent created = new(
+            CasterId: command.EntityId,
+            SkillId: skill.Value.Id,
+            TargetKind: command.TargetKind,
+            TargetEntityId: command.TargetEntityId ?? default,
+            TargetPosXRaw: command.TargetPosXRaw,
+            TargetPosYRaw: command.TargetPosYRaw,
+            StartTick: tick,
+            ExecuteTick: tick + skill.Value.CastTimeTicks,
+            CastSeq: nextSeq);
+
+        ImmutableArray<PendingCastComponent> updatedPending = (zone.PendingCasts.IsDefault ? ImmutableArray<PendingCastComponent>.Empty : zone.PendingCasts)
+            .Add(created)
+            .OrderBy(p => p.ExecuteTick)
+            .ThenBy(p => p.CasterId.Value)
+            .ThenBy(p => p.CastSeq)
+            .ToImmutableArray();
+
+        return (zone.WithPendingCasts(updatedPending), ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
+    }
+
+    private static (ZoneState Zone, ImmutableArray<CombatEvent> Events, ImmutableArray<StatusEvent> StatusEvents) ProcessPendingCasts(SimulationConfig config, int tick, ZoneState zone)
+    {
+        if (zone.PendingCasts.IsDefaultOrEmpty)
+        {
+            return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
+        }
+
+        ZoneState current = zone;
+        ImmutableArray<CombatEvent>.Builder combatEvents = ImmutableArray.CreateBuilder<CombatEvent>();
+        ImmutableArray<StatusEvent>.Builder statusEvents = ImmutableArray.CreateBuilder<StatusEvent>();
+        ImmutableArray<PendingCastComponent> pending = zone.PendingCasts
+            .OrderBy(p => p.ExecuteTick)
+            .ThenBy(p => p.CasterId.Value)
+            .ThenBy(p => p.CastSeq)
+            .ToImmutableArray();
+        ImmutableArray<PendingCastComponent>.Builder remaining = ImmutableArray.CreateBuilder<PendingCastComponent>(pending.Length);
+
+        foreach (PendingCastComponent cast in pending)
+        {
+            if (cast.ExecuteTick != tick)
+            {
+                remaining.Add(cast);
+                continue;
+            }
+
+            if (!TryBuildPendingCastCommand(cast, out WorldCommand command))
+            {
+                continue;
+            }
+
+            SkillDefinition? skill = FindSkill(config, cast.SkillId);
+            if (skill is null)
+            {
+                continue;
+            }
+
+            if (ShouldCancelPendingCast(config, tick, current, command, skill.Value))
+            {
+                combatEvents.Add(new CombatEvent(tick, cast.CasterId, cast.TargetKind == CastTargetKind.Entity ? cast.TargetEntityId : cast.CasterId, cast.SkillId, CombatEventType.Cancelled, 0));
+                continue;
+            }
+
+            (ZoneState executedZone, ImmutableArray<CombatEvent> executedEvents, ImmutableArray<StatusEvent> executedStatusEvents) = ExecuteCastNow(config, tick, current, cast.CasterId, command, skill.Value);
+            current = executedZone;
+            combatEvents.AddRange(executedEvents);
+            statusEvents.AddRange(executedStatusEvents);
+        }
+
+        current = current.WithPendingCasts(remaining
+            .OrderBy(p => p.ExecuteTick)
+            .ThenBy(p => p.CasterId.Value)
+            .ThenBy(p => p.CastSeq)
+            .ToImmutableArray());
+
+        return (current, combatEvents.ToImmutable(), statusEvents.ToImmutable());
+    }
+
+    private static bool TryBuildPendingCastCommand(PendingCastComponent pending, out WorldCommand command)
+    {
+        command = new WorldCommand(
+            Kind: WorldCommandKind.CastSkill,
+            EntityId: pending.CasterId,
+            ZoneId: default,
+            SkillId: pending.SkillId,
+            TargetEntityId: pending.TargetKind == CastTargetKind.Entity ? pending.TargetEntityId : null,
+            TargetKind: pending.TargetKind,
+            TargetPosXRaw: pending.TargetPosXRaw,
+            TargetPosYRaw: pending.TargetPosYRaw);
+        return true;
+    }
+
+    private static bool ShouldCancelPendingCast(SimulationConfig config, int tick, ZoneState zone, WorldCommand command, SkillDefinition skill)
+    {
         int casterIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.EntityId);
+        if (casterIndex < 0)
+        {
+            return true;
+        }
+
+        ImmutableArray<EntityState> entities = zone.Entities;
+        EntityState caster = entities[casterIndex];
+        if (!caster.IsAlive || caster.StatusEffects.HasStun)
+        {
+            return true;
+        }
+
+        if (command.TargetKind == CastTargetKind.Entity)
+        {
+            if (command.TargetEntityId is null)
+            {
+                return true;
+            }
+
+            int targetIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.TargetEntityId.Value);
+            if (targetIndex < 0)
+            {
+                return true;
+            }
+        }
+
+        Vec2Fix targetPos = command.TargetKind == CastTargetKind.Point
+            ? new Vec2Fix(new Fix32(command.TargetPosXRaw), new Fix32(command.TargetPosYRaw))
+            : entities[ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, command.TargetEntityId!.Value)].Pos;
+
+        Fix32 dx = caster.Pos.X - targetPos.X;
+        Fix32 dy = caster.Pos.Y - targetPos.Y;
+        Fix32 distSq = (dx * dx) + (dy * dy);
+        Fix32 range = new Fix32(skill.RangeQRaw);
+        if (distSq > range * range)
+        {
+            return true;
+        }
+
+        if (command.TargetKind == CastTargetKind.Point)
+        {
+            ImmutableArray<int> pointTargetIndices = ResolveCastTargetIndices(zone, casterIndex, command, skill);
+            if (pointTargetIndices.IsDefaultOrEmpty)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static (ZoneState Zone, ImmutableArray<CombatEvent> Events, ImmutableArray<StatusEvent> StatusEvents) ExecuteCastNow(SimulationConfig config, int tick, ZoneState zone, EntityId casterId, WorldCommand command, SkillDefinition skill)
+    {
+        ImmutableArray<EntityState> entities = zone.Entities;
+        int casterIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, casterId);
         if (casterIndex < 0)
         {
             return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
@@ -1575,10 +1772,10 @@ public static class Simulation
         EntityState updatedCaster = caster with
         {
             LastAttackTick = tick,
-            AttackCooldownTicks = skill.Value.CooldownTicks
+            AttackCooldownTicks = Math.Max(skill.CooldownTicks, skill.GlobalCooldownTicks)
         };
 
-        ImmutableArray<int> targetIndices = ResolveCastTargetIndices(zone, casterIndex, command, skill.Value);
+        ImmutableArray<int> targetIndices = ResolveCastTargetIndices(zone, casterIndex, command, skill);
         if (targetIndices.IsDefaultOrEmpty)
         {
             return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
@@ -1597,17 +1794,17 @@ public static class Simulation
                 target = alreadyUpdated;
             }
 
-            int amount = skill.Value.BaseAmount;
-            if (skill.Value.CoefRaw != 0)
+            int amount = skill.BaseAmount;
+            if (skill.CoefRaw != 0)
             {
-                amount += Fix32.FloorToInt(Fix32.FromInt(caster.AttackDamage) * new Fix32(skill.Value.CoefRaw));
+                amount += Fix32.FloorToInt(Fix32.FromInt(caster.AttackDamage) * new Fix32(skill.CoefRaw));
             }
 
             int finalAmount;
             CombatEventType eventType;
             EntityState updatedTarget;
 
-            if (skill.Value.EffectKind == SkillEffectKind.Heal)
+            if (skill.EffectKind == SkillEffectKind.Heal)
             {
                 finalAmount = Math.Min(Math.Max(0, target.MaxHp - target.Hp), Math.Max(0, amount));
                 eventType = CombatEventType.Heal;
@@ -1632,7 +1829,7 @@ public static class Simulation
 
             targetUpdates[targetIndex] = updatedTarget;
 
-            if (skill.Value.StatusEffect is OptionalStatusEffect statusDefinition)
+            if (skill.StatusEffect is OptionalStatusEffect statusDefinition)
             {
                 StatusEffectInstance incomingStatus = new(
                     statusDefinition.Type,
@@ -1648,7 +1845,7 @@ public static class Simulation
                 Tick: tick,
                 SourceId: caster.Id,
                 TargetId: target.Id,
-                SkillId: skill.Value.Id,
+                SkillId: skill.Id,
                 Type: eventType,
                 Amount: finalAmount));
         }
@@ -1708,6 +1905,11 @@ public static class Simulation
         if (caster.StatusEffects.HasStun)
         {
             return CastResult.Rejected_Stunned;
+        }
+
+        if (!zone.PendingCasts.IsDefaultOrEmpty && zone.PendingCasts.Any(p => p.CasterId.Value == command.EntityId.Value))
+        {
+            return CastResult.Rejected_OnCooldown;
         }
 
         if (tick - caster.LastAttackTick < caster.AttackCooldownTicks)
