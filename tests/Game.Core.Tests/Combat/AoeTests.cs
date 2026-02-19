@@ -20,7 +20,7 @@ public sealed class AoeTests
 
         state = CastAoe(state, config, caster: new EntityId(1), targetX: 6, targetY: 5);
 
-        Assert.Equal(new[] { 2, 5, 4, 3 }, state.CombatEvents.Select(e => e.TargetId.Value).ToArray());
+        Assert.Equal(new[] { 2, 4, 5, 3 }, state.CombatEvents.Select(e => e.TargetId.Value).ToArray());
     }
 
     [Fact]
