@@ -116,7 +116,9 @@ public sealed class DamageAndEventsTests
 
         ZoneState zone = Assert.Single(state.Zones);
         state = state.WithZoneUpdated(zone.WithEntities(zone.Entities
-            .Select(e => e.Id.Value == 1 ? e with { AttackDamage = 10, Defense = 0 } : e with { AttackDamage = 7, Defense = 3 })
+            .Select(e => e.Id.Value == 1
+                ? e with { AttackDamage = 10, DefenseStats = new DefenseStatsComponent(Armor: 0, MagicResist: 0) }
+                : e with { AttackDamage = 7, DefenseStats = new DefenseStatsComponent(Armor: 3, MagicResist: 0) })
             .ToImmutableArray()));
         return state;
     }

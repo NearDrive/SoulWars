@@ -1022,7 +1022,7 @@ public static class Simulation
                 AttackDamage: DefaultAttackDamage,
                 AttackCooldownTicks: DefaultAttackCooldownTicks,
                 LastAttackTick: -DefaultAttackCooldownTicks,
-                Defense: 0,
+                DefenseStats: new DefenseStatsComponent(Armor: 0, MagicResist: 0),
                 Kind: EntityKind.Npc,
                 NextWanderChangeTick: 0,
                 WanderX: 0,
@@ -1084,7 +1084,7 @@ public static class Simulation
                 AttackDamage: DefaultAttackDamage,
                 AttackCooldownTicks: DefaultAttackCooldownTicks,
                 LastAttackTick: -DefaultAttackCooldownTicks,
-                Defense: 0,
+                DefenseStats: new DefenseStatsComponent(Armor: 0, MagicResist: 0),
                 Kind: EntityKind.Npc,
                 NextWanderChangeTick: 0,
                 WanderX: 0,
@@ -1536,7 +1536,7 @@ public static class Simulation
             AttackDamage: DefaultAttackDamage,
             AttackCooldownTicks: DefaultAttackCooldownTicks,
             LastAttackTick: -DefaultAttackCooldownTicks,
-            Defense: 0,
+            DefenseStats: new DefenseStatsComponent(Armor: 0, MagicResist: 0),
             Kind: EntityKind.Player,
             NextWanderChangeTick: 0,
             WanderX: 0,
@@ -1934,7 +1934,7 @@ public static class Simulation
                 }
                 else
                 {
-                    finalAmount = Math.Max(1, amount - target.Defense);
+                    finalAmount = Math.Max(1, amount - target.DefenseStats.Armor);
                     finalAmount = Math.Min(finalAmount, target.Hp);
                     eventType = CombatEventType.Damage;
                     int nextHp = Math.Max(0, target.Hp - finalAmount);

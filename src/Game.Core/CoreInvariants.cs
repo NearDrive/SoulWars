@@ -134,9 +134,9 @@ public static class CoreInvariants
                     throw new InvariantViolationException($"invariant=AttackDamageNonNegative tick={tick} zoneId={zone.Id.Value} entityId={entity.Id.Value} damage={entity.AttackDamage}");
                 }
 
-                if (entity.Defense < 0)
+                if (entity.DefenseStats.Armor < 0 || entity.DefenseStats.MagicResist < 0)
                 {
-                    throw new InvariantViolationException($"invariant=DefenseNonNegative tick={tick} zoneId={zone.Id.Value} entityId={entity.Id.Value} defense={entity.Defense}");
+                    throw new InvariantViolationException($"invariant=DefenseNonNegative tick={tick} zoneId={zone.Id.Value} entityId={entity.Id.Value} armor={entity.DefenseStats.Armor} mr={entity.DefenseStats.MagicResist}");
                 }
 
                 if (entity.AttackRange.Raw < 0)

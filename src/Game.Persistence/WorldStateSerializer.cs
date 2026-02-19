@@ -445,6 +445,7 @@ public static class WorldStateSerializer
                 Fix32 range = new(reader.ReadInt32());
                 int damage = reader.ReadInt32();
                 int defense = (snapshotVersion >= 5 || (snapshotVersion == CurrentVersion && readDefenseForV4)) ? reader.ReadInt32() : 0;
+                int magicResist = defense;
                 int cooldownTicks = reader.ReadInt32();
                 int lastAttackTick = reader.ReadInt32();
 
@@ -452,6 +453,7 @@ public static class WorldStateSerializer
                     Range: range,
                     Damage: damage,
                     Defense: defense,
+                    MagicResist: magicResist,
                     CooldownTicks: cooldownTicks,
                     LastAttackTick: lastAttackTick);
             }

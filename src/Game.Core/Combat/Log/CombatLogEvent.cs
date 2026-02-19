@@ -11,5 +11,6 @@ public readonly record struct CombatLogEvent(
     EntityId SourceId,
     EntityId TargetId,
     SkillId SkillId,
-    int Amount,
+    int RawAmount,
+    int FinalAmount,
     CombatLogKind Kind);
