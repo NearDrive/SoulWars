@@ -6,7 +6,7 @@ namespace Game.Server.Tests.Canary;
 
 public sealed class Mvp9CanaryReplayTests
 {
-    private const string ExpectedFinalGlobalChecksum = "TODO";
+    private const string ExpectedFinalGlobalChecksum = "7629eae60ba7442198fa035a69d1cb76a5b1c25c59d5458d1b232e1d65ab1154";
 
     [Fact]
     [Trait("Category", "Canary")]
