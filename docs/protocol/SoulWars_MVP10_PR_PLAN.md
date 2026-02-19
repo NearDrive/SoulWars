@@ -1,5 +1,7 @@
 # SoulWars -- MVP10 PR Plan (Combat Core, Server-First, Deterministic)
 
+> **Legacy notice (governança):** aquest document es manté només com a històric. El source-of-truth vigent d'MVP10 és `docs/protocol/SoulWars_MVP10_MasterPlan (1).md` (OPCIÓ B expandida).
+
 ## Context
 
 MVP9 delivered: - Multi-zone deterministic runtime - Canonical tick
