@@ -162,7 +162,11 @@ public static class ProjectileSystem
         ImmutableArray<EntityState>.Builder rebuiltEntities = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
         for (int i = 0; i < entities.Length; i++)
         {
-            rebuiltEntities.Add((updates.TryGetValue(i, out EntityState? next) && next is not null) ? next : entities[i]);
+            EntityState candidate = (updates.TryGetValue(i, out EntityState? next) && next is not null) ? next : entities[i];
+            if (candidate.IsAlive)
+            {
+                rebuiltEntities.Add(candidate);
+            }
         }
 
         ZoneState updatedZone = zone

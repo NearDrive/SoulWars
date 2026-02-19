@@ -97,21 +97,25 @@ public static class StateChecksum
         ImmutableArray<ProjectileComponent> orderedProjectiles = (zone.Projectiles.IsDefault ? ImmutableArray<ProjectileComponent>.Empty : zone.Projectiles)
             .OrderBy(p => p.ProjectileId)
             .ToImmutableArray();
-        writer.Write(orderedProjectiles.Length);
-        foreach (ProjectileComponent projectile in orderedProjectiles)
+        if (!orderedProjectiles.IsDefaultOrEmpty)
         {
-            writer.Write(projectile.ProjectileId);
-            writer.Write(projectile.OwnerId.Value);
-            writer.Write(projectile.TargetId.Value);
-            writer.Write(projectile.SkillId.Value);
-            writer.Write(projectile.PosX.Raw);
-            writer.Write(projectile.PosY.Raw);
-            writer.Write(projectile.TargetX.Raw);
-            writer.Write(projectile.TargetY.Raw);
-            writer.Write(projectile.SpawnTick);
-            writer.Write(projectile.MaxLifetimeTicks);
-            writer.Write(projectile.CollidesWithWorld);
-            writer.Write(projectile.RequiresLoSOnSpawn);
+            writer.Write(unchecked((int)0x50524A54)); // "PRJT"
+            writer.Write(orderedProjectiles.Length);
+            foreach (ProjectileComponent projectile in orderedProjectiles)
+            {
+                writer.Write(projectile.ProjectileId);
+                writer.Write(projectile.OwnerId.Value);
+                writer.Write(projectile.TargetId.Value);
+                writer.Write(projectile.SkillId.Value);
+                writer.Write(projectile.PosX.Raw);
+                writer.Write(projectile.PosY.Raw);
+                writer.Write(projectile.TargetX.Raw);
+                writer.Write(projectile.TargetY.Raw);
+                writer.Write(projectile.SpawnTick);
+                writer.Write(projectile.MaxLifetimeTicks);
+                writer.Write(projectile.CollidesWithWorld);
+                writer.Write(projectile.RequiresLoSOnSpawn);
+            }
         }
     }
 
@@ -215,21 +219,29 @@ public static class StateChecksum
             .ThenBy(e => e.ProjectileId)
             .ThenBy(e => (int)e.Kind)
             .ToImmutableArray();
-        writer.Write(orderedProjectileEvents.Length);
-        foreach (ProjectileEvent evt in orderedProjectileEvents)
+        bool hasProjectileMetadata = !orderedProjectileEvents.IsDefaultOrEmpty
+            || state.ProjectileSpawnsDropped_Total > 0
+            || state.ProjectileSpawnsDropped_LastTick > 0
+            || state.NextProjectileId > 1;
+        if (hasProjectileMetadata)
         {
-            writer.Write(evt.Tick);
-            writer.Write(evt.ProjectileId);
-            writer.Write((byte)evt.Kind);
-            writer.Write(evt.OwnerId.Value);
-            writer.Write(evt.TargetId.Value);
-            writer.Write(evt.PosX.Raw);
-            writer.Write(evt.PosY.Raw);
-        }
+            writer.Write(unchecked((int)0x50524556)); // "PREV"
+            writer.Write(orderedProjectileEvents.Length);
+            foreach (ProjectileEvent evt in orderedProjectileEvents)
+            {
+                writer.Write(evt.Tick);
+                writer.Write(evt.ProjectileId);
+                writer.Write((byte)evt.Kind);
+                writer.Write(evt.OwnerId.Value);
+                writer.Write(evt.TargetId.Value);
+                writer.Write(evt.PosX.Raw);
+                writer.Write(evt.PosY.Raw);
+            }
 
-        writer.Write(state.NextProjectileId);
-        writer.Write(state.ProjectileSpawnsDropped_Total);
-        writer.Write(state.ProjectileSpawnsDropped_LastTick);
+            writer.Write(state.NextProjectileId);
+            writer.Write(state.ProjectileSpawnsDropped_Total);
+            writer.Write(state.ProjectileSpawnsDropped_LastTick);
+        }
 
         ImmutableArray<VendorTransactionAuditEntry> orderedVendorAudit = (state.VendorTransactionAuditLog.IsDefault ? ImmutableArray<VendorTransactionAuditEntry>.Empty : state.VendorTransactionAuditLog)
             .OrderBy(e => e.Tick)
