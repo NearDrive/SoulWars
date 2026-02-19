@@ -167,6 +167,28 @@ public static class StateChecksum
                 writer.Write(evt.Amount);
             }
         }
+
+        ImmutableArray<StatusEvent> orderedStatusEvents = (state.StatusEvents.IsDefault ? ImmutableArray<StatusEvent>.Empty : state.StatusEvents)
+            .OrderBy(e => e.Tick)
+            .ThenBy(e => e.SourceId.Value)
+            .ThenBy(e => e.TargetId.Value)
+            .ThenBy(e => e.EffectType)
+            .ToImmutableArray();
+        if (!orderedStatusEvents.IsDefaultOrEmpty)
+        {
+            writer.Write(unchecked((int)0x53455654)); // "SEVT"
+            writer.Write(orderedStatusEvents.Length);
+            foreach (StatusEvent evt in orderedStatusEvents)
+            {
+                writer.Write(evt.Tick);
+                writer.Write(evt.SourceId.Value);
+                writer.Write(evt.TargetId.Value);
+                writer.Write((byte)evt.Type);
+                writer.Write((byte)evt.EffectType);
+                writer.Write(evt.ExpiresAtTick);
+                writer.Write(evt.MagnitudeRaw);
+            }
+        }
         ImmutableArray<VendorTransactionAuditEntry> orderedVendorAudit = (state.VendorTransactionAuditLog.IsDefault ? ImmutableArray<VendorTransactionAuditEntry>.Empty : state.VendorTransactionAuditLog)
             .OrderBy(e => e.Tick)
             .ThenBy(e => e.PlayerEntityId.Value)
