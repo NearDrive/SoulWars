@@ -164,6 +164,8 @@ public readonly record struct SkillDefinition(
     int HitRadiusRaw,
     int MaxTargets,
     int CooldownTicks,
+    int CastTimeTicks,
+    int GlobalCooldownTicks,
     int ResourceCost,
     CastTargetKind TargetKind,
     SkillEffectKind EffectKind = SkillEffectKind.Damage,
@@ -176,13 +178,30 @@ public readonly record struct SkillDefinition(
         int RangeQRaw,
         int HitRadiusRaw,
         int CooldownTicks,
+        int CastTimeTicks,
+        int GlobalCooldownTicks,
         int ResourceCost,
         CastTargetKind TargetKind,
         SkillEffectKind EffectKind = SkillEffectKind.Damage,
         int BaseAmount = 0,
         int CoefRaw = 0,
         OptionalStatusEffect? StatusEffect = null)
-        : this(Id, RangeQRaw, HitRadiusRaw, MaxTargets: 8, CooldownTicks, ResourceCost, TargetKind, EffectKind, BaseAmount, CoefRaw, StatusEffect)
+        : this(Id, RangeQRaw, HitRadiusRaw, MaxTargets: 8, CooldownTicks, CastTimeTicks, GlobalCooldownTicks, ResourceCost, TargetKind, EffectKind, BaseAmount, CoefRaw, StatusEffect)
+    {
+    }
+
+    public SkillDefinition(
+        SkillId Id,
+        int RangeQRaw,
+        int HitRadiusRaw,
+        int CooldownTicks,
+        int ResourceCost,
+        CastTargetKind TargetKind,
+        SkillEffectKind EffectKind = SkillEffectKind.Damage,
+        int BaseAmount = 0,
+        int CoefRaw = 0,
+        OptionalStatusEffect? StatusEffect = null)
+        : this(Id, RangeQRaw, HitRadiusRaw, CooldownTicks, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost, TargetKind, EffectKind, BaseAmount, CoefRaw, StatusEffect)
     {
     }
 }
@@ -196,8 +215,20 @@ public enum SkillEffectKind : byte
 public enum CombatEventType : byte
 {
     Damage = 1,
-    Heal = 2
+    Heal = 2,
+    Cancelled = 3
 }
+
+public readonly record struct PendingCastComponent(
+    EntityId CasterId,
+    SkillId SkillId,
+    CastTargetKind TargetKind,
+    EntityId TargetEntityId,
+    int TargetPosXRaw,
+    int TargetPosYRaw,
+    int StartTick,
+    int ExecuteTick,
+    uint CastSeq);
 
 public readonly record struct CombatEvent(
     int Tick,
@@ -377,10 +408,10 @@ public sealed record ZoneEntities(
     }
 }
 
-public sealed record ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData)
+public sealed record ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData, ImmutableArray<PendingCastComponent> PendingCasts)
 {
     public ZoneState(ZoneId Id, TileMap Map, ImmutableArray<EntityState> Entities)
-        : this(Id, Map, ZoneEntities.FromEntityStates(Entities))
+        : this(Id, Map, ZoneEntities.FromEntityStates(Entities), ImmutableArray<PendingCastComponent>.Empty)
     {
     }
 
@@ -394,6 +425,11 @@ public sealed record ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData
     public ZoneState WithSortedEntities() => this with
     {
         EntitiesData = ZoneEntities.FromEntityStates(Entities)
+    };
+
+    public ZoneState WithPendingCasts(ImmutableArray<PendingCastComponent> pendingCasts) => this with
+    {
+        PendingCasts = pendingCasts
     };
 
     public ZoneChecksum ComputeChecksum() => new(Id.Value, StateChecksum.ComputeZoneChecksum(this));
