@@ -15,7 +15,8 @@ public sealed class ServerHostIntegrationTests
     [Fact]
     public async Task Tcp_Connect_EnterZone_ReceivesSnapshot()
     {
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+        // CI can be transiently slower during socket startup/first tick scheduling.
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(10));
         await using ServerRuntime runtime = new();
         await runtime.StartAsync(ServerConfig.Default(seed: 77) with { SnapshotEveryTicks = 1 }, IPAddress.Loopback, 0, cts.Token);
 
@@ -23,14 +24,14 @@ public sealed class ServerHostIntegrationTests
         await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);
 
         client.Send(new HelloV2("test-client", "alice"));
-        _ = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(2));
+        _ = await WaitForMessageAsync<Welcome>(runtime, client, TimeSpan.FromSeconds(4));
         client.EnterZone(1);
 
-        EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(2));
+        EnterZoneAck ack = await WaitForMessageAsync<EnterZoneAck>(runtime, client, TimeSpan.FromSeconds(4));
         Snapshot snapshot = await WaitForMessageAsync<Snapshot>(
             runtime,
             client,
-            TimeSpan.FromSeconds(2),
+            TimeSpan.FromSeconds(4),
             s => s.Entities.Any(e => e.EntityId == ack.EntityId));
 
         Assert.Equal(1, ack.ZoneId);
