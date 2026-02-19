@@ -14,7 +14,7 @@ public sealed class BotCombatScenarioTests
 
         Assert.Equal(runA.FinalGlobalChecksum, runB.FinalGlobalChecksum);
         Assert.Equal(runA.CombatEventsHash, runB.CombatEventsHash);
-        Assert.Equal(runA.FinalPerZoneChecksums, runB.FinalPerZoneChecksums);
+        Assert.Equal(runA.FinalPerZoneChecksums.ToArray(), runB.FinalPerZoneChecksums.ToArray());
         Assert.Equal(runA.DurationTicks, runB.DurationTicks);
     }
 
