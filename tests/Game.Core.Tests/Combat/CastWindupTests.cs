@@ -37,6 +37,9 @@ public sealed class CastWindupTests
         state = StepCast(state, config, casterId: 2, targetId: 1, skillId: 31);
 
         state = Simulation.Step(config, state, new Inputs(ImmutableArray<WorldCommand>.Empty));
+        Assert.Empty(state.CombatEvents);
+
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray<WorldCommand>.Empty));
         CombatEvent cancel = Assert.Single(state.CombatEvents.Where(e => e.Type == CombatEventType.Cancelled));
         Assert.Equal(1, cancel.SourceId.Value);
         Assert.DoesNotContain(state.CombatEvents, e => e.Type == CombatEventType.Damage && e.SkillId.Value == 30);
