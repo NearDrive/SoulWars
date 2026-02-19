@@ -86,7 +86,7 @@ public static class SkillEffectSystem
     private static SkillDefinition? FindSkill(SimulationConfig config, SkillId skillId)
     {
         ImmutableArray<SkillDefinition> skills = config.SkillDefinitions.IsDefault
-            ? SimulationConfig.DefaultSkillDefinitions
+            ? ImmutableArray<SkillDefinition>.Empty
             : config.SkillDefinitions;
 
         for (int i = 0; i < skills.Length; i++)
