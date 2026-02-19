@@ -93,7 +93,7 @@ public static class BotCombatScenario
                     continue;
                 }
 
-                bool inRange = IsWithinRange(botEntity.Value.Pos, target.Pos, Fix32.FromInt(3));
+                bool inRange = IsWithinRange(botEntity.Pos, target.Pos, Fix32.FromInt(3));
                 if (inRange && tick >= nextCastTickByEntityId[bot.EntityId.Value])
                 {
                     commands.Add(new WorldCommand(
@@ -107,8 +107,8 @@ public static class BotCombatScenario
                 }
                 else
                 {
-                    sbyte moveX = Direction(botEntity.Value.Pos.X.Raw, target.Pos.X.Raw);
-                    sbyte moveY = Direction(botEntity.Value.Pos.Y.Raw, target.Pos.Y.Raw);
+                    sbyte moveX = Direction(botEntity.Pos.X.Raw, target.Pos.X.Raw);
+                    sbyte moveY = Direction(botEntity.Pos.Y.Raw, target.Pos.Y.Raw);
                     commands.Add(new WorldCommand(
                         Kind: WorldCommandKind.MoveIntent,
                         EntityId: bot.EntityId,
