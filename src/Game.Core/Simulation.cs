@@ -55,7 +55,8 @@ public static class Simulation
             VendorTransactionAuditLog: ImmutableArray<VendorTransactionAuditEntry>.Empty,
             Vendors: ImmutableArray<VendorDefinition>.Empty,
             CombatEvents: ImmutableArray<CombatEvent>.Empty,
-            StatusEvents: ImmutableArray<StatusEvent>.Empty);
+            StatusEvents: ImmutableArray<StatusEvent>.Empty,
+            SkillCastIntents: ImmutableArray<SkillCastIntent>.Empty);
     }
 
     private static WorldState CreateInitialStateFromManualDefinitions(SimulationConfig config, ZoneDefinitions definitions)
@@ -83,7 +84,8 @@ public static class Simulation
             VendorTransactionAuditLog: ImmutableArray<VendorTransactionAuditEntry>.Empty,
             Vendors: ImmutableArray<VendorDefinition>.Empty,
             CombatEvents: ImmutableArray<CombatEvent>.Empty,
-            StatusEvents: ImmutableArray<StatusEvent>.Empty);
+            StatusEvents: ImmutableArray<StatusEvent>.Empty,
+            SkillCastIntents: ImmutableArray<SkillCastIntent>.Empty);
     }
 
     public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs, SimulationInstrumentation? instrumentation = null)
@@ -99,7 +101,8 @@ public static class Simulation
         {
             Tick = state.Tick + 1,
             CombatEvents = ImmutableArray<CombatEvent>.Empty,
-            StatusEvents = ImmutableArray<StatusEvent>.Empty
+            StatusEvents = ImmutableArray<StatusEvent>.Empty,
+            SkillCastIntents = ImmutableArray<SkillCastIntent>.Empty
         };
         List<ZoneTransferEvent> pendingTransfers = new();
         ImmutableArray<StatusEvent>.Builder tickStatusEvents = ImmutableArray.CreateBuilder<StatusEvent>();
@@ -152,7 +155,7 @@ public static class Simulation
                 continue;
             }
 
-            (ZoneState nextZone, ImmutableArray<CombatEvent> zoneEvents, ImmutableArray<StatusEvent> zoneStatusEvents) = ProcessZoneCommands(config, updated.Tick, zone, zoneCommands, instrumentation);
+            (ZoneState nextZone, ImmutableArray<CombatEvent> zoneEvents, ImmutableArray<StatusEvent> zoneStatusEvents, ImmutableArray<SkillCastIntent> zoneCastIntents) = ProcessZoneCommands(config, updated.Tick, zone, zoneCommands, instrumentation);
             updated = updated.WithZoneUpdated(nextZone);
             if (!zoneEvents.IsDefaultOrEmpty)
             {
@@ -169,6 +172,13 @@ public static class Simulation
             if (!zoneStatusEvents.IsDefaultOrEmpty)
             {
                 tickStatusEvents.AddRange(zoneStatusEvents);
+            }
+
+            if (!zoneCastIntents.IsDefaultOrEmpty)
+            {
+                ImmutableArray<SkillCastIntent> combined = (updated.SkillCastIntents.IsDefault ? ImmutableArray<SkillCastIntent>.Empty : updated.SkillCastIntents)
+                    .AddRange(zoneCastIntents);
+                updated = updated.WithSkillCastIntents(combined);
             }
 
             updated = RebuildEntityLocations(updated);
@@ -1323,11 +1333,12 @@ public static class Simulation
             .ToImmutableArray();
     }
 
-    private static (ZoneState Zone, ImmutableArray<CombatEvent> Events, ImmutableArray<StatusEvent> StatusEvents) ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<(WorldCommand Command, int CommandIndex)> zoneCommands, SimulationInstrumentation? instrumentation)
+    private static (ZoneState Zone, ImmutableArray<CombatEvent> Events, ImmutableArray<StatusEvent> StatusEvents, ImmutableArray<SkillCastIntent> CastIntents) ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<(WorldCommand Command, int CommandIndex)> zoneCommands, SimulationInstrumentation? instrumentation)
     {
         ZoneState current = zone;
         ImmutableArray<CombatEvent>.Builder combatEvents = ImmutableArray.CreateBuilder<CombatEvent>();
         ImmutableArray<StatusEvent>.Builder statusEvents = ImmutableArray.CreateBuilder<StatusEvent>();
+        ImmutableArray<SkillCastIntent>.Builder castIntents = ImmutableArray.CreateBuilder<SkillCastIntent>();
 
         foreach ((WorldCommand command, _) in zoneCommands.Where(c => c.Command.Kind is WorldCommandKind.EnterZone))
         {
@@ -1371,7 +1382,7 @@ public static class Simulation
                 continue;
             }
 
-            (ZoneState next, ImmutableArray<CombatEvent> castEvents, ImmutableArray<StatusEvent> castStatusEvents) = ApplyCastSkill(config, tick, current, command);
+            (ZoneState next, ImmutableArray<CombatEvent> castEvents, ImmutableArray<StatusEvent> castStatusEvents, SkillCastIntent? castIntent) = ApplyCastSkill(config, tick, current, command);
             current = next;
             for (int targetOrder = 0; targetOrder < castEvents.Length; targetOrder++)
             {
@@ -1381,6 +1392,11 @@ public static class Simulation
             for (int statusOrder = 0; statusOrder < castStatusEvents.Length; statusOrder++)
             {
                 statusEvents.Add(castStatusEvents[statusOrder]);
+            }
+
+            if (castIntent is SkillCastIntent accepted)
+            {
+                castIntents.Add(accepted);
             }
         }
 
@@ -1406,7 +1422,7 @@ public static class Simulation
             current = ApplyLeaveZone(current, command);
         }
 
-        return (current, combatEvents.ToImmutable(), statusEvents.ToImmutable());
+        return (current, combatEvents.ToImmutable(), statusEvents.ToImmutable(), castIntents.ToImmutable());
     }
 
     private static bool IsValidCommand(WorldCommand command)
@@ -1615,32 +1631,37 @@ public static class Simulation
             .ToImmutableArray());
     }
 
-    private static (ZoneState Zone, ImmutableArray<CombatEvent> Events, ImmutableArray<StatusEvent> StatusEvents) ApplyCastSkill(SimulationConfig config, int tick, ZoneState zone, WorldCommand command)
+    private static (ZoneState Zone, ImmutableArray<CombatEvent> Events, ImmutableArray<StatusEvent> StatusEvents, SkillCastIntent? CastIntent) ApplyCastSkill(SimulationConfig config, int tick, ZoneState zone, WorldCommand command)
     {
         CastResult result = ValidateCastSkill(config, tick, zone, command);
         if (result != CastResult.Ok || command.SkillId is null)
         {
-            return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
+            return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty, null);
         }
 
         SkillDefinition? skill = FindSkill(config, command.SkillId.Value);
         if (skill is null)
         {
-            return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
+            return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty, null);
         }
+
+        CastSkillCommand castCommand = SkillCastSystem.FromWorldCommand(command);
+        SkillCastIntent acceptedIntent = SkillCastSystem.ToIntent(tick, castCommand);
+        ZoneState updatedForCooldown = StartSkillCooldown(zone, command.EntityId, skill.Value);
 
         if (skill.Value.CastTimeTicks <= 0)
         {
-            return ExecuteCastNow(config, tick, zone, command.EntityId, command, skill.Value);
+            (ZoneState executedZone, ImmutableArray<CombatEvent> events, ImmutableArray<StatusEvent> statusEvents) = ExecuteCastNow(config, tick, updatedForCooldown, command.EntityId, command, skill.Value);
+            return (executedZone, events, statusEvents, acceptedIntent);
         }
 
-        if (zone.PendingCasts.Any(p => p.CasterId.Value == command.EntityId.Value))
+        if (updatedForCooldown.PendingCasts.Any(p => p.CasterId.Value == command.EntityId.Value))
         {
-            return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
+            return (updatedForCooldown, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty, acceptedIntent);
         }
 
         uint nextSeq = 1;
-        foreach (PendingCastComponent pending in zone.PendingCasts)
+        foreach (PendingCastComponent pending in updatedForCooldown.PendingCasts)
         {
             if (pending.CasterId.Value == command.EntityId.Value && pending.CastSeq >= nextSeq)
             {
@@ -1659,14 +1680,27 @@ public static class Simulation
             ExecuteTick: tick + skill.Value.CastTimeTicks,
             CastSeq: nextSeq);
 
-        ImmutableArray<PendingCastComponent> updatedPending = (zone.PendingCasts.IsDefault ? ImmutableArray<PendingCastComponent>.Empty : zone.PendingCasts)
+        ImmutableArray<PendingCastComponent> updatedPending = (updatedForCooldown.PendingCasts.IsDefault ? ImmutableArray<PendingCastComponent>.Empty : updatedForCooldown.PendingCasts)
             .Add(created)
             .OrderBy(p => p.ExecuteTick)
             .ThenBy(p => p.CasterId.Value)
             .ThenBy(p => p.CastSeq)
             .ToImmutableArray();
 
-        return (zone.WithPendingCasts(updatedPending), ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
+        return (updatedForCooldown.WithPendingCasts(updatedPending), ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty, acceptedIntent);
+    }
+
+    private static ZoneState StartSkillCooldown(ZoneState zone, EntityId casterId, SkillDefinition skill)
+    {
+        int casterIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, casterId);
+        if (casterIndex < 0)
+        {
+            return zone;
+        }
+
+        EntityState caster = zone.Entities[casterIndex];
+        SkillCooldownsComponent updated = caster.SkillCooldowns.StartCooldown(skill.Id, skill.CooldownTicks);
+        return ReplaceEntity(zone, casterIndex, caster with { SkillCooldowns = updated });
     }
 
     private static (ZoneState Zone, ImmutableArray<CombatEvent> Events, ImmutableArray<StatusEvent> StatusEvents) ProcessPendingCasts(SimulationConfig config, int tick, ZoneState zone)
@@ -1952,12 +1986,23 @@ public static class Simulation
             return CastResult.Rejected_OnCooldown;
         }
 
+        if (!caster.SkillCooldowns.IsReady(command.SkillId.Value))
+        {
+            return CastResult.Rejected_OnCooldown;
+        }
+
         if (skill.Value.ResourceCost > 0)
         {
             return CastResult.Rejected_NotEnoughResource;
         }
 
-        if (skill.Value.TargetKind != command.TargetKind)
+        CastSkillCommand castCommand = SkillCastSystem.FromWorldCommand(command);
+        if (skill.Value.TargetKind != command.TargetKind || castCommand.TargetType != skill.Value.TargetType)
+        {
+            return CastResult.Rejected_InvalidTarget;
+        }
+
+        if (!SkillCastSystem.HasCoherentTarget(castCommand))
         {
             return CastResult.Rejected_InvalidTarget;
         }

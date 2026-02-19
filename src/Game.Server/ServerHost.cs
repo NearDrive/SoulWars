@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using Game.Audit;
 using Game.Core;
 using Game.Protocol;
+using ProtocolCastSkillCommand = Game.Protocol.CastSkillCommand;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -470,7 +471,7 @@ public sealed class ServerHost
                 case LootIntent lootIntent:
                     HandleLootIntent(session, lootIntent, worldCommands);
                     break;
-                case CastSkillCommand castSkillCommand:
+                case ProtocolCastSkillCommand castSkillCommand:
                     PendingCastSkillCommand? pendingCast = CreatePendingCastSkillCommand(targetTick, session, castSkillCommand);
                     if (pendingCast is not null)
                     {
@@ -523,7 +524,7 @@ public sealed class ServerHost
         return new PendingAttackIntent(targetTick, session.EntityId.Value, session.CurrentZoneId.Value, attackIntent.TargetId);
     }
 
-    private PendingCastSkillCommand? CreatePendingCastSkillCommand(int targetTick, SessionState session, CastSkillCommand castSkillCommand)
+    private PendingCastSkillCommand? CreatePendingCastSkillCommand(int targetTick, SessionState session, ProtocolCastSkillCommand castSkillCommand)
     {
         if (session.EntityId is null || session.CurrentZoneId is null)
         {

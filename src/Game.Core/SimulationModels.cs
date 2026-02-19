@@ -457,7 +457,8 @@ public sealed record WorldState(
     ImmutableArray<VendorTransactionAuditEntry> VendorTransactionAuditLog = default,
     ImmutableArray<VendorDefinition> Vendors = default,
     ImmutableArray<CombatEvent> CombatEvents = default,
-    ImmutableArray<StatusEvent> StatusEvents = default)
+    ImmutableArray<StatusEvent> StatusEvents = default,
+    ImmutableArray<SkillCastIntent> SkillCastIntents = default)
 {
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
@@ -652,6 +653,22 @@ public sealed record WorldState(
                 .ThenBy(e => e.SourceId.Value)
                 .ThenBy(e => e.TargetId.Value)
                 .ThenBy(e => e.EffectType)
+                .ToImmutableArray()
+        };
+    }
+
+    public WorldState WithSkillCastIntents(ImmutableArray<SkillCastIntent> skillCastIntents)
+    {
+        return this with
+        {
+            SkillCastIntents = skillCastIntents
+                .OrderBy(i => i.Tick)
+                .ThenBy(i => i.CasterId.Value)
+                .ThenBy(i => i.SkillId.Value)
+                .ThenBy(i => (int)i.TargetType)
+                .ThenBy(i => i.TargetEntityId.Value)
+                .ThenBy(i => i.TargetX.Raw)
+                .ThenBy(i => i.TargetY.Raw)
                 .ToImmutableArray()
         };
     }
