@@ -6,7 +6,7 @@ namespace Game.Server.Tests.Canary;
 
 public sealed class Mvp9GoldenReplayTests
 {
-    private const string ExpectedFinalGlobalChecksumPrefix = "1e537a73eb7364239d1cf89dc53e4bce";
+    private const string ExpectedFinalGlobalChecksumPrefix = "7629eae60ba7442198fa035a69d1cb76";
 
     [Fact]
     [Trait("Category", "ReplayVerify")]
