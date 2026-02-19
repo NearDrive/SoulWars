@@ -3,9 +3,12 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: '0 3 * * *'
 
 jobs:
-  build-and-test:
+  canary:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
@@ -52,7 +55,29 @@ jobs:
       - name: Build
         run: dotnet build -c Release --no-restore
 
-      - name: Test
+      - name: Canary test lane
+        run: dotnet test -c Release --no-build --filter "Category=Canary" --logger "console;verbosity=detailed" --blame --blame-hang-timeout 2m
+
+  full:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
+      - name: Full deterministic suite (excluding soak)
         run: dotnet test -c Release --no-build --filter "Category!=Soak" --logger "console;verbosity=detailed" --blame --blame-hang-timeout 2m
 
       - name: MVP7 verification gate
@@ -65,6 +90,7 @@ jobs:
         run: dotnet run -c Release --project src/Game.App.Headless -- --verify-mvp1
 
   dod-gate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -88,7 +114,8 @@ jobs:
       - name: Replay verify golden drift gate
         run: dotnet test -c Release --no-build --filter "Category=ReplayVerify" --logger "console;verbosity=normal"
 
-  soak:
+  nightly:
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
 
     steps:

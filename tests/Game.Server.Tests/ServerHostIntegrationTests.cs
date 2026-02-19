@@ -13,6 +13,7 @@ namespace Game.Server.Tests;
 public sealed class ServerHostIntegrationTests
 {
     [Fact]
+    [Trait("Category", "Canary")]
     public async Task Tcp_Connect_EnterZone_ReceivesSnapshot()
     {
         // CI can be transiently slower during socket startup/first tick scheduling.

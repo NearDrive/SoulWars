@@ -11,6 +11,7 @@ namespace Game.Server.Tests.Mvp9;
 public sealed class Mvp9InvariantsTests
 {
     [Fact]
+    [Trait("Category", "Canary")]
     public void Invariant_EntityIdUniqueAcrossZones_FailsFast()
     {
         EntityState shared = CreateEntity(101, 2, 2);

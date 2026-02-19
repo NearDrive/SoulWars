@@ -12,6 +12,7 @@ namespace Game.Server.Tests;
 public sealed class SqlitePersistenceTests
 {
     [Fact]
+    [Trait("Category", "Canary")]
     public void SqliteStore_SaveLoad_WorldBlob_RoundTrip()
     {
         string dbPath = CreateTempDbPath();
