@@ -16,9 +16,10 @@ public static class WorldStateSerializer
         ImmutableArray<VendorDefinition> Vendors,
         ImmutableArray<VendorTransactionAuditEntry> VendorAudit,
         ImmutableArray<CombatEvent> CombatEvents,
-        ImmutableArray<StatusEvent> StatusEvents);
+        ImmutableArray<StatusEvent> StatusEvents,
+        PartyRegistry PartyRegistry);
 
-    private sealed record V5SnapshotPayload(
+    private sealed record V6SnapshotPayload(
         int Tick,
         ImmutableArray<ZoneState> Zones,
         ImmutableArray<LootEntityState> LootEntities,
@@ -27,10 +28,11 @@ public static class WorldStateSerializer
         ImmutableArray<VendorDefinition> Vendors,
         ImmutableArray<VendorTransactionAuditEntry> VendorAudit,
         ImmutableArray<CombatEvent> CombatEvents,
-        ImmutableArray<StatusEvent> StatusEvents);
+        ImmutableArray<StatusEvent> StatusEvents,
+        PartyRegistry PartyRegistry);
 
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 4;
+    private const int CurrentVersion = 5;
     public static int SerializerVersion => CurrentVersion;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
@@ -45,6 +47,8 @@ public static class WorldStateSerializer
     private const int MaxVendorAuditCount = 5_000_000;
     private const int MaxCombatEventCount = 10_000_000;
     private const int MaxStatusEventCount = 10_000_000;
+    private const int MaxPartyCount = 2_000_000;
+    private const int MaxPartyMembers = 2_000_000;
 
     public static void Save(Stream stream, WorldState world)
     {
@@ -76,6 +80,7 @@ public static class WorldStateSerializer
         WriteVendorAudit(writer, world.VendorTransactionAuditLog.IsDefault ? ImmutableArray<VendorTransactionAuditEntry>.Empty : world.VendorTransactionAuditLog);
         WriteCombatEvents(writer, world.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : world.CombatEvents);
         WriteStatusEvents(writer, world.StatusEvents.IsDefault ? ImmutableArray<StatusEvent>.Empty : world.StatusEvents);
+        WritePartyRegistry(writer, world.PartyRegistryOrEmpty);
     }
 
     public static WorldState Load(Stream stream)
@@ -86,8 +91,8 @@ public static class WorldStateSerializer
         {
             using BinaryReader reader = new(stream, Encoding.UTF8, leaveOpen: true);
             RawSnapshotPayload raw = LoadRaw(reader);
-            V5SnapshotPayload migrated = MigrateToV5(raw);
-            return LoadV5(migrated);
+            V6SnapshotPayload migrated = MigrateToV6(raw);
+            return LoadV6(migrated);
         }
         catch (EndOfStreamException ex)
         {
@@ -117,7 +122,7 @@ public static class WorldStateSerializer
         }
 
         int version = reader.ReadInt32();
-        if (version is not (1 or 2 or 3 or 4 or CurrentVersion))
+        if (version is not (1 or 2 or 3 or 4 or 5 or CurrentVersion))
         {
             throw new InvalidDataException($"Unsupported world-state version '{version}'.");
         }
@@ -196,6 +201,9 @@ public static class WorldStateSerializer
         ImmutableArray<StatusEvent> statusEvents = version >= 4 && HasRemainingData(reader)
             ? ReadStatusEvents(reader)
             : ImmutableArray<StatusEvent>.Empty;
+        PartyRegistry partyRegistry = version >= 5 && HasRemainingData(reader)
+            ? ReadPartyRegistry(reader)
+            : PartyRegistry.Empty;
 
         return new RawSnapshotPayload(
             Version: version,
@@ -207,14 +215,15 @@ public static class WorldStateSerializer
             Vendors: vendors,
             VendorAudit: vendorAudit,
             CombatEvents: combatEvents,
-            StatusEvents: statusEvents);
+            StatusEvents: statusEvents,
+            PartyRegistry: partyRegistry);
     }
 
-    private static V5SnapshotPayload MigrateToV5(RawSnapshotPayload payload)
+    private static V6SnapshotPayload MigrateToV6(RawSnapshotPayload payload)
     {
         if (payload.Version == CurrentVersion)
         {
-            return new V5SnapshotPayload(
+            return new V6SnapshotPayload(
                 Tick: payload.Tick,
                 Zones: payload.Zones,
                 LootEntities: payload.LootEntities,
@@ -223,10 +232,11 @@ public static class WorldStateSerializer
                 Vendors: payload.Vendors,
                 VendorAudit: payload.VendorAudit,
                 CombatEvents: payload.CombatEvents,
-                StatusEvents: payload.StatusEvents);
+                StatusEvents: payload.StatusEvents,
+            PartyRegistry: payload.PartyRegistry);
         }
 
-        return new V5SnapshotPayload(
+        return new V6SnapshotPayload(
             Tick: payload.Tick,
             Zones: payload.Zones.OrderBy(z => z.Id.Value).ToImmutableArray(),
             LootEntities: payload.LootEntities.OrderBy(l => l.Id.Value).ToImmutableArray(),
@@ -248,23 +258,25 @@ public static class WorldStateSerializer
                 .ThenBy(e => e.Quantity)
                 .ToImmutableArray(),
             CombatEvents: ImmutableArray<CombatEvent>.Empty,
-            StatusEvents: ImmutableArray<StatusEvent>.Empty);
+            StatusEvents: ImmutableArray<StatusEvent>.Empty,
+            PartyRegistry: PartyRegistry.Empty);
     }
 
-    private static WorldState LoadV5(V5SnapshotPayload payload)
+    private static WorldState LoadV6(V6SnapshotPayload payload)
     {
         ImmutableArray<EntityLocation> locations = BuildEntityLocations(payload.Zones);
         WorldState loaded = new(
-            payload.Tick,
-            payload.Zones,
-            locations,
-            payload.LootEntities,
-            payload.PlayerInventories,
+            Tick: payload.Tick,
+            Zones: payload.Zones,
+            EntityLocations: locations,
+            PartyRegistry: payload.PartyRegistry,
+            LootEntities: payload.LootEntities,
+            PlayerInventories: payload.PlayerInventories,
             PlayerWallets: payload.PlayerWallets,
             VendorTransactionAuditLog: payload.VendorAudit,
             Vendors: payload.Vendors,
             CombatEvents: payload.CombatEvents,
-                StatusEvents: payload.StatusEvents);
+            StatusEvents: payload.StatusEvents);
 
         CoreInvariants.Validate(loaded, payload.Tick);
         return loaded;
@@ -743,6 +755,55 @@ public static class WorldStateSerializer
             .ThenBy(e => e.EffectType)
             .ToImmutableArray();
     }
+
+    private static void WritePartyRegistry(BinaryWriter writer, PartyRegistry partyRegistry)
+    {
+        PartyRegistry canonical = partyRegistry.Canonicalize();
+        writer.Write(canonical.NextPartySequence);
+        writer.Write(canonical.Parties.Length);
+        foreach (PartyState party in canonical.Parties)
+        {
+            writer.Write(party.Id.Value);
+            writer.Write(party.LeaderId.Value);
+            writer.Write(party.Members.Length);
+            foreach (PartyMember member in party.Members)
+            {
+                writer.Write(member.EntityId.Value);
+            }
+        }
+    }
+
+    private static PartyRegistry ReadPartyRegistry(BinaryReader reader)
+    {
+        int nextPartySequence = reader.ReadInt32();
+        if (nextPartySequence <= 0)
+        {
+            throw new InvalidDataException("Party next sequence must be positive.");
+        }
+
+        int partyCount = reader.ReadInt32();
+        ValidateCount(partyCount, MaxPartyCount, nameof(partyCount));
+
+        ImmutableArray<PartyState>.Builder parties = ImmutableArray.CreateBuilder<PartyState>(partyCount);
+        for (int i = 0; i < partyCount; i++)
+        {
+            PartyId partyId = new(reader.ReadInt32());
+            EntityId leaderId = new(reader.ReadInt32());
+            int memberCount = reader.ReadInt32();
+            ValidateCount(memberCount, MaxPartyMembers, nameof(memberCount));
+
+            ImmutableArray<PartyMember>.Builder members = ImmutableArray.CreateBuilder<PartyMember>(memberCount);
+            for (int memberIndex = 0; memberIndex < memberCount; memberIndex++)
+            {
+                members.Add(new PartyMember(new EntityId(reader.ReadInt32())));
+            }
+
+            parties.Add(new PartyState(partyId, leaderId, members.MoveToImmutable()).Canonicalize());
+        }
+
+        return new PartyRegistry(nextPartySequence, parties.MoveToImmutable()).Canonicalize();
+    }
+
     private static ImmutableArray<EntityLocation> BuildEntityLocations(ImmutableArray<ZoneState> zones)
     {
         ImmutableArray<EntityLocation>.Builder builder = ImmutableArray.CreateBuilder<EntityLocation>();

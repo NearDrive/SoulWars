@@ -134,7 +134,7 @@ public sealed class LootSimulationTests
             new EntityLocation(new EntityId(1), new ZoneId(1)),
             new EntityLocation(new EntityId(2), new ZoneId(1)));
 
-        return new WorldState(0, ImmutableArray.Create(zone), locations, ImmutableArray<LootEntityState>.Empty);
+        return new WorldState(Tick: 0, Zones: ImmutableArray.Create(zone), EntityLocations: locations, LootEntities: ImmutableArray<LootEntityState>.Empty);
     }
 
     private static TileMap BuildOpenMap(int width, int height)

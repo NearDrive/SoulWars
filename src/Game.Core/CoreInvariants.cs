@@ -225,6 +225,56 @@ public static class CoreInvariants
             }
         }
 
+        PartyRegistry partyRegistry = world.PartyRegistryOrEmpty.Canonicalize();
+        if (partyRegistry.NextPartySequence <= 0)
+        {
+            throw new InvariantViolationException($"invariant=PartyNextSequencePositive tick={tick} next={partyRegistry.NextPartySequence}");
+        }
+
+        int lastPartyId = int.MinValue;
+        HashSet<int> partyMembers = new();
+        foreach (PartyState party in partyRegistry.Parties)
+        {
+            if (party.Id.Value <= lastPartyId)
+            {
+                throw new InvariantViolationException($"invariant=PartiesOrdered tick={tick} partyId={party.Id.Value} lastPartyId={lastPartyId}");
+            }
+
+            lastPartyId = party.Id.Value;
+
+            if (party.Members.IsDefaultOrEmpty)
+            {
+                throw new InvariantViolationException($"invariant=PartyMembersNonEmpty tick={tick} partyId={party.Id.Value}");
+            }
+
+            int lastMemberId = int.MinValue;
+            bool leaderFound = false;
+            foreach (PartyMember member in party.Members)
+            {
+                if (member.EntityId.Value <= lastMemberId)
+                {
+                    throw new InvariantViolationException($"invariant=PartyMembersOrdered tick={tick} partyId={party.Id.Value} entityId={member.EntityId.Value} lastEntityId={lastMemberId}");
+                }
+
+                lastMemberId = member.EntityId.Value;
+
+                if (!partyMembers.Add(member.EntityId.Value))
+                {
+                    throw new InvariantViolationException($"invariant=PartyMemberUniqueAcrossParties tick={tick} entityId={member.EntityId.Value}");
+                }
+
+                if (member.EntityId.Value == party.LeaderId.Value)
+                {
+                    leaderFound = true;
+                }
+            }
+
+            if (!leaderFound)
+            {
+                throw new InvariantViolationException($"invariant=PartyLeaderIsMember tick={tick} partyId={party.Id.Value} leaderId={party.LeaderId.Value}");
+            }
+        }
+
 
         ImmutableArray<CombatEvent> combatEvents = world.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : world.CombatEvents;
         if (world.CombatEventsDropped_LastTick > 0 && !CombatEventBudgets.IsCanonicalOrder(combatEvents))

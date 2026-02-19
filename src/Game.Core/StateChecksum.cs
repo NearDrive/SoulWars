@@ -266,6 +266,25 @@ public static class StateChecksum
             writer.Write(entry.GoldBefore);
             writer.Write(entry.GoldAfter);
         }
+
+        PartyRegistry partyRegistry = state.PartyRegistryOrEmpty.Canonicalize();
+        bool hasPartyMetadata = partyRegistry.NextPartySequence != 1 || !partyRegistry.Parties.IsDefaultOrEmpty;
+        if (hasPartyMetadata)
+        {
+            writer.Write(unchecked((int)0x50525459)); // "PRTY"
+            writer.Write(partyRegistry.NextPartySequence);
+            writer.Write(partyRegistry.Parties.Length);
+            foreach (PartyState party in partyRegistry.Parties)
+            {
+                writer.Write(party.Id.Value);
+                writer.Write(party.LeaderId.Value);
+                writer.Write(party.Members.Length);
+                foreach (PartyMember member in party.Members)
+                {
+                    writer.Write(member.EntityId.Value);
+                }
+            }
+        }
     }
 
     private static byte[] ComputeMapHash(TileMap map)
