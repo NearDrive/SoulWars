@@ -57,7 +57,10 @@ public static class Simulation
             CombatEvents: ImmutableArray<CombatEvent>.Empty,
             CombatLogEvents: ImmutableArray<CombatLogEvent>.Empty,
             StatusEvents: ImmutableArray<StatusEvent>.Empty,
-            SkillCastIntents: ImmutableArray<SkillCastIntent>.Empty);
+            SkillCastIntents: ImmutableArray<SkillCastIntent>.Empty,
+            CombatEventsDropped_Total: 0,
+            CombatEventsDropped_LastTick: 0,
+            CombatEventsEmitted_LastTick: 0);
     }
 
     private static WorldState CreateInitialStateFromManualDefinitions(SimulationConfig config, ZoneDefinitions definitions)
@@ -87,7 +90,10 @@ public static class Simulation
             CombatEvents: ImmutableArray<CombatEvent>.Empty,
             CombatLogEvents: ImmutableArray<CombatLogEvent>.Empty,
             StatusEvents: ImmutableArray<StatusEvent>.Empty,
-            SkillCastIntents: ImmutableArray<SkillCastIntent>.Empty);
+            SkillCastIntents: ImmutableArray<SkillCastIntent>.Empty,
+            CombatEventsDropped_Total: 0,
+            CombatEventsDropped_LastTick: 0,
+            CombatEventsEmitted_LastTick: 0);
     }
 
     public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs, SimulationInstrumentation? instrumentation = null)
@@ -105,7 +111,9 @@ public static class Simulation
             CombatEvents = ImmutableArray<CombatEvent>.Empty,
             CombatLogEvents = ImmutableArray<CombatLogEvent>.Empty,
             StatusEvents = ImmutableArray<StatusEvent>.Empty,
-            SkillCastIntents = ImmutableArray<SkillCastIntent>.Empty
+            SkillCastIntents = ImmutableArray<SkillCastIntent>.Empty,
+            CombatEventsDropped_LastTick = 0,
+            CombatEventsEmitted_LastTick = 0
         };
         List<ZoneTransferEvent> pendingTransfers = new();
         ImmutableArray<StatusEvent>.Builder tickStatusEvents = ImmutableArray.CreateBuilder<StatusEvent>();
@@ -162,14 +170,7 @@ public static class Simulation
             updated = updated.WithZoneUpdated(nextZone);
             if (!zoneEvents.IsDefaultOrEmpty)
             {
-                ImmutableArray<CombatEvent> combined = (updated.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : updated.CombatEvents)
-                    .AddRange(zoneEvents);
-                if (config.MaxCombatEventsPerTick > 0 && combined.Length > config.MaxCombatEventsPerTick)
-                {
-                    throw new InvariantViolationException($"invariant=MaxCombatEventsPerTickExceeded tick={updated.Tick} max={config.MaxCombatEventsPerTick} actual={combined.Length}");
-                }
-
-                updated = updated.WithCombatEvents(combined);
+                updated = AppendBudgetedCombatEvents(updated, zoneEvents, config.MaxCombatEventsPerTickPerZone, config.MaxCombatEventsRetainedPerZone);
             }
 
             if (!zoneStatusEvents.IsDefaultOrEmpty)
@@ -194,14 +195,7 @@ public static class Simulation
 
             if (!pendingEvents.IsDefaultOrEmpty)
             {
-                ImmutableArray<CombatEvent> combined = (updated.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : updated.CombatEvents)
-                    .AddRange(pendingEvents);
-                if (config.MaxCombatEventsPerTick > 0 && combined.Length > config.MaxCombatEventsPerTick)
-                {
-                    throw new InvariantViolationException($"invariant=MaxCombatEventsPerTickExceeded tick={updated.Tick} max={config.MaxCombatEventsPerTick} actual={combined.Length}");
-                }
-
-                updated = updated.WithCombatEvents(combined);
+                updated = AppendBudgetedCombatEvents(updated, pendingEvents, config.MaxCombatEventsPerTickPerZone, config.MaxCombatEventsRetainedPerZone);
             }
 
             if (!pendingStatusEvents.IsDefaultOrEmpty)
@@ -223,7 +217,9 @@ public static class Simulation
                 tickCombatLogEvents.AddRange(combatLogEvents);
             }
         }
-        updated = updated.WithCombatLogEvents(tickCombatLogEvents.ToImmutable());
+        ImmutableArray<CombatLogEvent> retainedCombatLog = (updated.CombatLogEvents.IsDefault ? ImmutableArray<CombatLogEvent>.Empty : updated.CombatLogEvents)
+            .AddRange(tickCombatLogEvents.ToImmutable());
+        updated = updated.WithCombatLogEvents(CombatEventBuffer.TrimCombatLog(retainedCombatLog, config.MaxCombatLogEventsRetained));
 
         foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
         {
@@ -239,6 +235,11 @@ public static class Simulation
         updated = ProcessVendorIntents(updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
         updated = EnsureWalletsForPlayers(updated);
         updated = updated.WithStatusEvents(tickStatusEvents.ToImmutable());
+        updated = updated.WithCombatEvents(CombatEventBuffer.TrimRetained(updated.CombatEvents, config.MaxCombatEventsRetainedPerZone));
+        if (config.MaxCombatEventsRetainedPerZone > 0 && updated.CombatEvents.Length > config.MaxCombatEventsRetainedPerZone)
+        {
+            throw new InvariantViolationException($"invariant=CombatEventsRetainedBudgetExceeded tick={updated.Tick} actual={updated.CombatEvents.Length} max={config.MaxCombatEventsRetainedPerZone}");
+        }
 
         if (config.Invariants.EnableCoreInvariants)
         {
@@ -247,6 +248,26 @@ public static class Simulation
 
         _ = config.MaxSpeed;
         return updated;
+    }
+
+
+    private static WorldState AppendBudgetedCombatEvents(WorldState state, ImmutableArray<CombatEvent> incoming, int perTickBudget, int retainedBudget)
+    {
+        ImmutableArray<CombatEvent> orderedIncoming = CombatEventBudgets.OrderCanonically(incoming);
+        int take = perTickBudget <= 0 ? orderedIncoming.Length : Math.Min(perTickBudget, orderedIncoming.Length);
+        ImmutableArray<CombatEvent> keptTick = take == orderedIncoming.Length ? orderedIncoming : orderedIncoming.Take(take).ToImmutableArray();
+        uint dropped = (uint)(orderedIncoming.Length - keptTick.Length);
+
+        ImmutableArray<CombatEvent> retained = CombatEventBuffer.AppendTickEvents(
+            state.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : state.CombatEvents,
+            keptTick,
+            retainedBudget);
+        return state
+            .WithCombatEvents(retained)
+            .WithCombatBudgetCounters(
+                state.CombatEventsDropped_Total + dropped,
+                state.CombatEventsDropped_LastTick + dropped,
+                state.CombatEventsEmitted_LastTick + (uint)keptTick.Length);
     }
 
     private static ZoneState RunNpcAiAndApply(SimulationConfig config, int tick, ZoneState zone, SimulationInstrumentation? instrumentation)

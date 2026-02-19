@@ -17,7 +17,10 @@ public readonly record struct SimulationConfig(
     Fix32 NpcAggroRange,
     InvariantOptions Invariants,
     ImmutableArray<SkillDefinition> SkillDefinitions = default,
-    int MaxCombatEventsPerTick = 0)
+    int MaxCombatEventsPerTickPerZone = CombatEventBudgets.DefaultMaxCombatEventsPerTickPerZone,
+    int MaxCombatEventsRetainedPerZone = CombatEventBudgets.DefaultMaxCombatEventsRetainedPerZone,
+    int MaxCombatEventsPerSnapshot = CombatEventBudgets.DefaultMaxCombatEventsPerSnapshot,
+    int MaxCombatLogEventsRetained = CombatEventBudgets.DefaultMaxCombatLogEventsRetained)
 {
     public static SimulationConfig Default(int seed) => new(
         Seed: seed,
@@ -34,5 +37,8 @@ public readonly record struct SimulationConfig(
         NpcAggroRange: Fix32.FromInt(6),
         SkillDefinitions: ImmutableArray<SkillDefinition>.Empty,
         Invariants: InvariantOptions.Enabled,
-        MaxCombatEventsPerTick: 0);
+        MaxCombatEventsPerTickPerZone: CombatEventBudgets.DefaultMaxCombatEventsPerTickPerZone,
+        MaxCombatEventsRetainedPerZone: CombatEventBudgets.DefaultMaxCombatEventsRetainedPerZone,
+        MaxCombatEventsPerSnapshot: CombatEventBudgets.DefaultMaxCombatEventsPerSnapshot,
+        MaxCombatLogEventsRetained: CombatEventBudgets.DefaultMaxCombatLogEventsRetained);
 }
