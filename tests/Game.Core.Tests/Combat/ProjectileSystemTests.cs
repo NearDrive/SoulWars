@@ -114,7 +114,7 @@ public sealed class ProjectileSystemTests
                 HitRadiusRaw: Fix32.OneRaw,
                 CooldownTicks: 1,
                 ResourceCost: 0,
-                TargetKind: CastTargetKind.Entity,
+                TargetType: SkillTargetType.Entity,
                 BaseDamage: 11,
                 ProjectileSpeedRaw: Fix32.FromInt(1).Raw,
                 UsesProjectile: true,
