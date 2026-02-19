@@ -39,19 +39,22 @@ public static class BotCombatScenario
                     PrimarySkillId,
                     RangeRaw: Fix32.FromInt(3).Raw,
                     HitRadiusRaw: Fix32.OneRaw,
+                    MaxTargets: 1,
                     CooldownTicks: cooldownTicks,
+                    CastTimeTicks: 0,
+                    GlobalCooldownTicks: 0,
                     ResourceCost: 0,
-                    TargetKind: CastTargetKind.Entity,
+                    TargetType: SkillTargetType.Entity,
                     EffectKind: SkillEffectKind.Damage,
                     BaseAmount: 14,
                     CoefRaw: Fix32.OneRaw))
         };
 
         ImmutableArray<BotSpec> bots = ImmutableArray.Create(
-            new BotSpec(new EntityId(1001), new ZoneId(1), team: 1, new Vec2Fix(Fix32.FromInt(4), Fix32.FromInt(4))),
-            new BotSpec(new EntityId(1002), new ZoneId(1), team: 2, new Vec2Fix(Fix32.FromInt(10), Fix32.FromInt(4))),
-            new BotSpec(new EntityId(1003), new ZoneId(2), team: 1, new Vec2Fix(Fix32.FromInt(4), Fix32.FromInt(4))),
-            new BotSpec(new EntityId(1004), new ZoneId(2), team: 2, new Vec2Fix(Fix32.FromInt(10), Fix32.FromInt(4))));
+            new BotSpec(new EntityId(1001), new ZoneId(1), 1, new Vec2Fix(Fix32.FromInt(4), Fix32.FromInt(4))),
+            new BotSpec(new EntityId(1002), new ZoneId(1), 2, new Vec2Fix(Fix32.FromInt(10), Fix32.FromInt(4))),
+            new BotSpec(new EntityId(1003), new ZoneId(2), 1, new Vec2Fix(Fix32.FromInt(4), Fix32.FromInt(4))),
+            new BotSpec(new EntityId(1004), new ZoneId(2), 2, new Vec2Fix(Fix32.FromInt(10), Fix32.FromInt(4))));
 
         WorldState state = Simulation.CreateInitialState(config);
         state = SpawnBots(config, state, bots);
@@ -67,12 +70,13 @@ public static class BotCombatScenario
             ImmutableArray<WorldCommand>.Builder commands = ImmutableArray.CreateBuilder<WorldCommand>();
             foreach (BotSpec bot in bots.OrderBy(b => b.EntityId.Value))
             {
-                if (!state.TryGetEntity(bot.EntityId, out EntityState botEntity) || !botEntity.IsAlive)
+                if (!state.TryGetEntityZone(bot.EntityId, out ZoneId zoneId) || !state.TryGetZone(zoneId, out ZoneState zone))
                 {
                     continue;
                 }
 
-                if (!state.TryGetEntityZone(bot.EntityId, out ZoneId zoneId) || !state.TryGetZone(zoneId, out ZoneState zone))
+                EntityState? botEntity = zone.Entities.FirstOrDefault(entity => entity.Id.Value == bot.EntityId.Value);
+                if (botEntity is null || !botEntity.IsAlive)
                 {
                     continue;
                 }
@@ -89,7 +93,7 @@ public static class BotCombatScenario
                     continue;
                 }
 
-                bool inRange = IsWithinRange(botEntity.Pos, target.Pos, Fix32.FromInt(3));
+                bool inRange = IsWithinRange(botEntity.Value.Pos, target.Pos, Fix32.FromInt(3));
                 if (inRange && tick >= nextCastTickByEntityId[bot.EntityId.Value])
                 {
                     commands.Add(new WorldCommand(
@@ -103,8 +107,8 @@ public static class BotCombatScenario
                 }
                 else
                 {
-                    sbyte moveX = Direction(botEntity.Pos.X.Raw, target.Pos.X.Raw);
-                    sbyte moveY = Direction(botEntity.Pos.Y.Raw, target.Pos.Y.Raw);
+                    sbyte moveX = Direction(botEntity.Value.Pos.X.Raw, target.Pos.X.Raw);
+                    sbyte moveY = Direction(botEntity.Value.Pos.Y.Raw, target.Pos.Y.Raw);
                     commands.Add(new WorldCommand(
                         Kind: WorldCommandKind.MoveIntent,
                         EntityId: bot.EntityId,
