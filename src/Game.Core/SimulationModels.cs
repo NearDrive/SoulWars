@@ -360,15 +360,15 @@ public sealed record ZoneEntities(
     }
 }
 
-public sealed record ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData, ImmutableArray<PendingCastComponent> PendingCasts)
+public sealed record ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData, ImmutableArray<PendingCastComponent> PendingCasts, ImmutableArray<ProjectileComponent> Projectiles)
 {
     public ZoneState(ZoneId Id, TileMap Map, ImmutableArray<EntityState> Entities)
-        : this(Id, Map, ZoneEntities.FromEntityStates(Entities), ImmutableArray<PendingCastComponent>.Empty)
+        : this(Id, Map, ZoneEntities.FromEntityStates(Entities), ImmutableArray<PendingCastComponent>.Empty, ImmutableArray<ProjectileComponent>.Empty)
     {
     }
 
     public ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData)
-        : this(Id, Map, EntitiesData, ImmutableArray<PendingCastComponent>.Empty)
+        : this(Id, Map, EntitiesData, ImmutableArray<PendingCastComponent>.Empty, ImmutableArray<ProjectileComponent>.Empty)
     {
     }
 
@@ -387,6 +387,13 @@ public sealed record ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData
     public ZoneState WithPendingCasts(ImmutableArray<PendingCastComponent> pendingCasts) => this with
     {
         PendingCasts = pendingCasts
+    };
+
+    public ZoneState WithProjectiles(ImmutableArray<ProjectileComponent> projectiles) => this with
+    {
+        Projectiles = (projectiles.IsDefault ? ImmutableArray<ProjectileComponent>.Empty : projectiles)
+            .OrderBy(p => p.ProjectileId)
+            .ToImmutableArray()
     };
 
     public ZoneChecksum ComputeChecksum() => new(Id.Value, StateChecksum.ComputeZoneChecksum(this));
@@ -460,9 +467,13 @@ public sealed record WorldState(
     ImmutableArray<CombatLogEvent> CombatLogEvents = default,
     ImmutableArray<StatusEvent> StatusEvents = default,
     ImmutableArray<SkillCastIntent> SkillCastIntents = default,
+    ImmutableArray<ProjectileEvent> ProjectileEvents = default,
     uint CombatEventsDropped_Total = 0,
     uint CombatEventsDropped_LastTick = 0,
-    uint CombatEventsEmitted_LastTick = 0)
+    uint CombatEventsEmitted_LastTick = 0,
+    int NextProjectileId = 1,
+    uint ProjectileSpawnsDropped_Total = 0,
+    uint ProjectileSpawnsDropped_LastTick = 0)
 {
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
@@ -703,6 +714,30 @@ public sealed record WorldState(
                 .ToImmutableArray()
         };
     }
+
+
+    public WorldState WithProjectileEvents(ImmutableArray<ProjectileEvent> projectileEvents)
+    {
+        return this with
+        {
+            ProjectileEvents = (projectileEvents.IsDefault ? ImmutableArray<ProjectileEvent>.Empty : projectileEvents)
+                .OrderBy(e => e.Tick)
+                .ThenBy(e => e.ProjectileId)
+                .ThenBy(e => (int)e.Kind)
+                .ToImmutableArray()
+        };
+    }
+
+    public WorldState WithProjectileCounters(int nextProjectileId, uint droppedTotal, uint droppedLastTick)
+    {
+        return this with
+        {
+            NextProjectileId = nextProjectileId,
+            ProjectileSpawnsDropped_Total = droppedTotal,
+            ProjectileSpawnsDropped_LastTick = droppedLastTick
+        };
+    }
+
 }
 
 public enum WorldCommandKind : byte

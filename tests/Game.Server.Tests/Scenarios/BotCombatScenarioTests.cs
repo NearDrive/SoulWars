@@ -7,7 +7,7 @@ public sealed class BotCombatScenarioTests
 {
     [Fact]
     [Trait("Category", "Canary")]
-    public void BotCombat_ReplayStable()
+    public void BotCombatScenario_ReplayStable_WithProjectiles()
     {
         BotCombatScenario.RunResult runA = BotCombatScenario.RunDeterministic();
         BotCombatScenario.RunResult runB = BotCombatScenario.RunDeterministic();

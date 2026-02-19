@@ -58,9 +58,13 @@ public static class Simulation
             CombatLogEvents: ImmutableArray<CombatLogEvent>.Empty,
             StatusEvents: ImmutableArray<StatusEvent>.Empty,
             SkillCastIntents: ImmutableArray<SkillCastIntent>.Empty,
+            ProjectileEvents: ImmutableArray<ProjectileEvent>.Empty,
             CombatEventsDropped_Total: 0,
             CombatEventsDropped_LastTick: 0,
-            CombatEventsEmitted_LastTick: 0);
+            CombatEventsEmitted_LastTick: 0,
+            NextProjectileId: 1,
+            ProjectileSpawnsDropped_Total: 0,
+            ProjectileSpawnsDropped_LastTick: 0);
     }
 
     private static WorldState CreateInitialStateFromManualDefinitions(SimulationConfig config, ZoneDefinitions definitions)
@@ -91,9 +95,13 @@ public static class Simulation
             CombatLogEvents: ImmutableArray<CombatLogEvent>.Empty,
             StatusEvents: ImmutableArray<StatusEvent>.Empty,
             SkillCastIntents: ImmutableArray<SkillCastIntent>.Empty,
+            ProjectileEvents: ImmutableArray<ProjectileEvent>.Empty,
             CombatEventsDropped_Total: 0,
             CombatEventsDropped_LastTick: 0,
-            CombatEventsEmitted_LastTick: 0);
+            CombatEventsEmitted_LastTick: 0,
+            NextProjectileId: 1,
+            ProjectileSpawnsDropped_Total: 0,
+            ProjectileSpawnsDropped_LastTick: 0);
     }
 
     public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs, SimulationInstrumentation? instrumentation = null)
@@ -112,7 +120,9 @@ public static class Simulation
             CombatLogEvents = ImmutableArray<CombatLogEvent>.Empty,
             StatusEvents = ImmutableArray<StatusEvent>.Empty,
             SkillCastIntents = ImmutableArray<SkillCastIntent>.Empty,
+            ProjectileEvents = ImmutableArray<ProjectileEvent>.Empty,
             CombatEventsDropped_LastTick = 0,
+            ProjectileSpawnsDropped_LastTick = 0,
             CombatEventsEmitted_LastTick = 0
         };
         List<ZoneTransferEvent> pendingTransfers = new();
@@ -204,7 +214,41 @@ public static class Simulation
             }
         }
 
+        ImmutableArray<ProjectileEvent>.Builder tickProjectileEvents = ImmutableArray.CreateBuilder<ProjectileEvent>();
+        foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
+        {
+            ImmutableArray<SkillCastIntent> zoneIntents = (updated.SkillCastIntents.IsDefault ? ImmutableArray<SkillCastIntent>.Empty : updated.SkillCastIntents)
+                .Where(i => zone.EntitiesData.AliveIds.Any(id => id.Value == i.CasterId.Value))
+                .ToImmutableArray();
+            (ZoneState nextZone, ImmutableArray<ProjectileEvent> projectileEvents, int nextProjectileId, uint droppedSpawns) = ProjectileSystem.SpawnProjectiles(config, updated.Tick, zone, zoneIntents, updated.NextProjectileId);
+            updated = updated.WithZoneUpdated(nextZone).WithProjectileCounters(nextProjectileId, updated.ProjectileSpawnsDropped_Total + droppedSpawns, updated.ProjectileSpawnsDropped_LastTick + droppedSpawns);
+            if (!projectileEvents.IsDefaultOrEmpty)
+            {
+                tickProjectileEvents.AddRange(projectileEvents);
+            }
+        }
+
         ImmutableArray<CombatLogEvent>.Builder tickCombatLogEvents = ImmutableArray.CreateBuilder<CombatLogEvent>();
+        foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
+        {
+            (ZoneState nextZone, ImmutableArray<CombatEvent> projectileCombatEvents, ImmutableArray<CombatLogEvent> projectileCombatLogEvents, ImmutableArray<ProjectileEvent> projectileEvents) = ProjectileSystem.StepProjectiles(config, updated.Tick, zone);
+            updated = updated.WithZoneUpdated(nextZone);
+            if (!projectileCombatEvents.IsDefaultOrEmpty)
+            {
+                updated = AppendBudgetedCombatEvents(updated, projectileCombatEvents, config.MaxCombatEventsPerTickPerZone, config.MaxCombatEventsRetainedPerZone);
+            }
+
+            if (!projectileCombatLogEvents.IsDefaultOrEmpty)
+            {
+                tickCombatLogEvents.AddRange(projectileCombatLogEvents);
+            }
+
+            if (!projectileEvents.IsDefaultOrEmpty)
+            {
+                tickProjectileEvents.AddRange(projectileEvents);
+            }
+        }
+
         foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
         {
             ImmutableArray<SkillCastIntent> zoneIntents = (updated.SkillCastIntents.IsDefault ? ImmutableArray<SkillCastIntent>.Empty : updated.SkillCastIntents)
@@ -220,6 +264,7 @@ public static class Simulation
         ImmutableArray<CombatLogEvent> retainedCombatLog = (updated.CombatLogEvents.IsDefault ? ImmutableArray<CombatLogEvent>.Empty : updated.CombatLogEvents)
             .AddRange(tickCombatLogEvents.ToImmutable());
         updated = updated.WithCombatLogEvents(CombatEventBuffer.TrimCombatLog(retainedCombatLog, config.MaxCombatLogEventsRetained));
+        updated = updated.WithProjectileEvents(tickProjectileEvents.ToImmutable());
 
         foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
         {
@@ -1884,6 +1929,12 @@ public static class Simulation
             LastAttackTick = tick,
             AttackCooldownTicks = Math.Max(skill.CooldownTicks, skill.GlobalCooldownTicks)
         };
+
+        if (ProjectileSystem.IsProjectileSkill(skill))
+        {
+            ZoneState projectileZone = ReplaceEntity(zone, casterIndex, updatedCaster);
+            return (projectileZone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<StatusEvent>.Empty);
+        }
 
         ImmutableArray<int> targetIndices = ResolveCastTargetIndices(zone, casterIndex, command, skill);
         if (targetIndices.IsDefaultOrEmpty)
