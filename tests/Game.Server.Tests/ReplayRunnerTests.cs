@@ -7,6 +7,7 @@ namespace Game.Server.Tests;
 public sealed class ReplayRunnerTests
 {
     [Fact]
+    [Trait("Category", "Canary")]
     public async Task Replay_Verify_BaselineFixture()
     {
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(20));
