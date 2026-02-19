@@ -2083,6 +2083,15 @@ public static class Simulation
             return CastResult.Rejected_OutOfRange;
         }
 
+        if ((skill.Value.Flags & SkillFlags.RequiresLineOfSight) != 0)
+        {
+            LineOfSight.TileMapCollision collision = new(zone.Map);
+            if (!LineOfSight.HasLineOfSight(collision, caster.Pos.X, caster.Pos.Y, targetPos.X, targetPos.Y))
+            {
+                return CastResult.Rejected_InvalidTarget;
+            }
+        }
+
         if (command.TargetKind == CastTargetKind.Point)
         {
             ImmutableArray<int> pointTargetIndices = ResolveCastTargetIndices(zone, casterIndex, command, skill.Value);
