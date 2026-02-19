@@ -55,6 +55,7 @@ public static class Simulation
             VendorTransactionAuditLog: ImmutableArray<VendorTransactionAuditEntry>.Empty,
             Vendors: ImmutableArray<VendorDefinition>.Empty,
             CombatEvents: ImmutableArray<CombatEvent>.Empty,
+            CombatLogEvents: ImmutableArray<CombatLogEvent>.Empty,
             StatusEvents: ImmutableArray<StatusEvent>.Empty,
             SkillCastIntents: ImmutableArray<SkillCastIntent>.Empty);
     }
@@ -84,6 +85,7 @@ public static class Simulation
             VendorTransactionAuditLog: ImmutableArray<VendorTransactionAuditEntry>.Empty,
             Vendors: ImmutableArray<VendorDefinition>.Empty,
             CombatEvents: ImmutableArray<CombatEvent>.Empty,
+            CombatLogEvents: ImmutableArray<CombatLogEvent>.Empty,
             StatusEvents: ImmutableArray<StatusEvent>.Empty,
             SkillCastIntents: ImmutableArray<SkillCastIntent>.Empty);
     }
@@ -101,6 +103,7 @@ public static class Simulation
         {
             Tick = state.Tick + 1,
             CombatEvents = ImmutableArray<CombatEvent>.Empty,
+            CombatLogEvents = ImmutableArray<CombatLogEvent>.Empty,
             StatusEvents = ImmutableArray<StatusEvent>.Empty,
             SkillCastIntents = ImmutableArray<SkillCastIntent>.Empty
         };
@@ -206,6 +209,21 @@ public static class Simulation
                 tickStatusEvents.AddRange(pendingStatusEvents);
             }
         }
+
+        ImmutableArray<CombatLogEvent>.Builder tickCombatLogEvents = ImmutableArray.CreateBuilder<CombatLogEvent>();
+        foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
+        {
+            ImmutableArray<SkillCastIntent> zoneIntents = (updated.SkillCastIntents.IsDefault ? ImmutableArray<SkillCastIntent>.Empty : updated.SkillCastIntents)
+                .Where(i => zone.EntitiesData.AliveIds.Any(id => id.Value == i.CasterId.Value))
+                .ToImmutableArray();
+            (ZoneState nextZone, ImmutableArray<CombatLogEvent> combatLogEvents) = SkillEffectSystem.ApplyPendingIntents(config, updated.Tick, zone, zoneIntents);
+            updated = updated.WithZoneUpdated(nextZone);
+            if (!combatLogEvents.IsDefaultOrEmpty)
+            {
+                tickCombatLogEvents.AddRange(combatLogEvents);
+            }
+        }
+        updated = updated.WithCombatLogEvents(tickCombatLogEvents.ToImmutable());
 
         foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
         {
@@ -1885,15 +1903,24 @@ public static class Simulation
             }
             else
             {
-                finalAmount = Math.Max(1, amount - target.Defense);
-                finalAmount = Math.Min(finalAmount, target.Hp);
-                eventType = CombatEventType.Damage;
-                int nextHp = Math.Max(0, target.Hp - finalAmount);
-                updatedTarget = target with
+                if (skill.BaseDamage > 0)
                 {
-                    Hp = nextHp,
-                    IsAlive = nextHp > 0
-                };
+                    finalAmount = 0;
+                    eventType = CombatEventType.Damage;
+                    updatedTarget = target;
+                }
+                else
+                {
+                    finalAmount = Math.Max(1, amount - target.Defense);
+                    finalAmount = Math.Min(finalAmount, target.Hp);
+                    eventType = CombatEventType.Damage;
+                    int nextHp = Math.Max(0, target.Hp - finalAmount);
+                    updatedTarget = target with
+                    {
+                        Hp = nextHp,
+                        IsAlive = nextHp > 0
+                    };
+                }
             }
 
             targetUpdates[targetIndex] = updatedTarget;
