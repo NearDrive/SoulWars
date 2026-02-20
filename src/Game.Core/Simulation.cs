@@ -288,6 +288,7 @@ public static class Simulation
             .AddRange(tickCombatLogEvents.ToImmutable());
         updated = updated.WithCombatLogEvents(CombatEventBuffer.TrimCombatLog(retainedCombatLog, config.MaxCombatLogEventsRetained));
         updated = updated.WithProjectileEvents(tickProjectileEvents.ToImmutable());
+        updated = ApplyThreatFromCombatEvents(updated);
 
         foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
         {
@@ -340,6 +341,83 @@ public static class Simulation
                 state.CombatEventsEmitted_LastTick + (uint)keptTick.Length);
     }
 
+    private static WorldState ApplyThreatFromCombatEvents(WorldState state)
+    {
+        ImmutableArray<CombatEvent> events = state.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : state.CombatEvents;
+        ImmutableArray<CombatEvent> tickDamageEvents = events
+            .Where(e => e.Tick == state.Tick && e.Type == CombatEventType.Damage)
+            .OrderBy(e => e.SourceId.Value)
+            .ThenBy(e => e.TargetId.Value)
+            .ThenBy(e => e.SkillId.Value)
+            .ThenBy(e => e.Amount)
+            .ToImmutableArray();
+
+        if (tickDamageEvents.IsDefaultOrEmpty)
+        {
+            return state;
+        }
+
+        WorldState current = state;
+        foreach (ZoneState zone in state.Zones.OrderBy(z => z.Id.Value))
+        {
+            ImmutableArray<EntityState> entities = zone.Entities;
+            ImmutableArray<EntityId> ids = zone.EntitiesData.AliveIds;
+            ImmutableArray<EntityState>.Builder nextEntities = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
+            bool changed = false;
+
+            for (int i = 0; i < entities.Length; i++)
+            {
+                EntityState entity = entities[i];
+                if (entity.Kind != EntityKind.Npc || !entity.IsAlive)
+                {
+                    nextEntities.Add(entity);
+                    continue;
+                }
+
+                ThreatComponent threat = entity.Threat;
+                for (int eventIndex = 0; eventIndex < tickDamageEvents.Length; eventIndex++)
+                {
+                    CombatEvent combatEvent = tickDamageEvents[eventIndex];
+                    if (combatEvent.TargetId.Value != entity.Id.Value || combatEvent.Amount <= 0)
+                    {
+                        continue;
+                    }
+
+                    int sourceIndex = ZoneEntities.FindIndex(ids, combatEvent.SourceId);
+                    if (sourceIndex < 0)
+                    {
+                        continue;
+                    }
+
+                    EntityState sourceEntity = entities[sourceIndex];
+                    if (sourceEntity.Kind != EntityKind.Player)
+                    {
+                        continue;
+                    }
+
+                    threat = threat.AddThreat(sourceEntity.Id, combatEvent.Amount, state.Tick);
+                }
+
+                if (!Equals(threat, entity.Threat))
+                {
+                    changed = true;
+                    nextEntities.Add(entity with { Threat = threat });
+                }
+                else
+                {
+                    nextEntities.Add(entity);
+                }
+            }
+
+            if (changed)
+            {
+                current = current.WithZoneUpdated(zone.WithEntities(nextEntities.ToImmutable().OrderBy(e => e.Id.Value).ToImmutableArray()));
+            }
+        }
+
+        return current;
+    }
+
     private static ZoneState RunNpcAiAndApply(SimulationConfig config, int tick, ZoneState zone, SimulationInstrumentation? instrumentation)
     {
         List<WorldCommand> npcCommands = new();
@@ -348,6 +426,7 @@ public static class Simulation
             .ToImmutableArray();
 
         ImmutableArray<EntityState>.Builder postAiEntities = ImmutableArray.CreateBuilder<EntityState>(ordered.Length);
+        ImmutableArray<EntityId> orderedIds = ordered.Select(e => e.Id).ToImmutableArray();
         Fix32 aggroRangeSq = config.NpcAggroRange * config.NpcAggroRange;
 
         foreach (EntityState entity in ordered)
@@ -375,45 +454,25 @@ public static class Simulation
                 };
             }
 
-            EntityState? closestPlayer = null;
-            Fix32 closestDistSq = new(int.MaxValue);
+            (EntityState? target, ThreatComponent sanitizedThreat, Fix32 targetDistSq) = SelectNpcTarget(ordered, orderedIds, npc, aggroRangeSq);
+            npc = npc with { Threat = sanitizedThreat };
 
-            foreach (EntityState candidate in ordered)
+            if (target is not null)
             {
-                instrumentation?.CountEntitiesVisited?.Invoke(1);
-                if (candidate.Kind != EntityKind.Player || !candidate.IsAlive)
-                {
-                    continue;
-                }
-
-                Fix32 dx = candidate.Pos.X - npc.Pos.X;
-                Fix32 dy = candidate.Pos.Y - npc.Pos.Y;
-                Fix32 distSq = (dx * dx) + (dy * dy);
-                if (distSq > aggroRangeSq || distSq >= closestDistSq)
-                {
-                    continue;
-                }
-
-                closestDistSq = distSq;
-                closestPlayer = candidate;
-            }
-
-            if (closestPlayer is not null)
-            {
-                Fix32 dx = closestPlayer.Pos.X - npc.Pos.X;
-                Fix32 dy = closestPlayer.Pos.Y - npc.Pos.Y;
+                Fix32 dx = target.Pos.X - npc.Pos.X;
+                Fix32 dy = target.Pos.Y - npc.Pos.Y;
                 moveX = SignToSByte(dx);
                 moveY = SignToSByte(dy);
 
                 Fix32 attackRangeSq = npc.AttackRange * npc.AttackRange;
                 bool canAttack = tick - npc.LastAttackTick >= npc.AttackCooldownTicks;
-                if (canAttack && closestDistSq <= attackRangeSq)
+                if (canAttack && targetDistSq <= attackRangeSq)
                 {
                     npcCommands.Add(new WorldCommand(
                         Kind: WorldCommandKind.AttackIntent,
                         EntityId: npc.Id,
                         ZoneId: zone.Id,
-                        TargetEntityId: closestPlayer.Id));
+                        TargetEntityId: target.Id));
                 }
             }
 
@@ -444,6 +503,90 @@ public static class Simulation
         }
 
         return updatedZone;
+    }
+
+    private static (EntityState? Target, ThreatComponent Threat, Fix32 DistSq) SelectNpcTarget(ImmutableArray<EntityState> ordered, ImmutableArray<EntityId> orderedIds, EntityState npc, Fix32 aggroRangeSq)
+    {
+        ThreatComponent threat = npc.Threat;
+        ImmutableArray<ThreatEntry> entries = threat.OrderedEntries();
+
+        for (int i = entries.Length - 1; i >= 0; i--)
+        {
+            ThreatEntry entry = entries[i];
+            int candidateIndex = ZoneEntities.FindIndex(orderedIds, entry.SourceEntityId);
+            if (candidateIndex < 0)
+            {
+                threat = threat.RemoveAt(i);
+                continue;
+            }
+
+            EntityState candidate = ordered[candidateIndex];
+            if (!candidate.IsAlive || candidate.Kind != EntityKind.Player)
+            {
+                threat = threat.RemoveAt(i);
+            }
+        }
+
+        entries = threat.OrderedEntries();
+        EntityState? threatTarget = null;
+        int bestThreat = int.MinValue;
+        int bestId = int.MaxValue;
+        Fix32 threatDistSq = new(int.MaxValue);
+
+        for (int i = 0; i < entries.Length; i++)
+        {
+            ThreatEntry entry = entries[i];
+            int candidateIndex = ZoneEntities.FindIndex(orderedIds, entry.SourceEntityId);
+            if (candidateIndex < 0)
+            {
+                continue;
+            }
+
+            EntityState candidate = ordered[candidateIndex];
+            Fix32 dx = candidate.Pos.X - npc.Pos.X;
+            Fix32 dy = candidate.Pos.Y - npc.Pos.Y;
+            Fix32 distSq = (dx * dx) + (dy * dy);
+
+            bool better = entry.Threat > bestThreat || (entry.Threat == bestThreat && candidate.Id.Value < bestId);
+            if (!better)
+            {
+                continue;
+            }
+
+            bestThreat = entry.Threat;
+            bestId = candidate.Id.Value;
+            threatTarget = candidate;
+            threatDistSq = distSq;
+        }
+
+        if (threatTarget is not null)
+        {
+            return (threatTarget, threat, threatDistSq);
+        }
+
+        EntityState? closestPlayer = null;
+        Fix32 closestDistSq = new(int.MaxValue);
+
+        foreach (EntityState candidate in ordered)
+        {
+            if (candidate.Kind != EntityKind.Player || !candidate.IsAlive)
+            {
+                continue;
+            }
+
+            Fix32 dx = candidate.Pos.X - npc.Pos.X;
+            Fix32 dy = candidate.Pos.Y - npc.Pos.Y;
+            Fix32 distSq = (dx * dx) + (dy * dy);
+            if (distSq > aggroRangeSq || distSq >= closestDistSq)
+            {
+                continue;
+            }
+
+            closestDistSq = distSq;
+            closestPlayer = candidate;
+        }
+
+        return (closestPlayer, threat, closestDistSq);
     }
 
     private static ZoneState TickDownZoneSkillCooldowns(ZoneState zone)
