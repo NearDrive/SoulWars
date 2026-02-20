@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Immutable;
 using System.Linq;
 using Game.Core;
@@ -12,9 +13,34 @@ public sealed class BossPhaseTransitionTests
     public void Boss_Phase_Transition_Sequence_Is_Deterministic()
     {
         SimulationConfig config = EncounterTriggerTests_CreateConfig();
-        ImmutableArray<string> runA = RunScenario(config);
-        ImmutableArray<string> runB = RunScenario(config);
-        Assert.Equal(runA, runB);
+        ImmutableArray<string> trace = RunScenario(config);
+
+        Assert.Equal("phase=0;flags=0", trace[0]);
+
+        int firstPhaseOne = FindFirstIndex(trace, v => v.StartsWith("phase=1;", StringComparison.Ordinal));
+        Assert.True(firstPhaseOne >= 0, "Expected encounter to transition from phase 0 to phase 1.");
+
+        int firstPhaseOneTriggered = FindFirstIndex(trace, v => string.Equals(v, "phase=1;flags=1", StringComparison.Ordinal));
+        Assert.True(firstPhaseOneTriggered > firstPhaseOne, "Expected phase-1 tick trigger to fire after entering phase 1.");
+
+        for (int i = firstPhaseOneTriggered; i < trace.Length; i++)
+        {
+            Assert.Equal("phase=1;flags=1", trace[i]);
+        }
+    }
+
+
+    private static int FindFirstIndex(ImmutableArray<string> trace, Func<string, bool> predicate)
+    {
+        for (int i = 0; i < trace.Length; i++)
+        {
+            if (predicate(trace[i]))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private static ImmutableArray<string> RunScenario(SimulationConfig config)
