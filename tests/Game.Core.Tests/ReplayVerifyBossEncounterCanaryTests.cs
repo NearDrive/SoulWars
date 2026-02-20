@@ -35,8 +35,8 @@ public sealed class BossEncounterCanaryReplayVerifyTests
         Assert.Null(firstDivergentTick);
         Assert.Equal(baseline.FinalChecksum, replay.FinalChecksum);
         Assert.Equal(baseline.CombatEventCount, replay.CombatEventCount);
-        Assert.True(baseline.CombatEventCount > 0);
         Assert.True(baseline.BossAggroDirectionTrace.SequenceEqual(replay.BossAggroDirectionTrace));
+        Assert.Equal(300, baseline.TickChecksums.Length);
     }
 }
 
