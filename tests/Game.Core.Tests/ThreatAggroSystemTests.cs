@@ -88,7 +88,7 @@ public sealed class ThreatAccumulationTests
         NpcCountPerZone: 0,
         NpcWanderPeriodTicks: 9999,
         NpcAggroRange: Fix32.FromInt(32),
-        SkillDefinitions: ImmutableArray.Create(new SkillDefinition(new SkillId(1), 32, 0, 1, 0, 0, 0, 0, CastTargetKind.Entity, BaseAmount: 10)),
+        SkillDefinitions: ImmutableArray.Create(new SkillDefinition(new SkillId(1), Fix32.FromInt(32).Raw, 0, 1, 0, 0, 0, 0, CastTargetKind.Entity, BaseAmount: 10)),
         Invariants: InvariantOptions.Enabled);
 }
 
@@ -159,7 +159,7 @@ public sealed class AggroDeterminismTests
         NpcCountPerZone: 0,
         NpcWanderPeriodTicks: 9999,
         NpcAggroRange: Fix32.FromInt(32),
-        SkillDefinitions: ImmutableArray.Create(new SkillDefinition(new SkillId(1), 32, 0, 1, 0, 0, 0, 0, CastTargetKind.Entity, BaseAmount: 10)),
+        SkillDefinitions: ImmutableArray.Create(new SkillDefinition(new SkillId(1), Fix32.FromInt(32).Raw, 0, 1, 0, 0, 0, 0, CastTargetKind.Entity, BaseAmount: 10)),
         Invariants: InvariantOptions.Enabled);
 }
 
@@ -243,7 +243,7 @@ public sealed class TankVsDpsScenarioReplayTests
         NpcWanderPeriodTicks: 9999,
         NpcAggroRange: Fix32.FromInt(32),
         SkillDefinitions: ImmutableArray.Create(
-            new SkillDefinition(new SkillId(1), 32, 0, 1, 0, 0, 0, 0, CastTargetKind.Entity, BaseAmount: 5),
-            new SkillDefinition(new SkillId(2), 32, 0, 1, 0, 0, 0, 0, CastTargetKind.Entity, BaseAmount: 20)),
+            new SkillDefinition(new SkillId(1), Fix32.FromInt(32).Raw, 0, 1, 0, 0, 0, 0, CastTargetKind.Entity, BaseAmount: 5),
+            new SkillDefinition(new SkillId(2), Fix32.FromInt(32).Raw, 0, 1, 0, 0, 0, 0, CastTargetKind.Entity, BaseAmount: 20)),
         Invariants: InvariantOptions.Enabled);
 }
