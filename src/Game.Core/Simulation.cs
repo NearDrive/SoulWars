@@ -428,6 +428,9 @@ public static class Simulation
         ImmutableArray<EntityState>.Builder postAiEntities = ImmutableArray.CreateBuilder<EntityState>(ordered.Length);
         ImmutableArray<EntityId> orderedIds = ordered.Select(e => e.Id).ToImmutableArray();
         Fix32 aggroRangeSq = config.NpcAggroRange * config.NpcAggroRange;
+        NavGrid navGrid = NavGrid.FromTileMap(zone.Map);
+        DeterministicAStar pathfinder = new();
+        TileCoord[] pathBuffer = new TileCoord[Math.Max(16, zone.Map.Width * zone.Map.Height)];
 
         foreach (EntityState entity in ordered)
         {
@@ -438,32 +441,112 @@ public static class Simulation
             }
 
             EntityState npc = entity;
-            sbyte moveX = npc.WanderX;
-            sbyte moveY = npc.WanderY;
-
-            if (tick >= npc.NextWanderChangeTick)
-            {
-                SimRng wanderRng = CreateNpcTickRng(config.Seed, zone.Id, npc.Id, tick);
-                moveX = (sbyte)wanderRng.NextInt(-1, 2);
-                moveY = (sbyte)wanderRng.NextInt(-1, 2);
-                npc = npc with
-                {
-                    WanderX = moveX,
-                    WanderY = moveY,
-                    NextWanderChangeTick = tick + config.NpcWanderPeriodTicks
-                };
-            }
-
             (EntityState? target, ThreatComponent sanitizedThreat, Fix32 targetDistSq) = SelectNpcTarget(ordered, orderedIds, npc, aggroRangeSq);
             npc = npc with { Threat = sanitizedThreat };
 
+            MoveIntentComponent moveIntent = npc.MoveIntent;
+            if (moveIntent.RepathEveryTicks <= 0)
+            {
+                moveIntent = moveIntent with { RepathEveryTicks = 10 };
+            }
+
+            bool targetChanged = false;
+
             if (target is not null)
             {
-                Fix32 dx = target.Pos.X - npc.Pos.X;
-                Fix32 dy = target.Pos.Y - npc.Pos.Y;
-                moveX = SignToSByte(dx);
-                moveY = SignToSByte(dy);
+                targetChanged = moveIntent.Type != MoveIntentType.ChaseEntity
+                    || moveIntent.TargetEntityId.Value != target.Id.Value;
 
+                moveIntent = moveIntent with
+                {
+                    Type = MoveIntentType.ChaseEntity,
+                    TargetEntityId = target.Id
+                };
+
+                if (targetChanged)
+                {
+                    moveIntent = moveIntent with
+                    {
+                        NextRepathTick = tick,
+                        Path = ImmutableArray<TileCoord>.Empty,
+                        PathLen = 0,
+                        PathIndex = 0
+                    };
+                }
+            }
+            else
+            {
+                moveIntent = moveIntent with
+                {
+                    Type = MoveIntentType.Hold,
+                    TargetEntityId = default,
+                    Path = ImmutableArray<TileCoord>.Empty,
+                    PathLen = 0,
+                    PathIndex = 0
+                };
+            }
+
+            if (moveIntent.Type == MoveIntentType.ChaseEntity && tick >= moveIntent.NextRepathTick)
+            {
+                if (TryResolveGoalTile(moveIntent, ordered, orderedIds, out TileCoord goalTile))
+                {
+                    TileCoord startTile = PositionToTile(npc.Pos);
+                    if (pathfinder.TryFindPath(navGrid, startTile, goalTile, pathBuffer, out int pathLen, maxExpandedNodes: pathBuffer.Length))
+                    {
+                        moveIntent = moveIntent with
+                        {
+                            Path = pathBuffer[..pathLen].ToImmutableArray(),
+                            PathLen = pathLen,
+                            PathIndex = pathLen > 1 ? 1 : 0,
+                            NextRepathTick = tick + moveIntent.RepathEveryTicks
+                        };
+                    }
+                    else
+                    {
+                        moveIntent = moveIntent with
+                        {
+                            Type = MoveIntentType.Hold,
+                            Path = ImmutableArray<TileCoord>.Empty,
+                            PathLen = 0,
+                            PathIndex = 0,
+                            NextRepathTick = tick + moveIntent.RepathEveryTicks
+                        };
+                    }
+                }
+            }
+
+            sbyte moveX = 0;
+            sbyte moveY = 0;
+
+            if (moveIntent.Type != MoveIntentType.Hold && moveIntent.PathLen > 0 && moveIntent.PathIndex < moveIntent.PathLen)
+            {
+                NavAgentComponent navAgent = npc.NavAgent.Equals(default(NavAgentComponent))
+                    ? NavAgentComponent.Default
+                    : npc.NavAgent;
+
+                while (moveIntent.PathIndex < moveIntent.PathLen)
+                {
+                    Vec2Fix waypoint = TileToWorldCenter(moveIntent.Path[moveIntent.PathIndex]);
+                    Fix32 dxWaypoint = waypoint.X - npc.Pos.X;
+                    Fix32 dyWaypoint = waypoint.Y - npc.Pos.Y;
+                    if ((dxWaypoint * dxWaypoint) + (dyWaypoint * dyWaypoint) > (navAgent.ArrivalEpsilon * navAgent.ArrivalEpsilon))
+                    {
+                        break;
+                    }
+
+                    moveIntent = moveIntent with { PathIndex = moveIntent.PathIndex + 1 };
+                }
+
+                if (moveIntent.PathIndex < moveIntent.PathLen)
+                {
+                    Vec2Fix waypoint = TileToWorldCenter(moveIntent.Path[moveIntent.PathIndex]);
+                    moveX = SignToSByte(waypoint.X - npc.Pos.X);
+                    moveY = SignToSByte(waypoint.Y - npc.Pos.Y);
+                }
+            }
+
+            if (target is not null)
+            {
                 Fix32 attackRangeSq = npc.AttackRange * npc.AttackRange;
                 bool canAttack = tick - npc.LastAttackTick >= npc.AttackCooldownTicks;
                 if (canAttack && targetDistSq <= attackRangeSq)
@@ -476,7 +559,13 @@ public static class Simulation
                 }
             }
 
-            npc = npc with { WanderX = moveX, WanderY = moveY };
+            npc = npc with
+            {
+                WanderX = moveX,
+                WanderY = moveY,
+                MoveIntent = moveIntent,
+                NavAgent = npc.NavAgent.Equals(default(NavAgentComponent)) ? NavAgentComponent.Default : npc.NavAgent
+            };
             postAiEntities.Add(npc);
 
             npcCommands.Add(new WorldCommand(
@@ -503,6 +592,39 @@ public static class Simulation
         }
 
         return updatedZone;
+    }
+
+    private static bool TryResolveGoalTile(MoveIntentComponent moveIntent, ImmutableArray<EntityState> ordered, ImmutableArray<EntityId> orderedIds, out TileCoord goalTile)
+    {
+        goalTile = default;
+        if (moveIntent.Type == MoveIntentType.ChaseEntity)
+        {
+            int targetIndex = ZoneEntities.FindIndex(orderedIds, moveIntent.TargetEntityId);
+            if (targetIndex < 0)
+            {
+                return false;
+            }
+
+            goalTile = PositionToTile(ordered[targetIndex].Pos);
+            return true;
+        }
+
+        if (moveIntent.Type == MoveIntentType.GoToPoint)
+        {
+            goalTile = PositionToTile(new Vec2Fix(moveIntent.TargetX, moveIntent.TargetY));
+            return true;
+        }
+
+        return false;
+    }
+
+    private static TileCoord PositionToTile(Vec2Fix pos)
+        => new(Fix32.FloorToInt(pos.X), Fix32.FloorToInt(pos.Y));
+
+    private static Vec2Fix TileToWorldCenter(TileCoord tile)
+    {
+        Fix32 half = new(Fix32.OneRaw / 2);
+        return new Vec2Fix(Fix32.FromInt(tile.X) + half, Fix32.FromInt(tile.Y) + half);
     }
 
     private static (EntityState? Target, ThreatComponent Threat, Fix32 DistSq) SelectNpcTarget(ImmutableArray<EntityState> ordered, ImmutableArray<EntityId> orderedIds, EntityState npc, Fix32 aggroRangeSq)

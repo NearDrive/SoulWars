@@ -163,7 +163,15 @@ public sealed class ServerHostIntegrationTests
     {
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
         await using ServerRuntime runtime = new();
-        await runtime.StartAsync(ServerConfig.Default(seed: 123) with { SnapshotEveryTicks = 1 }, IPAddress.Loopback, 0, cts.Token);
+        await runtime.StartAsync(
+            ServerConfig.Default(seed: 123) with
+            {
+                SnapshotEveryTicks = 1,
+                NpcCountPerZone = 0
+            },
+            IPAddress.Loopback,
+            0,
+            cts.Token);
 
         await using HeadlessClient client = new();
         await client.ConnectAsync("127.0.0.1", runtime.BoundPort, cts.Token);

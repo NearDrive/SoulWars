@@ -194,6 +194,8 @@ public readonly record struct ComponentMask(uint Bits)
     public const uint CombatBit = 1u << 2;
     public const uint AiBit = 1u << 3;
     public const uint ThreatBit = 1u << 4;
+    public const uint MoveIntentBit = 1u << 5;
+    public const uint NavAgentBit = 1u << 6;
 
     public bool Has(uint bit) => (Bits & bit) != 0;
 }
@@ -202,6 +204,42 @@ public readonly record struct PositionComponent(Vec2Fix Pos, Vec2Fix Vel);
 public readonly record struct HealthComponent(int MaxHp, int Hp, bool IsAlive);
 public readonly record struct CombatComponent(Fix32 Range, int Damage, int Defense, int MagicResist, int CooldownTicks, int LastAttackTick);
 public readonly record struct AiComponent(int NextWanderChangeTick, sbyte WanderX, sbyte WanderY);
+
+public enum MoveIntentType : byte
+{
+    None = 0,
+    Hold = 1,
+    ChaseEntity = 2,
+    GoToPoint = 3
+}
+
+public readonly record struct MoveIntentComponent(
+    MoveIntentType Type,
+    EntityId TargetEntityId,
+    Fix32 TargetX,
+    Fix32 TargetY,
+    int RepathEveryTicks,
+    int NextRepathTick,
+    ImmutableArray<TileCoord> Path,
+    int PathLen,
+    int PathIndex)
+{
+    public static MoveIntentComponent Default => new(
+        Type: MoveIntentType.None,
+        TargetEntityId: default,
+        TargetX: Fix32.Zero,
+        TargetY: Fix32.Zero,
+        RepathEveryTicks: 10,
+        NextRepathTick: 0,
+        Path: ImmutableArray<TileCoord>.Empty,
+        PathLen: 0,
+        PathIndex: 0);
+}
+
+public readonly record struct NavAgentComponent(Fix32 ArrivalEpsilon)
+{
+    public static NavAgentComponent Default => new(new Fix32(Fix32.OneRaw / 8));
+}
 
 public sealed record EntityState(
     EntityId Id,
@@ -218,6 +256,8 @@ public sealed record EntityState(
     int NextWanderChangeTick = 0,
     sbyte WanderX = 0,
     sbyte WanderY = 0,
+    MoveIntentComponent MoveIntent = default,
+    NavAgentComponent NavAgent = default,
     DefenseStatsComponent DefenseStats = default,
     StatusEffectsComponent StatusEffects = default,
     SkillCooldownsComponent SkillCooldowns = default,
@@ -231,6 +271,8 @@ public sealed record ZoneEntities(
     ImmutableArray<HealthComponent> Health,
     ImmutableArray<CombatComponent> Combat,
     ImmutableArray<AiComponent> Ai,
+    ImmutableArray<MoveIntentComponent> MoveIntents,
+    ImmutableArray<NavAgentComponent> NavAgents,
     ImmutableArray<StatusEffectsComponent> StatusEffects = default,
     ImmutableArray<SkillCooldownsComponent> SkillCooldowns = default,
     ImmutableArray<ThreatComponent> Threat = default)
@@ -243,6 +285,8 @@ public sealed record ZoneEntities(
         ImmutableArray<HealthComponent>.Empty,
         ImmutableArray<CombatComponent>.Empty,
         ImmutableArray<AiComponent>.Empty,
+        ImmutableArray<MoveIntentComponent>.Empty,
+        ImmutableArray<NavAgentComponent>.Empty,
         ImmutableArray<StatusEffectsComponent>.Empty,
         ImmutableArray<SkillCooldownsComponent>.Empty,
         ImmutableArray<ThreatComponent>.Empty);
@@ -285,6 +329,8 @@ public sealed record ZoneEntities(
             HealthComponent health = Health[i];
             CombatComponent combat = Combat[i];
             AiComponent ai = Ai[i];
+            MoveIntentComponent moveIntent = MoveIntents[i];
+            NavAgentComponent navAgent = NavAgents[i];
             int statusCount = StatusEffects.IsDefault ? 0 : StatusEffects.Length;
             StatusEffectsComponent status = i < statusCount ? StatusEffects[i] : StatusEffectsComponent.Empty;
             int skillCooldownCount = SkillCooldowns.IsDefault ? 0 : SkillCooldowns.Length;
@@ -307,6 +353,8 @@ public sealed record ZoneEntities(
                 NextWanderChangeTick: ai.NextWanderChangeTick,
                 WanderX: ai.WanderX,
                 WanderY: ai.WanderY,
+                MoveIntent: moveIntent,
+                NavAgent: navAgent,
                 StatusEffects: status,
                 SkillCooldowns: skillCooldowns,
                 Threat: threat));
@@ -328,6 +376,8 @@ public sealed record ZoneEntities(
         ImmutableArray<HealthComponent>.Builder health = ImmutableArray.CreateBuilder<HealthComponent>(ordered.Length);
         ImmutableArray<CombatComponent>.Builder combat = ImmutableArray.CreateBuilder<CombatComponent>(ordered.Length);
         ImmutableArray<AiComponent>.Builder ai = ImmutableArray.CreateBuilder<AiComponent>(ordered.Length);
+        ImmutableArray<MoveIntentComponent>.Builder moveIntents = ImmutableArray.CreateBuilder<MoveIntentComponent>(ordered.Length);
+        ImmutableArray<NavAgentComponent>.Builder navAgents = ImmutableArray.CreateBuilder<NavAgentComponent>(ordered.Length);
         ImmutableArray<StatusEffectsComponent>.Builder statusEffects = ImmutableArray.CreateBuilder<StatusEffectsComponent>(ordered.Length);
         ImmutableArray<SkillCooldownsComponent>.Builder skillCooldowns = ImmutableArray.CreateBuilder<SkillCooldownsComponent>(ordered.Length);
         ImmutableArray<ThreatComponent>.Builder threat = ImmutableArray.CreateBuilder<ThreatComponent>(ordered.Length);
@@ -341,6 +391,8 @@ public sealed record ZoneEntities(
             {
                 bits |= ComponentMask.AiBit;
                 bits |= ComponentMask.ThreatBit;
+                bits |= ComponentMask.MoveIntentBit;
+                bits |= ComponentMask.NavAgentBit;
             }
 
             ids.Add(entity.Id);
@@ -352,6 +404,12 @@ public sealed record ZoneEntities(
             ai.Add(entity.Kind == EntityKind.Npc
                 ? new AiComponent(entity.NextWanderChangeTick, entity.WanderX, entity.WanderY)
                 : default);
+            moveIntents.Add(entity.Kind == EntityKind.Npc
+                ? entity.MoveIntent
+                : MoveIntentComponent.Default);
+            navAgents.Add(entity.Kind == EntityKind.Npc
+                ? entity.NavAgent
+                : NavAgentComponent.Default);
             statusEffects.Add(entity.StatusEffects);
             skillCooldowns.Add(entity.SkillCooldowns);
             threat.Add(entity.Threat);
@@ -365,6 +423,8 @@ public sealed record ZoneEntities(
             health.MoveToImmutable(),
             combat.MoveToImmutable(),
             ai.MoveToImmutable(),
+            moveIntents.MoveToImmutable(),
+            navAgents.MoveToImmutable(),
             statusEffects.MoveToImmutable(),
             skillCooldowns.MoveToImmutable(),
             threat.MoveToImmutable());

@@ -41,7 +41,9 @@ public static class CoreInvariants
                 || zone.EntitiesData.AliveIds.Length != zone.EntitiesData.Positions.Length
                 || zone.EntitiesData.AliveIds.Length != zone.EntitiesData.Health.Length
                 || zone.EntitiesData.AliveIds.Length != zone.EntitiesData.Combat.Length
-                || zone.EntitiesData.AliveIds.Length != zone.EntitiesData.Ai.Length)
+                || zone.EntitiesData.AliveIds.Length != zone.EntitiesData.Ai.Length
+                || zone.EntitiesData.AliveIds.Length != zone.EntitiesData.MoveIntents.Length
+                || zone.EntitiesData.AliveIds.Length != zone.EntitiesData.NavAgents.Length)
             {
                 throw new InvariantViolationException($"invariant=ParallelArraysLength tick={tick} zoneId={zone.Id.Value}");
             }
@@ -69,6 +71,18 @@ public static class CoreInvariants
                 if (expectsAi != hasAi)
                 {
                     throw new InvariantViolationException($"invariant=AiMaskMatchesKind tick={tick} zoneId={zone.Id.Value} entityId={id} kind={zone.EntitiesData.Kinds[i]} hasAi={hasAi}");
+                }
+
+                bool hasMoveIntent = mask.Has(ComponentMask.MoveIntentBit);
+                if (expectsAi != hasMoveIntent)
+                {
+                    throw new InvariantViolationException($"invariant=MoveIntentMaskMatchesKind tick={tick} zoneId={zone.Id.Value} entityId={id} kind={zone.EntitiesData.Kinds[i]} hasMoveIntent={hasMoveIntent}");
+                }
+
+                bool hasNavAgent = mask.Has(ComponentMask.NavAgentBit);
+                if (expectsAi != hasNavAgent)
+                {
+                    throw new InvariantViolationException($"invariant=NavAgentMaskMatchesKind tick={tick} zoneId={zone.Id.Value} entityId={id} kind={zone.EntitiesData.Kinds[i]} hasNavAgent={hasNavAgent}");
                 }
 
                 if (mask.Has(ComponentMask.CombatBit) && !mask.Has(ComponentMask.PositionBit))
