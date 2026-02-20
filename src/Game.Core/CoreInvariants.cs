@@ -275,6 +275,40 @@ public static class CoreInvariants
             }
         }
 
+        PartyInviteRegistry inviteRegistry = world.PartyInviteRegistryOrEmpty.Canonicalize();
+        int lastInviteeId = int.MinValue;
+        HashSet<int> inviteeSet = new();
+        foreach (PartyInvite invite in inviteRegistry.Invites)
+        {
+            if (invite.InviteeId.Value <= lastInviteeId)
+            {
+                throw new InvariantViolationException($"invariant=PartyInvitesOrdered tick={tick} inviteeId={invite.InviteeId.Value} lastInviteeId={lastInviteeId}");
+            }
+
+            if (!inviteeSet.Add(invite.InviteeId.Value))
+            {
+                throw new InvariantViolationException($"invariant=PartyInviteUniqueByInvitee tick={tick} inviteeId={invite.InviteeId.Value}");
+            }
+
+            if (partyMembers.Contains(invite.InviteeId.Value))
+            {
+                throw new InvariantViolationException($"invariant=PartyInviteeNotAlreadyMember tick={tick} inviteeId={invite.InviteeId.Value}");
+            }
+
+            if (!partyRegistry.Parties.Any(p => p.Id.Value == invite.PartyId.Value))
+            {
+                throw new InvariantViolationException($"invariant=PartyInviteReferencesExistingParty tick={tick} inviteeId={invite.InviteeId.Value} partyId={invite.PartyId.Value}");
+            }
+
+            if (invite.CreatedTick > tick)
+            {
+                throw new InvariantViolationException($"invariant=PartyInviteCreatedTickValid tick={tick} createdTick={invite.CreatedTick}");
+            }
+
+            lastInviteeId = invite.InviteeId.Value;
+        }
+
+
 
         ImmutableArray<CombatEvent> combatEvents = world.CombatEvents.IsDefault ? ImmutableArray<CombatEvent>.Empty : world.CombatEvents;
         if (world.CombatEventsDropped_LastTick > 0 && !CombatEventBudgets.IsCanonicalOrder(combatEvents))

@@ -269,6 +269,21 @@ public static class StateChecksum
 
         PartyRegistry partyRegistry = state.PartyRegistryOrEmpty.Canonicalize();
         bool hasPartyMetadata = partyRegistry.NextPartySequence != 1 || !partyRegistry.Parties.IsDefaultOrEmpty;
+
+        PartyInviteRegistry inviteRegistry = state.PartyInviteRegistryOrEmpty.Canonicalize();
+        bool hasInviteMetadata = !inviteRegistry.Invites.IsDefaultOrEmpty;
+        if (hasInviteMetadata)
+        {
+            writer.Write(unchecked((int)0x50495654)); // "PIVT"
+            writer.Write(inviteRegistry.Invites.Length);
+            foreach (PartyInvite invite in inviteRegistry.Invites)
+            {
+                writer.Write(invite.InviteeId.Value);
+                writer.Write(invite.PartyId.Value);
+                writer.Write(invite.InviterId.Value);
+                writer.Write(invite.CreatedTick);
+            }
+        }
         if (hasPartyMetadata)
         {
             writer.Write(unchecked((int)0x50525459)); // "PRTY"

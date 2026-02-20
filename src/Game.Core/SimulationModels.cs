@@ -458,6 +458,7 @@ public sealed record WorldState(
     ImmutableArray<ZoneState> Zones,
     ImmutableArray<EntityLocation> EntityLocations,
     PartyRegistry? PartyRegistry = null,
+    PartyInviteRegistry? PartyInviteRegistry = null,
     ImmutableArray<LootEntityState> LootEntities = default,
     ImmutableArray<PlayerInventoryState> PlayerInventories = default,
     ImmutableArray<PlayerDeathAuditEntry> PlayerDeathAuditLog = default,
@@ -477,6 +478,7 @@ public sealed record WorldState(
     uint ProjectileSpawnsDropped_LastTick = 0)
 {
     public PartyRegistry PartyRegistryOrEmpty => PartyRegistry ?? Game.Core.PartyRegistry.Empty;
+    public PartyInviteRegistry PartyInviteRegistryOrEmpty => PartyInviteRegistry ?? Game.Core.PartyInviteRegistry.Empty;
 
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
@@ -753,7 +755,10 @@ public enum WorldCommandKind : byte
     LootIntent = 6,
     VendorBuyIntent = 7,
     VendorSellIntent = 8,
-    CastSkill = 9
+    CastSkill = 9,
+    InviteToParty = 10,
+    AcceptPartyInvite = 11,
+    LeaveParty = 12
 }
 
 public sealed record WorldCommand(
@@ -772,7 +777,10 @@ public sealed record WorldCommand(
     EntityId? LootEntityId = null,
     string VendorId = "",
     string ItemId = "",
-    int Quantity = 0);
+    int Quantity = 0,
+    EntityId? InviteePlayerId = null,
+    EntityId? InviterPlayerId = null,
+    PartyId? PartyId = null);
 
 public sealed record Inputs(ImmutableArray<WorldCommand> Commands);
 public sealed record PlayerInput(EntityId EntityId, sbyte MoveX, sbyte MoveY);

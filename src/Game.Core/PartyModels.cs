@@ -6,6 +6,32 @@ public readonly record struct PartyId(int Value);
 
 public readonly record struct PartyMember(EntityId EntityId);
 
+public readonly record struct PartyInvite(
+    EntityId InviteeId,
+    PartyId PartyId,
+    EntityId InviterId,
+    int CreatedTick);
+
+public sealed record PartyInviteRegistry(ImmutableArray<PartyInvite> Invites)
+{
+    public static PartyInviteRegistry Empty => new(ImmutableArray<PartyInvite>.Empty);
+
+    public PartyInviteRegistry Canonicalize()
+    {
+        ImmutableArray<PartyInvite> canonical = (Invites.IsDefault ? ImmutableArray<PartyInvite>.Empty : Invites)
+            .GroupBy(i => i.InviteeId.Value)
+            .Select(g => g
+                .OrderBy(i => i.CreatedTick)
+                .ThenBy(i => i.PartyId.Value)
+                .ThenBy(i => i.InviterId.Value)
+                .First())
+            .OrderBy(i => i.InviteeId.Value)
+            .ToImmutableArray();
+
+        return this with { Invites = canonical };
+    }
+}
+
 public sealed record PartyState(
     PartyId Id,
     EntityId LeaderId,

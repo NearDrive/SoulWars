@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Game.Core;
 using Game.Persistence;
 using Xunit;
@@ -12,7 +13,11 @@ public sealed class PartySnapshotRoundtripTests
     {
         SimulationConfig config = CreateConfig(seed: 88);
         WorldState world = Simulation.CreateInitialState(config);
-        world = world with { PartyRegistry = world.PartyRegistryOrEmpty.CreateParty(new EntityId(42)) };
+        world = world with
+        {
+            PartyRegistry = world.PartyRegistryOrEmpty.CreateParty(new EntityId(42)),
+            PartyInviteRegistry = new PartyInviteRegistry(ImmutableArray.Create(new PartyInvite(new EntityId(77), new PartyId(1), new EntityId(42), world.Tick))).Canonicalize()
+        };
 
         string beforeChecksum = StateChecksum.Compute(world);
         byte[] snapshot = WorldStateSerializer.SaveToBytes(world);
@@ -26,6 +31,7 @@ public sealed class PartySnapshotRoundtripTests
         PartyRegistry afterRegistry = reloaded.PartyRegistryOrEmpty.Canonicalize();
         Assert.Equal(beforeRegistry.NextPartySequence, afterRegistry.NextPartySequence);
         Assert.Equal(beforeRegistry.Parties, afterRegistry.Parties);
+        Assert.Equal(world.PartyInviteRegistryOrEmpty.Canonicalize(), reloaded.PartyInviteRegistryOrEmpty.Canonicalize());
     }
 
     private static SimulationConfig CreateConfig(int seed) => new(
