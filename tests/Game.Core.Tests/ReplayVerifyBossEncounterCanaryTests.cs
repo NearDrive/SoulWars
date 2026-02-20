@@ -138,8 +138,8 @@ internal static class BossEncounterCanaryScenario
                     new EncounterTriggerDefinition(EncounterTriggerKind.OnTick, AtTickOffset: 180, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.CastSkill, Caster: EntityRef.Boss, SkillId: new SkillId(10), Target: TargetSpec.Self))),
                     new EncounterTriggerDefinition(EncounterTriggerKind.OnHpBelowPct, Target: EntityRef.Boss, Pct: 30, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.SetPhase, PhaseIndex: 2))))),
                 new EncounterPhaseDefinition(ImmutableArray.Create(
-                    new EncounterTriggerDefinition(EncounterTriggerKind.OnTick, AtTickOffset: 240, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.ApplyStatus, StatusSource: EntityRef.Boss, StatusTarget: EntityRef.Boss, StatusType: StatusEffectType.Slow, StatusDurationTicks: 60, StatusMagnitudeRaw: Fix32.Half.Raw))),
-                    new EncounterTriggerDefinition(EncounterTriggerKind.OnTick, AtTickOffset: 270, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.CastSkill, Caster: EntityRef.Boss, SkillId: new SkillId(11), Target: TargetSpec.HighestThreatPlayer)))))));
+                    new EncounterTriggerDefinition(EncounterTriggerKind.OnTick, AtTickOffset: 240, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.ApplyStatus, StatusSource: EntityRef.Boss, StatusTarget: EntityRef.Boss, StatusType: StatusEffectType.Slow, StatusDurationTicks: 60, StatusMagnitudeRaw: new Fix32(Fix32.OneRaw / 2).Raw))),
+                    new EncounterTriggerDefinition(EncounterTriggerKind.OnTick, AtTickOffset: 270, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.CastSkill, Caster: EntityRef.Boss, SkillId: new SkillId(11), Target: TargetSpec.Entity(EntityRef.FromEntityId(TankId)))))))));
 
         ZoneDefinition zone = new(
             ZoneId,
@@ -171,8 +171,8 @@ internal static class BossEncounterCanaryScenario
             new WorldCommand(WorldCommandKind.InviteToParty, TankId, ZoneId, InviteePlayerId: SupportId))));
 
         ImmutableArray<PartyInvite> invites = state.PartyInviteRegistryOrEmpty.Invites;
-        PartyInvite dpsInvite = invites.Single(i => i.InviteePlayerId == DpsId);
-        PartyInvite supportInvite = invites.Single(i => i.InviteePlayerId == SupportId);
+        PartyInvite dpsInvite = invites.Single(i => i.InviteeId == DpsId);
+        PartyInvite supportInvite = invites.Single(i => i.InviteeId == SupportId);
 
         state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
             new WorldCommand(WorldCommandKind.AcceptPartyInvite, DpsId, ZoneId, PartyId: dpsInvite.PartyId),
@@ -216,17 +216,19 @@ internal static class BossEncounterCanaryScenario
             return false;
         }
 
-        EntityState? boss = zone.Entities
-            .Where(e => e.Kind == EntityKind.Npc)
-            .OrderBy(e => e.Id.Value)
-            .FirstOrDefault();
-
-        if (boss is null)
+        ImmutableArray<EncounterRuntimeState> runtimes = state.EncounterRegistryOrEmpty.RuntimeStates;
+        if (runtimes.IsDefaultOrEmpty)
         {
             return false;
         }
 
-        bossId = boss.Id;
+        EncounterRuntimeState runtime = runtimes[0];
+        if (runtime.BossEntityId.Value <= 0)
+        {
+            return false;
+        }
+
+        bossId = runtime.BossEntityId;
         return true;
     }
 
@@ -237,11 +239,12 @@ internal static class BossEncounterCanaryScenario
             return 0;
         }
 
-        EntityState? boss = zone.Entities
-            .Where(e => e.Kind == EntityKind.Npc)
-            .OrderBy(e => e.Id.Value)
-            .FirstOrDefault();
+        if (!TryGetBossId(state, out EntityId bossId))
+        {
+            return 0;
+        }
 
-        return boss?.WanderX ?? 0;
+        int index = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, bossId);
+        return index < 0 ? 0 : zone.Entities[index].WanderX;
     }
 }
