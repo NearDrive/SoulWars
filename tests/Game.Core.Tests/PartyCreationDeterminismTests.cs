@@ -16,7 +16,7 @@ public sealed class PartyCreationDeterminismTests
 
         Assert.Equal(partyA.Id, partyB.Id);
         Assert.Equal(partyA.LeaderId, partyB.LeaderId);
-        Assert.Equal(partyA.Members, partyB.Members);
+        Assert.True(partyA.Members.SequenceEqual(partyB.Members));
         Assert.Equal(checksumA, checksumB);
     }
 
