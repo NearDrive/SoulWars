@@ -36,7 +36,7 @@ public sealed class InstanceCreationDeterminismTests
         WorldState loaded = WorldStateSerializer.LoadFromBytes(snapshot);
 
         Assert.Equal(world.InstanceRegistryOrEmpty.NextInstanceOrdinal, loaded.InstanceRegistryOrEmpty.NextInstanceOrdinal);
-        Assert.Equal(world.InstanceRegistryOrEmpty.Instances, loaded.InstanceRegistryOrEmpty.Instances);
+        Assert.True(world.InstanceRegistryOrEmpty.Instances.SequenceEqual(loaded.InstanceRegistryOrEmpty.Instances));
 
         (InstanceRegistry nextRegistryA, ZoneInstanceState nextA) = world.InstanceRegistryOrEmpty.CreateInstance(config.Seed, new PartyId(11), new ZoneId(1), creationTick: world.Tick);
         (InstanceRegistry nextRegistryB, ZoneInstanceState nextB) = loaded.InstanceRegistryOrEmpty.CreateInstance(config.Seed, new PartyId(11), new ZoneId(1), creationTick: loaded.Tick);
