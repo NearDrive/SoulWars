@@ -543,7 +543,13 @@ public static class Simulation
                 }
             }
 
-            npc = npc with { MoveIntent = moveIntent, NavAgent = npc.NavAgent.Equals(default(NavAgentComponent)) ? NavAgentComponent.Default : npc.NavAgent };
+            npc = npc with
+            {
+                WanderX = moveX,
+                WanderY = moveY,
+                MoveIntent = moveIntent,
+                NavAgent = npc.NavAgent.Equals(default(NavAgentComponent)) ? NavAgentComponent.Default : npc.NavAgent
+            };
             postAiEntities.Add(npc);
 
             npcCommands.Add(new WorldCommand(
