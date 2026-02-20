@@ -50,6 +50,7 @@ public static class Simulation
             Zones: initialZones,
             EntityLocations: BuildEntityLocations(initialZones),
             PartyRegistry: PartyRegistry.Empty,
+            PartyInviteRegistry: PartyInviteRegistry.Empty,
             LootEntities: ImmutableArray<LootEntityState>.Empty,
             PlayerInventories: ImmutableArray<PlayerInventoryState>.Empty,
             PlayerWallets: ImmutableArray<PlayerWalletState>.Empty,
@@ -88,6 +89,7 @@ public static class Simulation
             Zones: zones,
             EntityLocations: BuildEntityLocations(zones),
             PartyRegistry: PartyRegistry.Empty,
+            PartyInviteRegistry: PartyInviteRegistry.Empty,
             LootEntities: ImmutableArray<LootEntityState>.Empty,
             PlayerInventories: ImmutableArray<PlayerInventoryState>.Empty,
             PlayerWallets: ImmutableArray<PlayerWalletState>.Empty,
@@ -166,6 +168,9 @@ public static class Simulation
 
             QueueTeleportIntent(config, updated, command, pendingTransfers, projectedTeleportZones, instrumentation);
         }
+
+
+        updated = ProcessPartyCommands(updated, commands);
 
         foreach ((ZoneId zoneId, ImmutableArray<(WorldCommand Command, int CommandIndex)> zoneCommands) in orderedCommands
                      .Where(x => x.Command.Kind is WorldCommandKind.EnterZone or WorldCommandKind.MoveIntent or WorldCommandKind.AttackIntent or WorldCommandKind.CastSkill or WorldCommandKind.LeaveZone or WorldCommandKind.LootIntent)
@@ -1421,6 +1426,151 @@ public static class Simulation
             .ToImmutableArray();
     }
 
+    private static WorldState ProcessPartyCommands(WorldState state, ImmutableArray<WorldCommand> commands)
+    {
+        PartyRegistry registry = state.PartyRegistryOrEmpty.Canonicalize();
+        PartyInviteRegistry inviteRegistry = state.PartyInviteRegistryOrEmpty.Canonicalize();
+        int createdTick = state.Tick;
+
+        ImmutableArray<WorldCommand> ordered = commands
+            .Where(c => c.Kind is WorldCommandKind.InviteToParty or WorldCommandKind.AcceptPartyInvite or WorldCommandKind.LeaveParty)
+            .OrderBy(c => c.EntityId.Value)
+            .ThenBy(c => (int)c.Kind)
+            .ThenBy(c => c.InviteePlayerId?.Value ?? int.MinValue)
+            .ThenBy(c => c.PartyId?.Value ?? int.MinValue)
+            .ToImmutableArray();
+
+        foreach (WorldCommand command in ordered)
+        {
+            if (!IsValidCommand(command))
+            {
+                continue;
+            }
+
+            if (command.Kind is WorldCommandKind.InviteToParty)
+            {
+                EntityId inviterId = command.EntityId;
+                EntityId inviteeId = command.InviteePlayerId!.Value;
+                if (inviterId.Value == inviteeId.Value)
+                {
+                    continue;
+                }
+
+                PartyState? inviterParty = registry.Parties.FirstOrDefault(p => p.LeaderId.Value == inviterId.Value || p.Members.Any(m => m.EntityId.Value == inviterId.Value));
+                if (inviterParty is null)
+                {
+                    continue;
+                }
+
+                if (inviterParty.LeaderId.Value != inviterId.Value)
+                {
+                    continue;
+                }
+
+                if (registry.IsMember(inviteeId))
+                {
+                    continue;
+                }
+
+                if (!state.EntityLocations.Any(l => l.Id.Value == inviterId.Value) || !state.EntityLocations.Any(l => l.Id.Value == inviteeId.Value))
+                {
+                    continue;
+                }
+
+                PartyInvite invite = new(inviteeId, inviterParty.Id, inviterId, createdTick);
+                ImmutableArray<PartyInvite> invites = (inviteRegistry.Invites.IsDefault ? ImmutableArray<PartyInvite>.Empty : inviteRegistry.Invites)
+                    .Where(i => i.InviteeId.Value != inviteeId.Value)
+                    .Append(invite)
+                    .ToImmutableArray();
+                inviteRegistry = new PartyInviteRegistry(invites).Canonicalize();
+                continue;
+            }
+
+            if (command.Kind is WorldCommandKind.AcceptPartyInvite)
+            {
+                EntityId inviteeId = command.EntityId;
+                PartyId requestedPartyId = command.PartyId!.Value;
+                int inviteIndex = FindIndex(inviteRegistry.Invites, i => i.InviteeId.Value == inviteeId.Value);
+                if (inviteIndex < 0)
+                {
+                    continue;
+                }
+
+                PartyInvite invite = inviteRegistry.Invites[inviteIndex];
+                if (invite.PartyId.Value != requestedPartyId.Value)
+                {
+                    continue;
+                }
+
+                if (registry.IsMember(inviteeId))
+                {
+                    continue;
+                }
+
+                int partyIndex = FindIndex(registry.Parties, p => p.Id.Value == requestedPartyId.Value);
+                if (partyIndex < 0)
+                {
+                    continue;
+                }
+
+                PartyState party = registry.Parties[partyIndex];
+                if (!party.Members.Any(m => m.EntityId.Value == invite.InviterId.Value))
+                {
+                    continue;
+                }
+
+                PartyState updatedParty = party with
+                {
+                    Members = party.Members
+                        .Add(new PartyMember(inviteeId))
+                        .OrderBy(m => m.EntityId.Value)
+                        .ToImmutableArray()
+                };
+
+                registry = registry with
+                {
+                    Parties = registry.Parties.SetItem(partyIndex, updatedParty.Canonicalize())
+                };
+
+                inviteRegistry = new PartyInviteRegistry(inviteRegistry.Invites.Where(i => i.InviteeId.Value != inviteeId.Value).ToImmutableArray()).Canonicalize();
+                continue;
+            }
+
+            if (command.Kind is WorldCommandKind.LeaveParty)
+            {
+                EntityId playerId = command.EntityId;
+                int partyIndex = FindIndex(registry.Parties, p => p.Members.Any(m => m.EntityId.Value == playerId.Value));
+                if (partyIndex < 0)
+                {
+                    continue;
+                }
+
+                PartyState party = registry.Parties[partyIndex];
+                ImmutableArray<PartyMember> remaining = party.Members.Where(m => m.EntityId.Value != playerId.Value).OrderBy(m => m.EntityId.Value).ToImmutableArray();
+                if (remaining.IsDefaultOrEmpty)
+                {
+                    registry = registry with { Parties = registry.Parties.RemoveAt(partyIndex) };
+                }
+                else
+                {
+                    EntityId newLeader = remaining.MinBy(m => m.EntityId.Value).EntityId;
+                    PartyState updatedParty = party with { Members = remaining, LeaderId = newLeader };
+                    registry = registry with { Parties = registry.Parties.SetItem(partyIndex, updatedParty.Canonicalize()) };
+                }
+
+                inviteRegistry = new PartyInviteRegistry((inviteRegistry.Invites.IsDefault ? ImmutableArray<PartyInvite>.Empty : inviteRegistry.Invites)
+                    .Where(i => i.InviterId.Value != playerId.Value && i.InviteeId.Value != playerId.Value)
+                    .ToImmutableArray()).Canonicalize();
+            }
+        }
+
+        return state with
+        {
+            PartyRegistry = registry.Canonicalize(),
+            PartyInviteRegistry = inviteRegistry.Canonicalize()
+        };
+    }
+
     private static (ZoneState Zone, ImmutableArray<CombatEvent> Events, ImmutableArray<StatusEvent> StatusEvents, ImmutableArray<SkillCastIntent> CastIntents) ProcessZoneCommands(SimulationConfig config, int tick, ZoneState zone, ImmutableArray<(WorldCommand Command, int CommandIndex)> zoneCommands, SimulationInstrumentation? instrumentation)
     {
         ZoneState current = zone;
@@ -1513,6 +1663,19 @@ public static class Simulation
         return (current, combatEvents.ToImmutable(), statusEvents.ToImmutable(), castIntents.ToImmutable());
     }
 
+    private static int FindIndex<T>(ImmutableArray<T> values, Func<T, bool> predicate)
+    {
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (predicate(values[i]))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     private static bool IsValidCommand(WorldCommand command)
     {
         if (command.Kind is WorldCommandKind.MoveIntent)
@@ -1557,6 +1720,16 @@ public static class Simulation
             {
                 return false;
             }
+        }
+
+        if (command.Kind is WorldCommandKind.InviteToParty && command.InviteePlayerId is null)
+        {
+            return false;
+        }
+
+        if (command.Kind is WorldCommandKind.AcceptPartyInvite && command.PartyId is null)
+        {
+            return false;
         }
 
         return true;
