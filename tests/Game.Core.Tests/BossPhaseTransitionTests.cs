@@ -49,7 +49,10 @@ public sealed class BossPhaseTransitionTests
                 ? ImmutableArray.Create(new WorldCommand(WorldCommandKind.AttackIntent, new EntityId(12), new ZoneId(1), TargetEntityId: new EntityId(100001)))
                 : ImmutableArray<WorldCommand>.Empty;
             state = Simulation.Step(config, state, new Inputs(commands));
-            trace.Add(StateChecksum.Compute(state));
+
+            EncounterRuntimeState runtime = Assert.Single(state.EncounterRegistryOrEmpty.RuntimeStates);
+            string flags = string.Concat(runtime.FiredTriggers.Select(f => f ? '1' : '0'));
+            trace.Add($"phase={runtime.CurrentPhase};flags={flags}");
         }
 
         return trace.ToImmutable();
