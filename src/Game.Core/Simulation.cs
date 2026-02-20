@@ -486,7 +486,8 @@ public static class Simulation
                 };
             }
 
-            if (moveIntent.Type == MoveIntentType.ChaseEntity && tick >= moveIntent.NextRepathTick)
+            bool needsPathing = moveIntent.Type is MoveIntentType.ChaseEntity or MoveIntentType.GoToPoint;
+            if (needsPathing && tick >= moveIntent.NextRepathTick)
             {
                 if (TryResolveGoalTile(moveIntent, ordered, orderedIds, out TileCoord goalTile))
                 {
@@ -512,6 +513,17 @@ public static class Simulation
                             NextRepathTick = tick + moveIntent.RepathEveryTicks
                         };
                     }
+                }
+                else
+                {
+                    moveIntent = moveIntent with
+                    {
+                        Type = MoveIntentType.Hold,
+                        Path = ImmutableArray<TileCoord>.Empty,
+                        PathLen = 0,
+                        PathIndex = 0,
+                        NextRepathTick = tick + moveIntent.RepathEveryTicks
+                    };
                 }
             }
 
@@ -542,6 +554,16 @@ public static class Simulation
                     Vec2Fix waypoint = TileToWorldCenter(moveIntent.Path[moveIntent.PathIndex]);
                     moveX = SignToSByte(waypoint.X - npc.Pos.X);
                     moveY = SignToSByte(waypoint.Y - npc.Pos.Y);
+                }
+                else if (moveIntent.Type == MoveIntentType.GoToPoint)
+                {
+                    moveIntent = moveIntent with
+                    {
+                        Type = MoveIntentType.Hold,
+                        Path = ImmutableArray<TileCoord>.Empty,
+                        PathLen = 0,
+                        PathIndex = 0
+                    };
                 }
             }
 
