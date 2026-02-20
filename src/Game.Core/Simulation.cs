@@ -450,13 +450,29 @@ public static class Simulation
                 moveIntent = moveIntent with { RepathEveryTicks = 10 };
             }
 
+            bool targetChanged = false;
+
             if (target is not null)
             {
+                targetChanged = moveIntent.Type != MoveIntentType.ChaseEntity
+                    || moveIntent.TargetEntityId.Value != target.Id.Value;
+
                 moveIntent = moveIntent with
                 {
                     Type = MoveIntentType.ChaseEntity,
                     TargetEntityId = target.Id
                 };
+
+                if (targetChanged)
+                {
+                    moveIntent = moveIntent with
+                    {
+                        NextRepathTick = tick,
+                        Path = ImmutableArray<TileCoord>.Empty,
+                        PathLen = 0,
+                        PathIndex = 0
+                    };
+                }
             }
             else
             {
