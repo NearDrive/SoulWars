@@ -38,7 +38,7 @@ public static class WorldStateSerializer
         EncounterRegistry EncounterRegistry);
 
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 8;
+    private const int CurrentVersion = 9;
     public static int SerializerVersion => CurrentVersion;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
@@ -137,7 +137,7 @@ public static class WorldStateSerializer
         }
 
         int version = reader.ReadInt32();
-        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or CurrentVersion))
+        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or CurrentVersion))
         {
             throw new InvalidDataException($"Unsupported world-state version '{version}'.");
         }
@@ -381,6 +381,11 @@ public static class WorldStateSerializer
         EnsureEqualLength(count, entities.Health.Length, nameof(entities.Health));
         EnsureEqualLength(count, entities.Combat.Length, nameof(entities.Combat));
         EnsureEqualLength(count, entities.Ai.Length, nameof(entities.Ai));
+        int threatCount = entities.Threat.IsDefault ? 0 : entities.Threat.Length;
+        if (threatCount != 0)
+        {
+            EnsureEqualLength(count, threatCount, nameof(entities.Threat));
+        }
 
         EnsureSortedEntityIds(entities.AliveIds);
 
@@ -431,6 +436,20 @@ public static class WorldStateSerializer
                 writer.Write(ai.WanderY);
             }
 
+            if (mask.Has(ComponentMask.ThreatBit))
+            {
+                ThreatComponent threat = threatCount == 0 ? ThreatComponent.Empty : entities.Threat[i];
+                ImmutableArray<ThreatEntry> entries = threat.OrderedEntries();
+                writer.Write(entries.Length);
+                for (int entryIndex = 0; entryIndex < entries.Length; entryIndex++)
+                {
+                    ThreatEntry entry = entries[entryIndex];
+                    writer.Write(entry.SourceEntityId.Value);
+                    writer.Write(entry.Threat);
+                    writer.Write(entry.LastTick);
+                }
+            }
+
         }
     }
 
@@ -446,6 +465,7 @@ public static class WorldStateSerializer
         ImmutableArray<HealthComponent>.Builder health = ImmutableArray.CreateBuilder<HealthComponent>(entityCount);
         ImmutableArray<CombatComponent>.Builder combat = ImmutableArray.CreateBuilder<CombatComponent>(entityCount);
         ImmutableArray<AiComponent>.Builder ai = ImmutableArray.CreateBuilder<AiComponent>(entityCount);
+        ImmutableArray<ThreatComponent>.Builder threat = ImmutableArray.CreateBuilder<ThreatComponent>(entityCount);
 
         int previousEntityId = int.MinValue;
 
@@ -472,6 +492,7 @@ public static class WorldStateSerializer
             HealthComponent entityHealth = default;
             CombatComponent entityCombat = default;
             AiComponent entityAi = default;
+            ThreatComponent entityThreat = ThreatComponent.Empty;
 
             if (mask.Has(ComponentMask.PositionBit))
             {
@@ -514,6 +535,34 @@ public static class WorldStateSerializer
                     WanderY: reader.ReadSByte());
             }
 
+            if (mask.Has(ComponentMask.ThreatBit) && snapshotVersion >= 9)
+            {
+                int entryCount = reader.ReadInt32();
+                ValidateCount(entryCount, MaxEntityCountPerZone, nameof(entryCount));
+                ImmutableArray<ThreatEntry>.Builder entries = ImmutableArray.CreateBuilder<ThreatEntry>(entryCount);
+                int previousSource = int.MinValue;
+                for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
+                {
+                    int sourceId = reader.ReadInt32();
+                    int threatValue = reader.ReadInt32();
+                    int lastTick = reader.ReadInt32();
+                    if (sourceId <= previousSource)
+                    {
+                        throw new InvalidDataException("Threat entries are not in ascending SourceEntityId order.");
+                    }
+
+                    if (threatValue < 0)
+                    {
+                        throw new InvalidDataException("Threat entry value cannot be negative.");
+                    }
+
+                    previousSource = sourceId;
+                    entries.Add(new ThreatEntry(new EntityId(sourceId), threatValue, lastTick));
+                }
+
+                entityThreat = new ThreatComponent(entries.MoveToImmutable());
+            }
+
             ids.Add(new EntityId(entityIdValue));
             masks.Add(mask);
             kinds.Add((EntityKind)kindRaw);
@@ -521,6 +570,7 @@ public static class WorldStateSerializer
             health.Add(entityHealth);
             combat.Add(entityCombat);
             ai.Add(entityAi);
+            threat.Add(entityThreat);
         }
 
         return new ZoneEntities(
@@ -530,7 +580,10 @@ public static class WorldStateSerializer
             positions.MoveToImmutable(),
             health.MoveToImmutable(),
             combat.MoveToImmutable(),
-            ai.MoveToImmutable());
+            ai.MoveToImmutable(),
+            ImmutableArray<StatusEffectsComponent>.Empty,
+            ImmutableArray<SkillCooldownsComponent>.Empty,
+            threat.MoveToImmutable());
     }
 
     private static void WriteLootEntities(BinaryWriter writer, ImmutableArray<LootEntityState> lootEntities)

@@ -193,6 +193,7 @@ public readonly record struct ComponentMask(uint Bits)
     public const uint HealthBit = 1u << 1;
     public const uint CombatBit = 1u << 2;
     public const uint AiBit = 1u << 3;
+    public const uint ThreatBit = 1u << 4;
 
     public bool Has(uint bit) => (Bits & bit) != 0;
 }
@@ -219,7 +220,8 @@ public sealed record EntityState(
     sbyte WanderY = 0,
     DefenseStatsComponent DefenseStats = default,
     StatusEffectsComponent StatusEffects = default,
-    SkillCooldownsComponent SkillCooldowns = default);
+    SkillCooldownsComponent SkillCooldowns = default,
+    ThreatComponent Threat = default);
 
 public sealed record ZoneEntities(
     ImmutableArray<EntityId> AliveIds,
@@ -230,7 +232,8 @@ public sealed record ZoneEntities(
     ImmutableArray<CombatComponent> Combat,
     ImmutableArray<AiComponent> Ai,
     ImmutableArray<StatusEffectsComponent> StatusEffects = default,
-    ImmutableArray<SkillCooldownsComponent> SkillCooldowns = default)
+    ImmutableArray<SkillCooldownsComponent> SkillCooldowns = default,
+    ImmutableArray<ThreatComponent> Threat = default)
 {
     public static ZoneEntities Empty => new(
         ImmutableArray<EntityId>.Empty,
@@ -241,7 +244,8 @@ public sealed record ZoneEntities(
         ImmutableArray<CombatComponent>.Empty,
         ImmutableArray<AiComponent>.Empty,
         ImmutableArray<StatusEffectsComponent>.Empty,
-        ImmutableArray<SkillCooldownsComponent>.Empty);
+        ImmutableArray<SkillCooldownsComponent>.Empty,
+        ImmutableArray<ThreatComponent>.Empty);
 
     public static int FindIndex(ImmutableArray<EntityId> ids, EntityId id)
     {
@@ -285,6 +289,8 @@ public sealed record ZoneEntities(
             StatusEffectsComponent status = i < statusCount ? StatusEffects[i] : StatusEffectsComponent.Empty;
             int skillCooldownCount = SkillCooldowns.IsDefault ? 0 : SkillCooldowns.Length;
             SkillCooldownsComponent skillCooldowns = i < skillCooldownCount ? SkillCooldowns[i] : SkillCooldownsComponent.Empty;
+            int threatCount = Threat.IsDefault ? 0 : Threat.Length;
+            ThreatComponent threat = i < threatCount ? Threat[i] : ThreatComponent.Empty;
             builder.Add(new EntityState(
                 Id: AliveIds[i],
                 Pos: position.Pos,
@@ -302,7 +308,8 @@ public sealed record ZoneEntities(
                 WanderX: ai.WanderX,
                 WanderY: ai.WanderY,
                 StatusEffects: status,
-                SkillCooldowns: skillCooldowns));
+                SkillCooldowns: skillCooldowns,
+                Threat: threat));
         }
 
         return builder.MoveToImmutable();
@@ -323,6 +330,7 @@ public sealed record ZoneEntities(
         ImmutableArray<AiComponent>.Builder ai = ImmutableArray.CreateBuilder<AiComponent>(ordered.Length);
         ImmutableArray<StatusEffectsComponent>.Builder statusEffects = ImmutableArray.CreateBuilder<StatusEffectsComponent>(ordered.Length);
         ImmutableArray<SkillCooldownsComponent>.Builder skillCooldowns = ImmutableArray.CreateBuilder<SkillCooldownsComponent>(ordered.Length);
+        ImmutableArray<ThreatComponent>.Builder threat = ImmutableArray.CreateBuilder<ThreatComponent>(ordered.Length);
 
         foreach (EntityState entity in ordered)
         {
@@ -332,6 +340,7 @@ public sealed record ZoneEntities(
             if (entity.Kind == EntityKind.Npc)
             {
                 bits |= ComponentMask.AiBit;
+                bits |= ComponentMask.ThreatBit;
             }
 
             ids.Add(entity.Id);
@@ -345,6 +354,7 @@ public sealed record ZoneEntities(
                 : default);
             statusEffects.Add(entity.StatusEffects);
             skillCooldowns.Add(entity.SkillCooldowns);
+            threat.Add(entity.Threat);
         }
 
         return new ZoneEntities(
@@ -356,7 +366,8 @@ public sealed record ZoneEntities(
             combat.MoveToImmutable(),
             ai.MoveToImmutable(),
             statusEffects.MoveToImmutable(),
-            skillCooldowns.MoveToImmutable());
+            skillCooldowns.MoveToImmutable(),
+            threat.MoveToImmutable());
     }
 }
 
