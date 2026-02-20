@@ -66,13 +66,17 @@ public sealed class BossPhaseTransitionTests
             ImmutableArray.Create(def));
 
         WorldState state = Simulation.CreateInitialState(config, new ZoneDefinitions(ImmutableArray.Create(zoneDef)));
-        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(new WorldCommand(WorldCommandKind.EnterZone, new EntityId(12), new ZoneId(1), SpawnPos: new Vec2Fix(Fix32.FromInt(2), Fix32.FromInt(2))))));
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.EnterZone, new EntityId(12), new ZoneId(1), SpawnPos: new Vec2Fix(Fix32.FromInt(2), Fix32.FromInt(2))),
+            new WorldCommand(WorldCommandKind.EnterZone, new EntityId(13), new ZoneId(1), SpawnPos: new Vec2Fix(Fix32.FromInt(2), Fix32.FromInt(2))))));
 
         ImmutableArray<string>.Builder trace = ImmutableArray.CreateBuilder<string>();
         for (int i = 0; i < 45; i++)
         {
-            ImmutableArray<WorldCommand> commands = i < 10
-                ? ImmutableArray.Create(new WorldCommand(WorldCommandKind.AttackIntent, new EntityId(12), new ZoneId(1), TargetEntityId: new EntityId(100001)))
+            ImmutableArray<WorldCommand> commands = i < 25
+                ? ImmutableArray.Create(
+                    new WorldCommand(WorldCommandKind.AttackIntent, new EntityId(12), new ZoneId(1), TargetEntityId: new EntityId(100001)),
+                    new WorldCommand(WorldCommandKind.AttackIntent, new EntityId(13), new ZoneId(1), TargetEntityId: new EntityId(100001)))
                 : ImmutableArray<WorldCommand>.Empty;
             state = Simulation.Step(config, state, new Inputs(commands));
 
