@@ -66,7 +66,7 @@ public static class EncounterSystem
             UpsertRuntime(runtimes, runtime);
         }
 
-        updated = updated.WithEncounterRegistry(new EncounterRegistry(registry.Definitions, runtimes.MoveToImmutable()));
+        updated = updated.WithEncounterRegistry(new EncounterRegistry(registry.Definitions, runtimes.ToImmutable()));
         return (updated, commands.ToImmutableArray());
     }
 
