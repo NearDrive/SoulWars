@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Reflection;
 using Game.App.Headless;
 using Game.Core;
 using Game.Persistence;
@@ -13,6 +14,22 @@ namespace Game.Server.Tests;
 [Trait("Category", "DoD")]
 public sealed class DoDGlobalValidationTests
 {
+    [Fact]
+    public void TestDiscoveryCountShouldNotDropUnexpectedly()
+    {
+        const int baselineDiscoveredTests = 141;
+
+        int discoveredTests = typeof(DoDGlobalValidationTests).Assembly
+            .GetTypes()
+            .Where(type => type.IsClass && !type.IsAbstract)
+            .SelectMany(type => type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
+            .Count(method => method.GetCustomAttributes(inherit: true)
+                .Any(attribute => attribute.GetType().FullName is "Xunit.FactAttribute" or "Xunit.TheoryAttribute"));
+
+        Assert.True(discoveredTests >= baselineDiscoveredTests,
+            $"Discovered test count dropped unexpectedly. Baseline={baselineDiscoveredTests}, Discovered={discoveredTests}");
+    }
+
     [Fact]
     public void DoD_MultiZone_TwoRuns_SameChecksum()
     {

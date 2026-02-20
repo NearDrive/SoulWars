@@ -3,12 +3,13 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
   schedule:
     - cron: '0 3 * * *'
 
 jobs:
   canary:
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
@@ -135,3 +136,28 @@ jobs:
 
       - name: Soak deterministic gate
         run: dotnet test -c Release --no-build --filter "Category=Soak" --logger "console;verbosity=normal"
+
+      - name: Heavy deterministic gate
+        run: dotnet test -c Release --no-build --filter "Category=Perf" --logger "console;verbosity=normal"
+
+  full-audit:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
+      - name: Full test audit (no category filter)
+        run: dotnet test -c Release --no-build --logger "console;verbosity=detailed"
