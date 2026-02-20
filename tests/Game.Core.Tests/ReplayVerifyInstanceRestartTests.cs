@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json;
 using Game.Core;
 using Xunit;
 
@@ -23,7 +24,9 @@ public sealed class ReplayVerifyInstanceRestartTests
         int? firstDivergentTick = null;
         for (int i = 0; i < baseline.Length; i++)
         {
-            if (!Equals(baseline[i], resumed[i]))
+            string baselineJson = JsonSerializer.Serialize(baseline[i]);
+            string resumedJson = JsonSerializer.Serialize(resumed[i]);
+            if (!string.Equals(baselineJson, resumedJson, StringComparison.Ordinal))
             {
                 firstDivergentTick = baseline[i].Tick;
                 break;
