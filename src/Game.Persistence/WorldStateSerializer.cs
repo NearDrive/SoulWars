@@ -262,7 +262,8 @@ public static class WorldStateSerializer
                 StatusEvents: payload.StatusEvents,
             PartyRegistry: payload.PartyRegistry,
             PartyInviteRegistry: payload.PartyInviteRegistry,
-            InstanceRegistry: payload.InstanceRegistry);
+            InstanceRegistry: payload.InstanceRegistry,
+            EncounterRegistry: payload.EncounterRegistry);
         }
 
         return new V7SnapshotPayload(
