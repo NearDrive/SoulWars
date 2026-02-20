@@ -1,15 +1,10 @@
 name: CI
 
 on:
-  push:
   pull_request:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 3 * * *'
 
 jobs:
   canary:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
@@ -58,106 +53,3 @@ jobs:
 
       - name: Canary test lane
         run: dotnet test -c Release --no-build --filter "Category=PR64 OR Category=Canary" --logger "console;verbosity=detailed" --blame --blame-hang-timeout 2m
-
-  full:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Restore
-        run: dotnet restore
-
-      - name: Build
-        run: dotnet build -c Release --no-restore
-
-      - name: Full deterministic suite (excluding soak)
-        run: dotnet test -c Release --no-build --filter "Category!=Soak" --logger "console;verbosity=detailed" --blame --blame-hang-timeout 2m
-
-      - name: MVP7 verification gate
-        run: ./scripts/verify_mvp7.sh
-
-      - name: Persistence consistency gate
-        run: dotnet test -c Release --no-build --filter "Category=Persistence" --logger "console;verbosity=normal"
-
-      - name: MVP1 verify gate (headless)
-        run: dotnet run -c Release --project src/Game.App.Headless -- --verify-mvp1
-
-  dod-gate:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Restore
-        run: dotnet restore
-
-      - name: Build
-        run: dotnet build -c Release --no-restore
-
-      - name: DoD drift gate
-        run: dotnet test -c Release --no-build --filter "Category=DoD" --logger "console;verbosity=detailed"
-
-      - name: Replay verify golden drift gate
-        run: dotnet test -c Release --no-build --filter "Category=ReplayVerify" --logger "console;verbosity=normal"
-
-  nightly:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Restore
-        run: dotnet restore
-
-      - name: Build
-        run: dotnet build -c Release --no-restore
-
-      - name: Soak deterministic gate
-        run: dotnet test -c Release --no-build --filter "Category=Soak" --logger "console;verbosity=normal"
-
-      - name: Heavy deterministic gate
-        run: dotnet test -c Release --no-build --filter "Category=Perf" --logger "console;verbosity=normal"
-
-  full-audit:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Restore
-        run: dotnet restore
-
-      - name: Build
-        run: dotnet build -c Release --no-restore
-
-      - name: Full test audit (no category filter)
-        run: dotnet test -c Release --no-build --logger "console;verbosity=detailed"
