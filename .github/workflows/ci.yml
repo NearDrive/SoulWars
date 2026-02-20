@@ -56,7 +56,7 @@ jobs:
         run: dotnet build -c Release --no-restore
 
       - name: Canary test lane
-        run: dotnet test -c Release --no-build --filter "Category=PR67 OR Category=Canary" --logger "console;verbosity=detailed" --blame --blame-hang-timeout 2m
+        run: dotnet test -c Release --no-build --filter "Category=PR68 OR Category=Canary" --logger "console;verbosity=detailed" --blame --blame-hang-timeout 2m
 
   full:
     runs-on: ubuntu-latest
