@@ -204,7 +204,7 @@ public sealed class TankVsDpsScenarioReplayTests
             }
         }
 
-        return aggroTrace.MoveToImmutable();
+        return aggroTrace.ToImmutable();
     }
 
     private static EntityState GetNpc(WorldState state) => Assert.Single(state.Zones[0].Entities.Where(e => e.Id.Value == NpcId.Value));
