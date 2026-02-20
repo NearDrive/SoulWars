@@ -1490,7 +1490,7 @@ public static class Simulation
             {
                 EntityId inviteeId = command.EntityId;
                 PartyId requestedPartyId = command.PartyId!.Value;
-                int inviteIndex = inviteRegistry.Invites.FindIndex(i => i.InviteeId.Value == inviteeId.Value);
+                int inviteIndex = FindIndex(inviteRegistry.Invites, i => i.InviteeId.Value == inviteeId.Value);
                 if (inviteIndex < 0)
                 {
                     continue;
@@ -1507,7 +1507,7 @@ public static class Simulation
                     continue;
                 }
 
-                int partyIndex = registry.Parties.FindIndex(p => p.Id.Value == requestedPartyId.Value);
+                int partyIndex = FindIndex(registry.Parties, p => p.Id.Value == requestedPartyId.Value);
                 if (partyIndex < 0)
                 {
                     continue;
@@ -1539,7 +1539,7 @@ public static class Simulation
             if (command.Kind is WorldCommandKind.LeaveParty)
             {
                 EntityId playerId = command.EntityId;
-                int partyIndex = registry.Parties.FindIndex(p => p.Members.Any(m => m.EntityId.Value == playerId.Value));
+                int partyIndex = FindIndex(registry.Parties, p => p.Members.Any(m => m.EntityId.Value == playerId.Value));
                 if (partyIndex < 0)
                 {
                     continue;
@@ -1661,6 +1661,19 @@ public static class Simulation
         }
 
         return (current, combatEvents.ToImmutable(), statusEvents.ToImmutable(), castIntents.ToImmutable());
+    }
+
+    private static int FindIndex<T>(ImmutableArray<T> values, Func<T, bool> predicate)
+    {
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (predicate(values[i]))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private static bool IsValidCommand(WorldCommand command)
