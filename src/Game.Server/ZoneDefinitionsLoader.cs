@@ -162,13 +162,16 @@ public static class ZoneDefinitionsLoader
             respawnPoint = new Vec2Fix(Fix32.FromFloat(file.RespawnPoint.X), Fix32.FromFloat(file.RespawnPoint.Y));
         }
 
+        ImmutableArray<EncounterDefinition> encounters = ImmutableArray<EncounterDefinition>.Empty;
+
         return new ZoneDefinition(
             ZoneId: new ZoneId(file.ZoneId),
             Bounds: bounds,
             StaticObstacles: obstacles.ToImmutableArray(),
             NpcSpawns: spawns.ToImmutableArray(),
             LootRules: file.LootRules is null ? null : new LootRulesDefinition(),
-            RespawnPoint: respawnPoint);
+            RespawnPoint: respawnPoint,
+            Encounters: encounters);
     }
 
     private static void ValidateFinite(float value, string field, string path)

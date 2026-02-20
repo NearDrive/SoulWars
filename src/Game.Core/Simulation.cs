@@ -67,7 +67,8 @@ public static class Simulation
             CombatEventsEmitted_LastTick: 0,
             NextProjectileId: 1,
             ProjectileSpawnsDropped_Total: 0,
-            ProjectileSpawnsDropped_LastTick: 0);
+            ProjectileSpawnsDropped_LastTick: 0,
+            EncounterRegistry: EncounterRegistry.Empty);
     }
 
     private static WorldState CreateInitialStateFromManualDefinitions(SimulationConfig config, ZoneDefinitions definitions)
@@ -83,6 +84,12 @@ public static class Simulation
                 Id: z.ZoneId,
                 Map: BuildMapFromObstacles(config, z.StaticObstacles),
                 Entities: SpawnNpcsFromDefinitions(z)))
+            .ToImmutableArray();
+
+        ImmutableArray<EncounterDefinition> encounterDefinitions = definitions.Zones
+            .OrderBy(z => z.ZoneId.Value)
+            .SelectMany(z => z.Encounters.IsDefault ? ImmutableArray<EncounterDefinition>.Empty : z.Encounters)
+            .OrderBy(e => e.Id.Value)
             .ToImmutableArray();
 
         return new WorldState(
@@ -107,7 +114,8 @@ public static class Simulation
             CombatEventsEmitted_LastTick: 0,
             NextProjectileId: 1,
             ProjectileSpawnsDropped_Total: 0,
-            ProjectileSpawnsDropped_LastTick: 0);
+            ProjectileSpawnsDropped_LastTick: 0,
+            EncounterRegistry: new EncounterRegistry(encounterDefinitions, ImmutableArray<EncounterRuntimeState>.Empty));
     }
 
     public static WorldState Step(SimulationConfig config, WorldState state, Inputs inputs, SimulationInstrumentation? instrumentation = null)
@@ -148,6 +156,12 @@ public static class Simulation
         {
             ZoneState nextZone = TickDownZoneSkillCooldowns(zone);
             updated = updated.WithZoneUpdated(nextZone);
+        }
+
+        (updated, ImmutableArray<WorldCommand> encounterCommands) = EncounterSystem.Step(config, updated);
+        if (!encounterCommands.IsDefaultOrEmpty)
+        {
+            commands = commands.AddRange(encounterCommands);
         }
 
         ImmutableArray<(WorldCommand Command, int Index)> orderedCommands = commands

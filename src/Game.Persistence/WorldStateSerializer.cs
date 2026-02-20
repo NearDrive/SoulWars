@@ -19,7 +19,8 @@ public static class WorldStateSerializer
         ImmutableArray<StatusEvent> StatusEvents,
         PartyRegistry PartyRegistry,
         PartyInviteRegistry PartyInviteRegistry,
-        InstanceRegistry InstanceRegistry);
+        InstanceRegistry InstanceRegistry,
+        EncounterRegistry EncounterRegistry);
 
     private sealed record V7SnapshotPayload(
         int Tick,
@@ -33,10 +34,11 @@ public static class WorldStateSerializer
         ImmutableArray<StatusEvent> StatusEvents,
         PartyRegistry PartyRegistry,
         PartyInviteRegistry PartyInviteRegistry,
-        InstanceRegistry InstanceRegistry);
+        InstanceRegistry InstanceRegistry,
+        EncounterRegistry EncounterRegistry);
 
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 7;
+    private const int CurrentVersion = 8;
     public static int SerializerVersion => CurrentVersion;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
@@ -55,6 +57,10 @@ public static class WorldStateSerializer
     private const int MaxPartyMembers = 2_000_000;
     private const int MaxPartyInvites = 2_000_000;
     private const int MaxInstances = 2_000_000;
+    private const int MaxEncounters = 500_000;
+    private const int MaxEncounterPhases = 256;
+    private const int MaxEncounterTriggers = 2048;
+    private const int MaxEncounterActions = 4096;
 
     public static void Save(Stream stream, WorldState world)
     {
@@ -89,6 +95,7 @@ public static class WorldStateSerializer
         WritePartyRegistry(writer, world.PartyRegistryOrEmpty);
         WritePartyInviteRegistry(writer, world.PartyInviteRegistryOrEmpty);
         WriteInstanceRegistry(writer, world.InstanceRegistryOrEmpty);
+        WriteEncounterRegistry(writer, world.EncounterRegistryOrEmpty);
     }
 
     public static WorldState Load(Stream stream)
@@ -130,7 +137,7 @@ public static class WorldStateSerializer
         }
 
         int version = reader.ReadInt32();
-        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or CurrentVersion))
+        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or CurrentVersion))
         {
             throw new InvalidDataException($"Unsupported world-state version '{version}'.");
         }
@@ -218,6 +225,9 @@ public static class WorldStateSerializer
         InstanceRegistry instanceRegistry = version >= 7 && HasRemainingData(reader)
             ? ReadInstanceRegistry(reader)
             : InstanceRegistry.Empty;
+        EncounterRegistry encounterRegistry = version >= 8 && HasRemainingData(reader)
+            ? ReadEncounterRegistry(reader)
+            : EncounterRegistry.Empty;
 
         return new RawSnapshotPayload(
             Version: version,
@@ -232,7 +242,8 @@ public static class WorldStateSerializer
             StatusEvents: statusEvents,
             PartyRegistry: partyRegistry,
             PartyInviteRegistry: partyInviteRegistry,
-            InstanceRegistry: instanceRegistry);
+            InstanceRegistry: instanceRegistry,
+            EncounterRegistry: encounterRegistry);
     }
 
     private static V7SnapshotPayload MigrateToV7(RawSnapshotPayload payload)
@@ -279,7 +290,8 @@ public static class WorldStateSerializer
             StatusEvents: ImmutableArray<StatusEvent>.Empty,
             PartyRegistry: PartyRegistry.Empty,
             PartyInviteRegistry: PartyInviteRegistry.Empty,
-            InstanceRegistry: InstanceRegistry.Empty);
+            InstanceRegistry: InstanceRegistry.Empty,
+            EncounterRegistry: EncounterRegistry.Empty);
     }
 
     private static WorldState LoadV7(V7SnapshotPayload payload)
@@ -298,7 +310,8 @@ public static class WorldStateSerializer
             VendorTransactionAuditLog: payload.VendorAudit,
             Vendors: payload.Vendors,
             CombatEvents: payload.CombatEvents,
-            StatusEvents: payload.StatusEvents);
+            StatusEvents: payload.StatusEvents,
+            EncounterRegistry: payload.EncounterRegistry);
 
         CoreInvariants.Validate(loaded, payload.Tick);
         return loaded;
@@ -907,6 +920,169 @@ public static class WorldStateSerializer
         return new InstanceRegistry(nextInstanceOrdinal, instances.MoveToImmutable()).Canonicalize();
     }
 
+
+
+    private static void WriteEncounterRegistry(BinaryWriter writer, EncounterRegistry encounterRegistry)
+    {
+        EncounterRegistry canonical = encounterRegistry.Canonicalize();
+        writer.Write(canonical.Definitions.Length);
+        foreach (EncounterDefinition definition in canonical.Definitions)
+        {
+            writer.Write(definition.Id.Value);
+            writer.Write(definition.Key);
+            writer.Write(definition.Version);
+            writer.Write(definition.ZoneId.Value);
+            writer.Write(definition.PhasesOrEmpty.Length);
+            foreach (EncounterPhaseDefinition phase in definition.PhasesOrEmpty)
+            {
+                writer.Write(phase.TriggersOrEmpty.Length);
+                foreach (EncounterTriggerDefinition trigger in phase.TriggersOrEmpty)
+                {
+                    writer.Write((byte)trigger.Kind);
+                    writer.Write(trigger.AtTickOffset);
+                    writer.Write((byte)trigger.Target.Kind);
+                    writer.Write(trigger.Target.EntityId.Value);
+                    writer.Write(trigger.Pct);
+                    writer.Write(trigger.ActionsOrEmpty.Length);
+                    foreach (EncounterActionDefinition action in trigger.ActionsOrEmpty)
+                    {
+                        writer.Write((byte)action.Kind);
+                        writer.Write(action.NpcArchetypeId);
+                        writer.Write(action.X.Raw);
+                        writer.Write(action.Y.Raw);
+                        writer.Write(action.Count);
+                        writer.Write((byte)action.Caster.Kind);
+                        writer.Write(action.Caster.EntityId.Value);
+                        writer.Write(action.SkillId.Value);
+                        writer.Write((byte)action.Target.Kind);
+                        writer.Write((byte)action.Target.EntityRef.Kind);
+                        writer.Write(action.Target.EntityRef.EntityId.Value);
+                        writer.Write(action.Target.X.Raw);
+                        writer.Write(action.Target.Y.Raw);
+                        writer.Write((byte)action.StatusSource.Kind);
+                        writer.Write(action.StatusSource.EntityId.Value);
+                        writer.Write((byte)action.StatusTarget.Kind);
+                        writer.Write(action.StatusTarget.EntityId.Value);
+                        writer.Write((byte)action.StatusType);
+                        writer.Write(action.StatusDurationTicks);
+                        writer.Write(action.StatusMagnitudeRaw);
+                        writer.Write(action.PhaseIndex);
+                    }
+                }
+            }
+        }
+
+        writer.Write(canonical.RuntimeStates.Length);
+        foreach (EncounterRuntimeState runtime in canonical.RuntimeStates)
+        {
+            writer.Write(runtime.EncounterId.Value);
+            writer.Write(runtime.CurrentPhase);
+            writer.Write(runtime.StartTick);
+            writer.Write(runtime.BossEntityId.Value);
+            writer.Write(runtime.InstanceId.Value);
+            writer.Write(runtime.FiredTriggers.Length);
+            for (int i = 0; i < runtime.FiredTriggers.Length; i++)
+            {
+                writer.Write(runtime.FiredTriggers[i]);
+            }
+        }
+    }
+
+    private static EncounterRegistry ReadEncounterRegistry(BinaryReader reader)
+    {
+        int definitionCount = reader.ReadInt32();
+        ValidateCount(definitionCount, MaxEncounters, nameof(definitionCount));
+        ImmutableArray<EncounterDefinition>.Builder definitions = ImmutableArray.CreateBuilder<EncounterDefinition>(definitionCount);
+        ulong lastEncounterId = 0;
+        for (int i = 0; i < definitionCount; i++)
+        {
+            ulong encounterId = reader.ReadUInt64();
+            if (i > 0 && encounterId <= lastEncounterId)
+            {
+                throw new InvalidDataException("Encounters are not in strictly ascending EncounterId order.");
+            }
+
+            lastEncounterId = encounterId;
+            string key = reader.ReadString();
+            int version = reader.ReadInt32();
+            ZoneId zoneId = new(reader.ReadInt32());
+            int phaseCount = reader.ReadInt32();
+            ValidateCount(phaseCount, MaxEncounterPhases, nameof(phaseCount));
+            ImmutableArray<EncounterPhaseDefinition>.Builder phases = ImmutableArray.CreateBuilder<EncounterPhaseDefinition>(phaseCount);
+            for (int p = 0; p < phaseCount; p++)
+            {
+                int triggerCount = reader.ReadInt32();
+                ValidateCount(triggerCount, MaxEncounterTriggers, nameof(triggerCount));
+                ImmutableArray<EncounterTriggerDefinition>.Builder triggers = ImmutableArray.CreateBuilder<EncounterTriggerDefinition>(triggerCount);
+                for (int t = 0; t < triggerCount; t++)
+                {
+                    EncounterTriggerKind triggerKind = (EncounterTriggerKind)reader.ReadByte();
+                    int atTickOffset = reader.ReadInt32();
+                    EntityRef target = new((EntityRefKind)reader.ReadByte(), new EntityId(reader.ReadInt32()));
+                    int pct = reader.ReadInt32();
+                    int actionCount = reader.ReadInt32();
+                    ValidateCount(actionCount, MaxEncounterActions, nameof(actionCount));
+                    ImmutableArray<EncounterActionDefinition>.Builder actions = ImmutableArray.CreateBuilder<EncounterActionDefinition>(actionCount);
+                    for (int a = 0; a < actionCount; a++)
+                    {
+                        EncounterActionKind actionKind = (EncounterActionKind)reader.ReadByte();
+                        string npcArchetypeId = reader.ReadString();
+                        Fix32 x = new(reader.ReadInt32());
+                        Fix32 y = new(reader.ReadInt32());
+                        int count = reader.ReadInt32();
+                        EntityRef caster = new((EntityRefKind)reader.ReadByte(), new EntityId(reader.ReadInt32()));
+                        SkillId skillId = new(reader.ReadInt32());
+                        CastTargetKind targetKind = (CastTargetKind)reader.ReadByte();
+                        EntityRef targetRef = new((EntityRefKind)reader.ReadByte(), new EntityId(reader.ReadInt32()));
+                        TargetSpec targetSpec = new(targetKind, targetRef, new Fix32(reader.ReadInt32()), new Fix32(reader.ReadInt32()));
+                        EntityRef statusSource = new((EntityRefKind)reader.ReadByte(), new EntityId(reader.ReadInt32()));
+                        EntityRef statusTarget = new((EntityRefKind)reader.ReadByte(), new EntityId(reader.ReadInt32()));
+                        StatusEffectType statusType = (StatusEffectType)reader.ReadByte();
+                        int statusDurationTicks = reader.ReadInt32();
+                        int statusMagnitudeRaw = reader.ReadInt32();
+                        int phaseIndex = reader.ReadInt32();
+                        actions.Add(new EncounterActionDefinition(actionKind, npcArchetypeId, x, y, count, caster, skillId, targetSpec, statusSource, statusTarget, statusType, statusDurationTicks, statusMagnitudeRaw, phaseIndex));
+                    }
+
+                    triggers.Add(new EncounterTriggerDefinition(triggerKind, atTickOffset, target, pct, actions.MoveToImmutable()));
+                }
+
+                phases.Add(new EncounterPhaseDefinition(triggers.MoveToImmutable()));
+            }
+
+            definitions.Add(new EncounterDefinition(new EncounterId(encounterId), key, version, zoneId, phases.MoveToImmutable()));
+        }
+
+        int runtimeCount = reader.ReadInt32();
+        ValidateCount(runtimeCount, MaxEncounters, nameof(runtimeCount));
+        ImmutableArray<EncounterRuntimeState>.Builder runtimes = ImmutableArray.CreateBuilder<EncounterRuntimeState>(runtimeCount);
+        ulong lastRuntimeEncounterId = 0;
+        for (int i = 0; i < runtimeCount; i++)
+        {
+            ulong encounterId = reader.ReadUInt64();
+            if (i > 0 && encounterId <= lastRuntimeEncounterId)
+            {
+                throw new InvalidDataException("Encounter runtime states are not in strictly ascending EncounterId order.");
+            }
+
+            lastRuntimeEncounterId = encounterId;
+            int currentPhase = reader.ReadInt32();
+            int startTick = reader.ReadInt32();
+            EntityId bossEntityId = new(reader.ReadInt32());
+            ZoneInstanceId instanceId = new(reader.ReadUInt64());
+            int firedCount = reader.ReadInt32();
+            ValidateCount(firedCount, MaxEncounterTriggers, nameof(firedCount));
+            ImmutableArray<bool>.Builder fired = ImmutableArray.CreateBuilder<bool>(firedCount);
+            for (int f = 0; f < firedCount; f++)
+            {
+                fired.Add(reader.ReadBoolean());
+            }
+
+            runtimes.Add(new EncounterRuntimeState(new EncounterId(encounterId), currentPhase, startTick, fired.MoveToImmutable(), bossEntityId, instanceId));
+        }
+
+        return new EncounterRegistry(definitions.MoveToImmutable(), runtimes.MoveToImmutable()).Canonicalize();
+    }
     private static ImmutableArray<EntityLocation> BuildEntityLocations(ImmutableArray<ZoneState> zones)
     {
         ImmutableArray<EntityLocation>.Builder builder = ImmutableArray.CreateBuilder<EntityLocation>();

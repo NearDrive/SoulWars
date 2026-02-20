@@ -476,11 +476,13 @@ public sealed record WorldState(
     uint CombatEventsEmitted_LastTick = 0,
     int NextProjectileId = 1,
     uint ProjectileSpawnsDropped_Total = 0,
-    uint ProjectileSpawnsDropped_LastTick = 0)
+    uint ProjectileSpawnsDropped_LastTick = 0,
+    EncounterRegistry? EncounterRegistry = null)
 {
     public PartyRegistry PartyRegistryOrEmpty => PartyRegistry ?? Game.Core.PartyRegistry.Empty;
     public PartyInviteRegistry PartyInviteRegistryOrEmpty => PartyInviteRegistry ?? Game.Core.PartyInviteRegistry.Empty;
     public InstanceRegistry InstanceRegistryOrEmpty => InstanceRegistry ?? Game.Core.InstanceRegistry.Empty;
+    public EncounterRegistry EncounterRegistryOrEmpty => EncounterRegistry ?? Game.Core.EncounterRegistry.Empty;
 
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
@@ -665,6 +667,15 @@ public sealed record WorldState(
         return this with
         {
             InstanceRegistry = instanceRegistry.Canonicalize()
+        };
+    }
+
+
+    public WorldState WithEncounterRegistry(EncounterRegistry encounterRegistry)
+    {
+        return this with
+        {
+            EncounterRegistry = encounterRegistry.Canonicalize()
         };
     }
 
