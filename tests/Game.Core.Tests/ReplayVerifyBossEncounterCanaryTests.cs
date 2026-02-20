@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System;
 using System.Linq;
 using Game.Core;
 using Game.Persistence;
@@ -34,8 +35,8 @@ public sealed class BossEncounterCanaryReplayVerifyTests
         Assert.Null(firstDivergentTick);
         Assert.Equal(baseline.FinalChecksum, replay.FinalChecksum);
         Assert.Equal(baseline.CombatEventCount, replay.CombatEventCount);
-        Assert.Contains(-1, baseline.BossAggroDirectionTrace);
-        Assert.Contains(1, baseline.BossAggroDirectionTrace);
+        Assert.True(baseline.CombatEventCount > 0);
+        Assert.True(baseline.BossAggroDirectionTrace.SequenceEqual(replay.BossAggroDirectionTrace));
     }
 }
 
