@@ -276,6 +276,41 @@ public static class CoreInvariants
         }
 
         PartyInviteRegistry inviteRegistry = world.PartyInviteRegistryOrEmpty.Canonicalize();
+
+        InstanceRegistry instanceRegistry = world.InstanceRegistryOrEmpty.Canonicalize();
+        if (instanceRegistry.NextInstanceOrdinal <= 0)
+        {
+            throw new InvariantViolationException($"invariant=InstanceNextOrdinalPositive tick={tick} next={instanceRegistry.NextInstanceOrdinal}");
+        }
+
+        ulong lastInstanceId = 0;
+        int lastInstanceOrdinal = int.MinValue;
+        foreach (ZoneInstanceState instance in instanceRegistry.Instances)
+        {
+            if (lastInstanceId != 0 && instance.Id.Value <= lastInstanceId)
+            {
+                throw new InvariantViolationException($"invariant=InstancesOrdered tick={tick} instanceId={instance.Id.Value} lastInstanceId={lastInstanceId}");
+            }
+
+            if (instance.Ordinal <= lastInstanceOrdinal)
+            {
+                throw new InvariantViolationException($"invariant=InstanceOrdinalsOrdered tick={tick} ordinal={instance.Ordinal} lastOrdinal={lastInstanceOrdinal}");
+            }
+
+            if (instance.Ordinal <= 0)
+            {
+                throw new InvariantViolationException($"invariant=InstanceOrdinalPositive tick={tick} ordinal={instance.Ordinal}");
+            }
+
+            if (instance.CreationTick > tick)
+            {
+                throw new InvariantViolationException($"invariant=InstanceCreationTickValid tick={tick} creationTick={instance.CreationTick}");
+            }
+
+            lastInstanceId = instance.Id.Value;
+            lastInstanceOrdinal = instance.Ordinal;
+        }
+
         int lastInviteeId = int.MinValue;
         HashSet<int> inviteeSet = new();
         foreach (PartyInvite invite in inviteRegistry.Invites)
