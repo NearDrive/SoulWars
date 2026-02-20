@@ -195,7 +195,7 @@ public sealed class TankVsDpsScenarioReplayTests
         {
             ImmutableArray<WorldCommand>.Builder commands = ImmutableArray.CreateBuilder<WorldCommand>();
             commands.Add(new WorldCommand(WorldCommandKind.CastSkill, new EntityId(20), new ZoneId(1), TargetEntityId: NpcId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity));
-            if (tick % 3 == 0)
+            if (tick >= 8 && tick % 4 == 0)
             {
                 commands.Add(new WorldCommand(WorldCommandKind.CastSkill, new EntityId(21), new ZoneId(1), TargetEntityId: NpcId, SkillId: new SkillId(2), TargetKind: CastTargetKind.Entity));
             }
@@ -244,6 +244,6 @@ public sealed class TankVsDpsScenarioReplayTests
         NpcAggroRange: Fix32.FromInt(32),
         SkillDefinitions: ImmutableArray.Create(
             new SkillDefinition(new SkillId(1), Fix32.FromInt(32).Raw, 0, 1, 0, 0, 0, 0, CastTargetKind.Entity, BaseAmount: 5),
-            new SkillDefinition(new SkillId(2), Fix32.FromInt(32).Raw, 0, 1, 0, 0, 0, 0, CastTargetKind.Entity, BaseAmount: 20)),
+            new SkillDefinition(new SkillId(2), Fix32.FromInt(32).Raw, 0, 1, 0, 0, 0, 0, CastTargetKind.Entity, BaseAmount: 6)),
         Invariants: InvariantOptions.Enabled);
 }
