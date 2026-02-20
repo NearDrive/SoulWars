@@ -318,6 +318,74 @@ public static class StateChecksum
                 writer.Write(instance.RngSeed);
             }
         }
+
+        EncounterRegistry encounterRegistry = state.EncounterRegistryOrEmpty.Canonicalize();
+        bool hasEncounterMetadata = !encounterRegistry.Definitions.IsDefaultOrEmpty || !encounterRegistry.RuntimeStates.IsDefaultOrEmpty;
+        if (hasEncounterMetadata)
+        {
+            writer.Write(unchecked((int)0x454E4354)); // "ENCT"
+            writer.Write(encounterRegistry.Definitions.Length);
+            foreach (EncounterDefinition definition in encounterRegistry.Definitions)
+            {
+                writer.Write(definition.Id.Value);
+                writer.Write(definition.Key);
+                writer.Write(definition.Version);
+                writer.Write(definition.ZoneId.Value);
+                writer.Write(definition.PhasesOrEmpty.Length);
+                foreach (EncounterPhaseDefinition phase in definition.PhasesOrEmpty)
+                {
+                    writer.Write(phase.TriggersOrEmpty.Length);
+                    foreach (EncounterTriggerDefinition trigger in phase.TriggersOrEmpty)
+                    {
+                        writer.Write((byte)trigger.Kind);
+                        writer.Write(trigger.AtTickOffset);
+                        writer.Write((byte)trigger.Target.Kind);
+                        writer.Write(trigger.Target.EntityId.Value);
+                        writer.Write(trigger.Pct);
+                        writer.Write(trigger.ActionsOrEmpty.Length);
+                        foreach (EncounterActionDefinition action in trigger.ActionsOrEmpty)
+                        {
+                            writer.Write((byte)action.Kind);
+                            writer.Write(action.NpcArchetypeId);
+                            writer.Write(action.X.Raw);
+                            writer.Write(action.Y.Raw);
+                            writer.Write(action.Count);
+                            writer.Write((byte)action.Caster.Kind);
+                            writer.Write(action.Caster.EntityId.Value);
+                            writer.Write(action.SkillId.Value);
+                            writer.Write((byte)action.Target.Kind);
+                            writer.Write((byte)action.Target.EntityRef.Kind);
+                            writer.Write(action.Target.EntityRef.EntityId.Value);
+                            writer.Write(action.Target.X.Raw);
+                            writer.Write(action.Target.Y.Raw);
+                            writer.Write((byte)action.StatusSource.Kind);
+                            writer.Write(action.StatusSource.EntityId.Value);
+                            writer.Write((byte)action.StatusTarget.Kind);
+                            writer.Write(action.StatusTarget.EntityId.Value);
+                            writer.Write((byte)action.StatusType);
+                            writer.Write(action.StatusDurationTicks);
+                            writer.Write(action.StatusMagnitudeRaw);
+                            writer.Write(action.PhaseIndex);
+                        }
+                    }
+                }
+            }
+
+            writer.Write(encounterRegistry.RuntimeStates.Length);
+            foreach (EncounterRuntimeState runtime in encounterRegistry.RuntimeStates)
+            {
+                writer.Write(runtime.EncounterId.Value);
+                writer.Write(runtime.CurrentPhase);
+                writer.Write(runtime.StartTick);
+                writer.Write(runtime.BossEntityId.Value);
+                writer.Write(runtime.InstanceId.Value);
+                writer.Write(runtime.FiredTriggers.Length);
+                for (int i = 0; i < runtime.FiredTriggers.Length; i++)
+                {
+                    writer.Write(runtime.FiredTriggers[i]);
+                }
+            }
+        }
     }
 
     private static byte[] ComputeMapHash(TileMap map)

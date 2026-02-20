@@ -26,7 +26,8 @@ public sealed record ZoneDefinition(
     ImmutableArray<ZoneAabb> StaticObstacles,
     ImmutableArray<NpcSpawnDefinition> NpcSpawns,
     LootRulesDefinition? LootRules,
-    Vec2Fix? RespawnPoint = null);
+    Vec2Fix? RespawnPoint = null,
+    ImmutableArray<EncounterDefinition> Encounters = default);
 
 public sealed record ZoneDefinitions(ImmutableArray<ZoneDefinition> Zones)
 {
@@ -87,6 +88,37 @@ public static class ZoneDefinitionCanonicalizer
                     .Append(zone.RespawnPoint.Value.X.Raw).Append('|')
                     .Append(zone.RespawnPoint.Value.Y.Raw)
                     .Append('\n');
+            }
+
+
+            foreach (EncounterDefinition encounter in (zone.Encounters.IsDefault ? ImmutableArray<EncounterDefinition>.Empty : zone.Encounters)
+                         .OrderBy(e => e.Id.Value))
+            {
+                builder
+                    .Append("encounter|")
+                    .Append(encounter.Id.Value).Append('|')
+                    .Append(encounter.Key).Append('|')
+                    .Append(encounter.Version)
+                    .Append('\n');
+
+                for (int phaseIndex = 0; phaseIndex < encounter.PhasesOrEmpty.Length; phaseIndex++)
+                {
+                    EncounterPhaseDefinition phase = encounter.PhasesOrEmpty[phaseIndex];
+                    builder.Append("phase|").Append(phaseIndex).Append('\n');
+                    for (int triggerIndex = 0; triggerIndex < phase.TriggersOrEmpty.Length; triggerIndex++)
+                    {
+                        EncounterTriggerDefinition trigger = phase.TriggersOrEmpty[triggerIndex];
+                        builder
+                            .Append("trigger|")
+                            .Append(triggerIndex).Append('|')
+                            .Append((int)trigger.Kind).Append('|')
+                            .Append(trigger.AtTickOffset).Append('|')
+                            .Append((int)trigger.Target.Kind).Append('|')
+                            .Append(trigger.Target.EntityId.Value).Append('|')
+                            .Append(trigger.Pct)
+                            .Append('\n');
+                    }
+                }
             }
 
             foreach (NpcSpawnDefinition spawn in zone.NpcSpawns
