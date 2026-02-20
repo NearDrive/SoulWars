@@ -26,7 +26,7 @@ public sealed class WorldStateMigrationTests
         string worldChecksum = StateChecksum.Compute(loaded);
         string expectedChecksum = File.ReadAllText(Path.Combine(ResolveSnapshotFixtureDir(), checksumFile)).Trim();
 
-        Assert.Equal(4, serializerVersion);
+        Assert.Equal(WorldStateSerializer.SerializerVersion, serializerVersion);
         Assert.Equal(expectedChecksum, worldChecksum);
     }
 

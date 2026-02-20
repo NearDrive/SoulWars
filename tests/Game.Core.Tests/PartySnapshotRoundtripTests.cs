@@ -30,7 +30,7 @@ public sealed class PartySnapshotRoundtripTests
         PartyRegistry beforeRegistry = world.PartyRegistryOrEmpty.Canonicalize();
         PartyRegistry afterRegistry = reloaded.PartyRegistryOrEmpty.Canonicalize();
         Assert.Equal(beforeRegistry.NextPartySequence, afterRegistry.NextPartySequence);
-        Assert.Equal(beforeRegistry.Parties, afterRegistry.Parties);
+        Assert.True(beforeRegistry.Parties.SequenceEqual(afterRegistry.Parties));
         Assert.Equal(world.PartyInviteRegistryOrEmpty.Canonicalize(), reloaded.PartyInviteRegistryOrEmpty.Canonicalize());
     }
 

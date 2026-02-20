@@ -129,7 +129,7 @@ public sealed class Mvp8ToMvp9GateTestSuite
     [Theory]
     [Trait("Category", "Gate")]
     [MemberData(nameof(GetLegacySnapshotFixtures))]
-    public void Snapshot_OldVersions_MigrateToV4(string fixtureKey)
+    public void Snapshot_OldVersions_MigrateToCurrentVersion(string fixtureKey)
     {
         string fixtureDir = TestReplayRunnerHarness.ResolveSnapshotFixtureDirectory();
         byte[] fixtureBytes = Convert.FromHexString(File.ReadAllText(Path.Combine(fixtureDir, $"{fixtureKey}.hex")).Trim());
@@ -141,7 +141,7 @@ public sealed class Mvp8ToMvp9GateTestSuite
         int serializerVersion = BitConverter.ToInt32(migratedBytes, 8);
         string actualChecksum = StateChecksum.Compute(loaded);
 
-        Assert.Equal(4, serializerVersion);
+        Assert.Equal(WorldStateSerializer.SerializerVersion, serializerVersion);
         Assert.Equal(expectedChecksum, actualChecksum);
     }
 

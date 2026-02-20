@@ -29,7 +29,7 @@ public sealed class InstanceCreationDeterminismTests
         WorldState world = Simulation.CreateInitialState(config);
 
         InstanceRegistry registry = world.InstanceRegistryOrEmpty;
-        (registry, ZoneInstanceState created) = registry.CreateInstance(config.Seed, new PartyId(10), new ZoneId(1), creationTick: 5);
+        (registry, ZoneInstanceState created) = registry.CreateInstance(config.Seed, new PartyId(10), new ZoneId(1), creationTick: world.Tick);
         world = world.WithInstanceRegistry(registry);
 
         byte[] snapshot = WorldStateSerializer.SaveToBytes(world);
@@ -38,8 +38,8 @@ public sealed class InstanceCreationDeterminismTests
         Assert.Equal(world.InstanceRegistryOrEmpty.NextInstanceOrdinal, loaded.InstanceRegistryOrEmpty.NextInstanceOrdinal);
         Assert.Equal(world.InstanceRegistryOrEmpty.Instances, loaded.InstanceRegistryOrEmpty.Instances);
 
-        (InstanceRegistry nextRegistryA, ZoneInstanceState nextA) = world.InstanceRegistryOrEmpty.CreateInstance(config.Seed, new PartyId(11), new ZoneId(1), creationTick: 6);
-        (InstanceRegistry nextRegistryB, ZoneInstanceState nextB) = loaded.InstanceRegistryOrEmpty.CreateInstance(config.Seed, new PartyId(11), new ZoneId(1), creationTick: 6);
+        (InstanceRegistry nextRegistryA, ZoneInstanceState nextA) = world.InstanceRegistryOrEmpty.CreateInstance(config.Seed, new PartyId(11), new ZoneId(1), creationTick: world.Tick);
+        (InstanceRegistry nextRegistryB, ZoneInstanceState nextB) = loaded.InstanceRegistryOrEmpty.CreateInstance(config.Seed, new PartyId(11), new ZoneId(1), creationTick: loaded.Tick);
 
         Assert.Equal(nextA.Id, nextB.Id);
         Assert.Equal(nextRegistryA.NextInstanceOrdinal, nextRegistryB.NextInstanceOrdinal);
