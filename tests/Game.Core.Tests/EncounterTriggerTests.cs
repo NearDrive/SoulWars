@@ -54,16 +54,20 @@ public sealed class EncounterTriggerTests
                         Pct: 70,
                         Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.SpawnNpc, X: Fix32.FromInt(5), Y: Fix32.FromInt(5), Count: 1))))))));
 
-        state = EnterPlayer(state, new EntityId(10), new Vec2Fix(Fix32.FromInt(2), Fix32.FromInt(2)));
+        state = EnterPlayers(state, new EntityId(10), new EntityId(13), new Vec2Fix(Fix32.FromInt(2), Fix32.FromInt(2)));
         int initialNpcCount = state.Zones[0].Entities.Count(e => e.Kind == EntityKind.Npc);
 
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < 25; i++)
         {
-            state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(new WorldCommand(WorldCommandKind.AttackIntent, new EntityId(10), new ZoneId(1), TargetEntityId: new EntityId(100001)))));
+            state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+                new WorldCommand(WorldCommandKind.AttackIntent, new EntityId(10), new ZoneId(1), TargetEntityId: new EntityId(100001)),
+                new WorldCommand(WorldCommandKind.AttackIntent, new EntityId(13), new ZoneId(1), TargetEntityId: new EntityId(100001)))));
         }
 
         int afterNpcCount = state.Zones[0].Entities.Count(e => e.Kind == EntityKind.Npc);
+        EncounterRuntimeState runtime = Assert.Single(state.EncounterRegistryOrEmpty.RuntimeStates);
         Assert.Equal(initialNpcCount + 1, afterNpcCount);
+        Assert.True(runtime.FiredTriggers[0]);
     }
 
     [Fact]
@@ -83,21 +87,27 @@ public sealed class EncounterTriggerTests
                         Target: EntityRef.Boss,
                         Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.SpawnNpc, X: Fix32.FromInt(6), Y: Fix32.FromInt(6), Count: 1))))))));
 
-        state = EnterPlayer(state, new EntityId(11), new Vec2Fix(Fix32.FromInt(2), Fix32.FromInt(2)));
+        state = EnterPlayers(state, new EntityId(11), new EntityId(14), new Vec2Fix(Fix32.FromInt(2), Fix32.FromInt(2)));
         int initialNpcCount = state.Zones[0].Entities.Count(e => e.Kind == EntityKind.Npc);
 
-        for (int i = 0; i < 12; i++)
+        for (int i = 0; i < 55; i++)
         {
-            state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(new WorldCommand(WorldCommandKind.AttackIntent, new EntityId(11), new ZoneId(1), TargetEntityId: new EntityId(100001)))));
+            state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+                new WorldCommand(WorldCommandKind.AttackIntent, new EntityId(11), new ZoneId(1), TargetEntityId: new EntityId(100001)),
+                new WorldCommand(WorldCommandKind.AttackIntent, new EntityId(14), new ZoneId(1), TargetEntityId: new EntityId(100001)))));
         }
 
         int afterNpcCount = state.Zones[0].Entities.Count(e => e.Kind == EntityKind.Npc);
+        EncounterRuntimeState runtime = Assert.Single(state.EncounterRegistryOrEmpty.RuntimeStates);
         Assert.Equal(initialNpcCount, afterNpcCount);
+        Assert.True(runtime.FiredTriggers[0]);
     }
 
-    private static WorldState EnterPlayer(WorldState state, EntityId id, Vec2Fix pos)
+    private static WorldState EnterPlayers(WorldState state, EntityId first, EntityId second, Vec2Fix pos)
     {
-        return Simulation.Step(CreateConfig(), state, new Inputs(ImmutableArray.Create(new WorldCommand(WorldCommandKind.EnterZone, id, new ZoneId(1), SpawnPos: pos))));
+        return Simulation.Step(CreateConfig(), state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.EnterZone, first, new ZoneId(1), SpawnPos: pos),
+            new WorldCommand(WorldCommandKind.EnterZone, second, new ZoneId(1), SpawnPos: pos))));
     }
 
     private static WorldState CreateState(EncounterDefinition encounter)

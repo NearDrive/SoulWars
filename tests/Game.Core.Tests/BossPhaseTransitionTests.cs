@@ -52,7 +52,7 @@ public sealed class BossPhaseTransitionTests
             trace.Add(StateChecksum.Compute(state));
         }
 
-        return trace.MoveToImmutable();
+        return trace.ToImmutable();
     }
 
     private static SimulationConfig EncounterTriggerTests_CreateConfig() => new(
