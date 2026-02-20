@@ -1,0 +1,11 @@
+name: CI Full Audit (legacy-disabled)
+
+on:
+  workflow_call:
+
+jobs:
+  disabled:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disabled
+        run: echo "Legacy workflow intentionally disabled; full-audit runs in .github/workflows/ci.yml"

@@ -1,14 +1,14 @@
 name: CI
 
 on:
-  push:
   pull_request:
-  schedule:
-    - cron: '0 3 * * *'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   canary:
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
@@ -59,7 +59,6 @@ jobs:
         run: dotnet test -c Release --no-build --filter "Category=PR64 OR Category=Canary" --logger "console;verbosity=detailed" --blame --blame-hang-timeout 2m
 
   full:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -90,7 +89,6 @@ jobs:
         run: dotnet run -c Release --project src/Game.App.Headless -- --verify-mvp1
 
   dod-gate:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -114,8 +112,7 @@ jobs:
       - name: Replay verify golden drift gate
         run: dotnet test -c Release --no-build --filter "Category=ReplayVerify" --logger "console;verbosity=normal"
 
-  nightly:
-    if: github.event_name == 'schedule'
+  full-audit:
     runs-on: ubuntu-latest
 
     steps:
@@ -133,5 +130,5 @@ jobs:
       - name: Build
         run: dotnet build -c Release --no-restore
 
-      - name: Soak deterministic gate
-        run: dotnet test -c Release --no-build --filter "Category=Soak" --logger "console;verbosity=normal"
+      - name: Full test audit (no category filter)
+        run: dotnet test -c Release --no-build --logger "console;verbosity=detailed"

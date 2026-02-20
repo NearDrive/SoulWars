@@ -1,0 +1,11 @@
+name: CI Main (legacy-disabled)
+
+on:
+  workflow_call:
+
+jobs:
+  disabled:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disabled
+        run: echo "Legacy workflow intentionally disabled; main lanes run in .github/workflows/ci.yml"

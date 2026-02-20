@@ -1,0 +1,30 @@
+name: CI Nightly
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
+      - name: Soak deterministic gate
+        run: dotnet test -c Release --no-build --filter "Category=Soak" --logger "console;verbosity=normal"
+
+      - name: Heavy deterministic gate
+        run: dotnet test -c Release --no-build --filter "Category=Perf" --logger "console;verbosity=normal"
