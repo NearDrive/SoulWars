@@ -300,6 +300,24 @@ public static class StateChecksum
                 }
             }
         }
+
+        InstanceRegistry instanceRegistry = state.InstanceRegistryOrEmpty.Canonicalize();
+        bool hasInstanceMetadata = instanceRegistry.NextInstanceOrdinal != 1 || !instanceRegistry.Instances.IsDefaultOrEmpty;
+        if (hasInstanceMetadata)
+        {
+            writer.Write(unchecked((int)0x494E5354)); // "INST"
+            writer.Write(instanceRegistry.NextInstanceOrdinal);
+            writer.Write(instanceRegistry.Instances.Length);
+            foreach (ZoneInstanceState instance in instanceRegistry.Instances)
+            {
+                writer.Write(instance.Id.Value);
+                writer.Write(instance.PartyId.Value);
+                writer.Write(instance.ZoneId.Value);
+                writer.Write(instance.CreationTick);
+                writer.Write(instance.Ordinal);
+                writer.Write(instance.RngSeed);
+            }
+        }
     }
 
     private static byte[] ComputeMapHash(TileMap map)

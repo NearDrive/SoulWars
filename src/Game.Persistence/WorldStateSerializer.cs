@@ -18,9 +18,10 @@ public static class WorldStateSerializer
         ImmutableArray<CombatEvent> CombatEvents,
         ImmutableArray<StatusEvent> StatusEvents,
         PartyRegistry PartyRegistry,
-        PartyInviteRegistry PartyInviteRegistry);
+        PartyInviteRegistry PartyInviteRegistry,
+        InstanceRegistry InstanceRegistry);
 
-    private sealed record V6SnapshotPayload(
+    private sealed record V7SnapshotPayload(
         int Tick,
         ImmutableArray<ZoneState> Zones,
         ImmutableArray<LootEntityState> LootEntities,
@@ -31,10 +32,11 @@ public static class WorldStateSerializer
         ImmutableArray<CombatEvent> CombatEvents,
         ImmutableArray<StatusEvent> StatusEvents,
         PartyRegistry PartyRegistry,
-        PartyInviteRegistry PartyInviteRegistry);
+        PartyInviteRegistry PartyInviteRegistry,
+        InstanceRegistry InstanceRegistry);
 
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 6;
+    private const int CurrentVersion = 7;
     public static int SerializerVersion => CurrentVersion;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
@@ -52,6 +54,7 @@ public static class WorldStateSerializer
     private const int MaxPartyCount = 2_000_000;
     private const int MaxPartyMembers = 2_000_000;
     private const int MaxPartyInvites = 2_000_000;
+    private const int MaxInstances = 2_000_000;
 
     public static void Save(Stream stream, WorldState world)
     {
@@ -85,6 +88,7 @@ public static class WorldStateSerializer
         WriteStatusEvents(writer, world.StatusEvents.IsDefault ? ImmutableArray<StatusEvent>.Empty : world.StatusEvents);
         WritePartyRegistry(writer, world.PartyRegistryOrEmpty);
         WritePartyInviteRegistry(writer, world.PartyInviteRegistryOrEmpty);
+        WriteInstanceRegistry(writer, world.InstanceRegistryOrEmpty);
     }
 
     public static WorldState Load(Stream stream)
@@ -95,8 +99,8 @@ public static class WorldStateSerializer
         {
             using BinaryReader reader = new(stream, Encoding.UTF8, leaveOpen: true);
             RawSnapshotPayload raw = LoadRaw(reader);
-            V6SnapshotPayload migrated = MigrateToV6(raw);
-            return LoadV6(migrated);
+            V7SnapshotPayload migrated = MigrateToV7(raw);
+            return LoadV7(migrated);
         }
         catch (EndOfStreamException ex)
         {
@@ -211,6 +215,9 @@ public static class WorldStateSerializer
         PartyInviteRegistry partyInviteRegistry = version >= 6 && HasRemainingData(reader)
             ? ReadPartyInviteRegistry(reader)
             : PartyInviteRegistry.Empty;
+        InstanceRegistry instanceRegistry = version >= 7 && HasRemainingData(reader)
+            ? ReadInstanceRegistry(reader)
+            : InstanceRegistry.Empty;
 
         return new RawSnapshotPayload(
             Version: version,
@@ -224,14 +231,15 @@ public static class WorldStateSerializer
             CombatEvents: combatEvents,
             StatusEvents: statusEvents,
             PartyRegistry: partyRegistry,
-            PartyInviteRegistry: partyInviteRegistry);
+            PartyInviteRegistry: partyInviteRegistry,
+            InstanceRegistry: instanceRegistry);
     }
 
-    private static V6SnapshotPayload MigrateToV6(RawSnapshotPayload payload)
+    private static V7SnapshotPayload MigrateToV7(RawSnapshotPayload payload)
     {
         if (payload.Version == CurrentVersion)
         {
-            return new V6SnapshotPayload(
+            return new V7SnapshotPayload(
                 Tick: payload.Tick,
                 Zones: payload.Zones,
                 LootEntities: payload.LootEntities,
@@ -242,10 +250,11 @@ public static class WorldStateSerializer
                 CombatEvents: payload.CombatEvents,
                 StatusEvents: payload.StatusEvents,
             PartyRegistry: payload.PartyRegistry,
-            PartyInviteRegistry: payload.PartyInviteRegistry);
+            PartyInviteRegistry: payload.PartyInviteRegistry,
+            InstanceRegistry: payload.InstanceRegistry);
         }
 
-        return new V6SnapshotPayload(
+        return new V7SnapshotPayload(
             Tick: payload.Tick,
             Zones: payload.Zones.OrderBy(z => z.Id.Value).ToImmutableArray(),
             LootEntities: payload.LootEntities.OrderBy(l => l.Id.Value).ToImmutableArray(),
@@ -269,10 +278,11 @@ public static class WorldStateSerializer
             CombatEvents: ImmutableArray<CombatEvent>.Empty,
             StatusEvents: ImmutableArray<StatusEvent>.Empty,
             PartyRegistry: PartyRegistry.Empty,
-            PartyInviteRegistry: PartyInviteRegistry.Empty);
+            PartyInviteRegistry: PartyInviteRegistry.Empty,
+            InstanceRegistry: InstanceRegistry.Empty);
     }
 
-    private static WorldState LoadV6(V6SnapshotPayload payload)
+    private static WorldState LoadV7(V7SnapshotPayload payload)
     {
         ImmutableArray<EntityLocation> locations = BuildEntityLocations(payload.Zones);
         WorldState loaded = new(
@@ -281,6 +291,7 @@ public static class WorldStateSerializer
             EntityLocations: locations,
             PartyRegistry: payload.PartyRegistry,
             PartyInviteRegistry: payload.PartyInviteRegistry,
+            InstanceRegistry: payload.InstanceRegistry,
             LootEntities: payload.LootEntities,
             PlayerInventories: payload.PlayerInventories,
             PlayerWallets: payload.PlayerWallets,
@@ -845,6 +856,55 @@ public static class WorldStateSerializer
         }
 
         return new PartyInviteRegistry(invites.MoveToImmutable()).Canonicalize();
+    }
+
+    private static void WriteInstanceRegistry(BinaryWriter writer, InstanceRegistry instanceRegistry)
+    {
+        InstanceRegistry canonical = instanceRegistry.Canonicalize();
+        writer.Write(canonical.NextInstanceOrdinal);
+        writer.Write(canonical.Instances.Length);
+        foreach (ZoneInstanceState instance in canonical.Instances)
+        {
+            writer.Write(instance.Id.Value);
+            writer.Write(instance.PartyId.Value);
+            writer.Write(instance.ZoneId.Value);
+            writer.Write(instance.CreationTick);
+            writer.Write(instance.Ordinal);
+            writer.Write(instance.RngSeed);
+        }
+    }
+
+    private static InstanceRegistry ReadInstanceRegistry(BinaryReader reader)
+    {
+        int nextInstanceOrdinal = reader.ReadInt32();
+        if (nextInstanceOrdinal <= 0)
+        {
+            throw new InvalidDataException("Instance next ordinal must be positive.");
+        }
+
+        int count = reader.ReadInt32();
+        ValidateCount(count, MaxInstances, nameof(count));
+
+        ImmutableArray<ZoneInstanceState>.Builder instances = ImmutableArray.CreateBuilder<ZoneInstanceState>(count);
+        ulong lastInstanceId = 0;
+        for (int i = 0; i < count; i++)
+        {
+            ulong instanceId = reader.ReadUInt64();
+            if (i > 0 && instanceId <= lastInstanceId)
+            {
+                throw new InvalidDataException("Instances are not in strictly ascending ZoneInstanceId order.");
+            }
+
+            lastInstanceId = instanceId;
+            PartyId partyId = new(reader.ReadInt32());
+            ZoneId zoneId = new(reader.ReadInt32());
+            int creationTick = reader.ReadInt32();
+            int ordinal = reader.ReadInt32();
+            int rngSeed = reader.ReadInt32();
+            instances.Add(new ZoneInstanceState(new ZoneInstanceId(instanceId), partyId, zoneId, creationTick, ordinal, rngSeed));
+        }
+
+        return new InstanceRegistry(nextInstanceOrdinal, instances.MoveToImmutable()).Canonicalize();
     }
 
     private static ImmutableArray<EntityLocation> BuildEntityLocations(ImmutableArray<ZoneState> zones)

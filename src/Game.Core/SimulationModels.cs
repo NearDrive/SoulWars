@@ -459,6 +459,7 @@ public sealed record WorldState(
     ImmutableArray<EntityLocation> EntityLocations,
     PartyRegistry? PartyRegistry = null,
     PartyInviteRegistry? PartyInviteRegistry = null,
+    InstanceRegistry? InstanceRegistry = null,
     ImmutableArray<LootEntityState> LootEntities = default,
     ImmutableArray<PlayerInventoryState> PlayerInventories = default,
     ImmutableArray<PlayerDeathAuditEntry> PlayerDeathAuditLog = default,
@@ -479,6 +480,7 @@ public sealed record WorldState(
 {
     public PartyRegistry PartyRegistryOrEmpty => PartyRegistry ?? Game.Core.PartyRegistry.Empty;
     public PartyInviteRegistry PartyInviteRegistryOrEmpty => PartyInviteRegistry ?? Game.Core.PartyInviteRegistry.Empty;
+    public InstanceRegistry InstanceRegistryOrEmpty => InstanceRegistry ?? Game.Core.InstanceRegistry.Empty;
 
     public bool TryGetZone(ZoneId id, out ZoneState zone)
     {
@@ -656,6 +658,15 @@ public sealed record WorldState(
         };
     }
 
+
+
+    public WorldState WithInstanceRegistry(InstanceRegistry instanceRegistry)
+    {
+        return this with
+        {
+            InstanceRegistry = instanceRegistry.Canonicalize()
+        };
+    }
 
     public WorldState WithCombatBudgetCounters(uint droppedTotal, uint droppedLastTick, uint emittedLastTick)
     {
