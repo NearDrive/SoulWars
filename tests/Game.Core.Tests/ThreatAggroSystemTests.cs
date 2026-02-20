@@ -31,6 +31,8 @@ public sealed class ThreatAccumulationTests
 
     private static readonly EntityId NpcId = new(100001);
 
+    private readonly record struct ScenarioRunResult(string FinalChecksum, ImmutableArray<int> AggroTrace);
+
     private static WorldState EnterPlayers(WorldState state, params EntityId[] players)
     {
         ImmutableArray<WorldCommand> commands = players
@@ -114,6 +116,8 @@ public sealed class AggroDeterminismTests
 
     private static readonly EntityId NpcId = new(100001);
 
+    private readonly record struct ScenarioRunResult(string FinalChecksum, ImmutableArray<int> AggroTrace);
+
     private static WorldState Step(WorldState state, ImmutableArray<WorldCommand> commands) => Simulation.Step(ThreatAccumulationTests_CreateConfig(), state, new Inputs(commands));
 
     private static WorldCommand Enter(int playerId, int x) => new(WorldCommandKind.EnterZone, new EntityId(playerId), new ZoneId(1), SpawnPos: new Vec2Fix(Fix32.FromInt(x), Fix32.FromInt(5)));
@@ -167,17 +171,19 @@ public sealed class TankVsDpsScenarioReplayTests
     public void TankVsDps_Replay_Is_Deterministic_And_Aggro_Follows_Threat()
     {
         SimulationConfig config = AggroDeterminismTests_ThreatAccumulationTests_CreateConfig();
-        ImmutableArray<int> baseline = Run(config, restartTick: null);
-        ImmutableArray<int> resumed = Run(config, restartTick: 10);
+        ScenarioRunResult baseline = Run(config, restartTick: null);
+        ScenarioRunResult resumed = Run(config, restartTick: 10);
 
-        Assert.Equal(baseline, resumed);
-        Assert.Contains(-1, baseline);
-        Assert.Contains(1, baseline);
+        Assert.Equal(baseline.FinalChecksum, resumed.FinalChecksum);
+        Assert.Contains(-1, baseline.AggroTrace);
+        Assert.Contains(1, baseline.AggroTrace);
     }
 
     private static readonly EntityId NpcId = new(100001);
 
-    private static ImmutableArray<int> Run(SimulationConfig config, int? restartTick)
+    private readonly record struct ScenarioRunResult(string FinalChecksum, ImmutableArray<int> AggroTrace);
+
+    private static ScenarioRunResult Run(SimulationConfig config, int? restartTick)
     {
         WorldState state = AggroDeterminismTests_ThreatAccumulationTests_CreateWorld(config);
         state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
@@ -204,7 +210,7 @@ public sealed class TankVsDpsScenarioReplayTests
             }
         }
 
-        return aggroTrace.ToImmutable();
+        return new ScenarioRunResult(StateChecksum.Compute(state), aggroTrace.ToImmutable());
     }
 
     private static EntityState GetNpc(WorldState state) => Assert.Single(state.Zones[0].Entities.Where(e => e.Id.Value == NpcId.Value));
