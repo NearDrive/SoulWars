@@ -381,6 +381,8 @@ public static class WorldStateSerializer
         EnsureEqualLength(count, entities.Health.Length, nameof(entities.Health));
         EnsureEqualLength(count, entities.Combat.Length, nameof(entities.Combat));
         EnsureEqualLength(count, entities.Ai.Length, nameof(entities.Ai));
+        EnsureEqualLength(count, entities.MoveIntents.Length, nameof(entities.MoveIntents));
+        EnsureEqualLength(count, entities.NavAgents.Length, nameof(entities.NavAgents));
         int threatCount = entities.Threat.IsDefault ? 0 : entities.Threat.Length;
         if (threatCount != 0)
         {
@@ -436,6 +438,32 @@ public static class WorldStateSerializer
                 writer.Write(ai.WanderY);
             }
 
+            if (mask.Has(ComponentMask.MoveIntentBit))
+            {
+                MoveIntentComponent moveIntent = entities.MoveIntents[i];
+                writer.Write((byte)moveIntent.Type);
+                writer.Write(moveIntent.TargetEntityId.Value);
+                writer.Write(moveIntent.TargetX.Raw);
+                writer.Write(moveIntent.TargetY.Raw);
+                writer.Write(moveIntent.RepathEveryTicks);
+                writer.Write(moveIntent.NextRepathTick);
+                writer.Write(moveIntent.PathLen);
+                writer.Write(moveIntent.PathIndex);
+                ImmutableArray<TileCoord> path = moveIntent.Path.IsDefault ? ImmutableArray<TileCoord>.Empty : moveIntent.Path;
+                writer.Write(path.Length);
+                for (int pathIndex = 0; pathIndex < path.Length; pathIndex++)
+                {
+                    writer.Write(path[pathIndex].X);
+                    writer.Write(path[pathIndex].Y);
+                }
+            }
+
+            if (mask.Has(ComponentMask.NavAgentBit))
+            {
+                NavAgentComponent navAgent = entities.NavAgents[i];
+                writer.Write(navAgent.ArrivalEpsilon.Raw);
+            }
+
             if (mask.Has(ComponentMask.ThreatBit))
             {
                 ThreatComponent threat = threatCount == 0 ? ThreatComponent.Empty : entities.Threat[i];
@@ -465,6 +493,8 @@ public static class WorldStateSerializer
         ImmutableArray<HealthComponent>.Builder health = ImmutableArray.CreateBuilder<HealthComponent>(entityCount);
         ImmutableArray<CombatComponent>.Builder combat = ImmutableArray.CreateBuilder<CombatComponent>(entityCount);
         ImmutableArray<AiComponent>.Builder ai = ImmutableArray.CreateBuilder<AiComponent>(entityCount);
+        ImmutableArray<MoveIntentComponent>.Builder moveIntents = ImmutableArray.CreateBuilder<MoveIntentComponent>(entityCount);
+        ImmutableArray<NavAgentComponent>.Builder navAgents = ImmutableArray.CreateBuilder<NavAgentComponent>(entityCount);
         ImmutableArray<ThreatComponent>.Builder threat = ImmutableArray.CreateBuilder<ThreatComponent>(entityCount);
 
         int previousEntityId = int.MinValue;
@@ -492,6 +522,8 @@ public static class WorldStateSerializer
             HealthComponent entityHealth = default;
             CombatComponent entityCombat = default;
             AiComponent entityAi = default;
+            MoveIntentComponent moveIntent = MoveIntentComponent.Default;
+            NavAgentComponent navAgent = NavAgentComponent.Default;
             ThreatComponent entityThreat = ThreatComponent.Empty;
 
             if (mask.Has(ComponentMask.PositionBit))
@@ -535,6 +567,47 @@ public static class WorldStateSerializer
                     WanderY: reader.ReadSByte());
             }
 
+            if (mask.Has(ComponentMask.MoveIntentBit) && snapshotVersion >= 9)
+            {
+                byte moveIntentTypeRaw = reader.ReadByte();
+                if (!Enum.IsDefined(typeof(MoveIntentType), moveIntentTypeRaw))
+                {
+                    throw new InvalidDataException($"Unknown MoveIntentType value '{moveIntentTypeRaw}'.");
+                }
+
+                EntityId targetEntityId = new(reader.ReadInt32());
+                Fix32 targetX = new(reader.ReadInt32());
+                Fix32 targetY = new(reader.ReadInt32());
+                int repathEveryTicks = reader.ReadInt32();
+                int nextRepathTick = reader.ReadInt32();
+                int pathLen = reader.ReadInt32();
+                int pathIndex = reader.ReadInt32();
+                int storedPathCount = reader.ReadInt32();
+                ValidateCount(storedPathCount, MaxEntityCountPerZone, nameof(storedPathCount));
+
+                ImmutableArray<TileCoord>.Builder path = ImmutableArray.CreateBuilder<TileCoord>(storedPathCount);
+                for (int pathEntry = 0; pathEntry < storedPathCount; pathEntry++)
+                {
+                    path.Add(new TileCoord(reader.ReadInt32(), reader.ReadInt32()));
+                }
+
+                moveIntent = new MoveIntentComponent(
+                    (MoveIntentType)moveIntentTypeRaw,
+                    targetEntityId,
+                    targetX,
+                    targetY,
+                    repathEveryTicks,
+                    nextRepathTick,
+                    path.MoveToImmutable(),
+                    pathLen,
+                    pathIndex);
+            }
+
+            if (mask.Has(ComponentMask.NavAgentBit) && snapshotVersion >= 9)
+            {
+                navAgent = new NavAgentComponent(new Fix32(reader.ReadInt32()));
+            }
+
             if (mask.Has(ComponentMask.ThreatBit) && snapshotVersion >= 9)
             {
                 int entryCount = reader.ReadInt32();
@@ -570,6 +643,8 @@ public static class WorldStateSerializer
             health.Add(entityHealth);
             combat.Add(entityCombat);
             ai.Add(entityAi);
+            moveIntents.Add(moveIntent);
+            navAgents.Add(navAgent);
             threat.Add(entityThreat);
         }
 
@@ -581,6 +656,8 @@ public static class WorldStateSerializer
             health.MoveToImmutable(),
             combat.MoveToImmutable(),
             ai.MoveToImmutable(),
+            moveIntents.MoveToImmutable(),
+            navAgents.MoveToImmutable(),
             ImmutableArray<StatusEffectsComponent>.Empty,
             ImmutableArray<SkillCooldownsComponent>.Empty,
             threat.MoveToImmutable());
