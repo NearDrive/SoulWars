@@ -187,7 +187,12 @@ public sealed class ReplayVerifyLeashScenarioTests
         ImmutableArray<string> baseline = RunReplay(out EntityState baselineNpc);
         ImmutableArray<string> replay = RunReplay(out EntityState replayNpc);
 
-        Assert.Equal(baseline, replay);
+        Assert.Equal(baseline.Length, replay.Length);
+        for (int i = 0; i < baseline.Length; i++)
+        {
+            Assert.Equal(baseline[i], replay[i]);
+        }
+
         Assert.False(baselineNpc.Leash.IsLeashing);
         Assert.Equal(MoveIntentType.Hold, baselineNpc.MoveIntent.Type);
         Assert.Equal(baselineNpc.Pos, replayNpc.Pos);
