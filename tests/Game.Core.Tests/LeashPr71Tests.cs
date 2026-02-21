@@ -19,7 +19,9 @@ public sealed class LeashTriggerTests
         EntityId playerId = new(1);
 
         state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
-            new WorldCommand(WorldCommandKind.EnterZone, playerId, zoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(3) + Half, Fix32.FromInt(1) + Half)))));
+            new WorldCommand(WorldCommandKind.EnterZone, playerId, zoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(10) + Half, Fix32.FromInt(1) + Half)))));
+
+        state = OverrideNpcLeashRadius(state, zoneId, npcId, Fix32.FromInt(1));
 
         ZoneState initialZone = Assert.Single(state.Zones);
         EntityState initialNpc = initialZone.Entities.Single(e => e.Id == npcId);
@@ -50,6 +52,18 @@ public sealed class LeashTriggerTests
         Assert.True(observedActivation);
     }
 
+
+    private static WorldState OverrideNpcLeashRadius(WorldState state, ZoneId zoneId, EntityId npcId, Fix32 radius)
+    {
+        Assert.True(state.TryGetZone(zoneId, out ZoneState zone));
+        ImmutableArray<EntityState> updated = zone.Entities
+            .Select(entity => entity.Id == npcId
+                ? entity with { Leash = LeashComponent.Create(new Vec2Fix(entity.Leash.AnchorX, entity.Leash.AnchorY), radius) }
+                : entity)
+            .ToImmutableArray();
+
+        return state.WithZoneUpdated(zone.WithEntities(updated));
+    }
     private static Fix32 DistSqToAnchor(EntityState npc)
     {
         Fix32 dx = npc.Pos.X - npc.Leash.AnchorX;
