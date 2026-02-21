@@ -184,21 +184,22 @@ public sealed class ReplayVerifyLeashScenarioTests
     [Trait("Category", "Canary")]
     public void ReplayVerify_LeashScenario_IsStable_AndReturnsToAnchor()
     {
-        ImmutableArray<string> baseline = RunReplay(out EntityState baselineNpc);
-        ImmutableArray<string> replay = RunReplay(out EntityState replayNpc);
+        ReplayOutcome baseline = RunReplay();
+        ReplayOutcome replay = RunReplay();
 
-        Assert.Equal(baseline.Length, replay.Length);
-        for (int i = 0; i < baseline.Length; i++)
+        Assert.Equal(baseline.Checksums.Length, replay.Checksums.Length);
+        for (int i = 0; i < baseline.Checksums.Length; i++)
         {
-            Assert.Equal(baseline[i], replay[i]);
+            Assert.Equal(baseline.Checksums[i], replay.Checksums[i]);
         }
 
-        Assert.False(baselineNpc.Leash.IsLeashing);
-        Assert.Equal(MoveIntentType.Hold, baselineNpc.MoveIntent.Type);
-        Assert.Equal(baselineNpc.Pos, replayNpc.Pos);
+        Assert.True(baseline.SawLeashing);
+        Assert.False(baseline.FinalNpc.Leash.IsLeashing);
+        Assert.True(IsWithinAnchorRadius(baseline.FinalNpc));
+        Assert.Equal(baseline.FinalNpc.Pos, replay.FinalNpc.Pos);
     }
 
-    private static ImmutableArray<string> RunReplay(out EntityState finalNpc)
+    private static ReplayOutcome RunReplay()
     {
         SimulationConfig config = CreateConfig(7103);
         WorldState state = Simulation.CreateInitialState(config, BuildZone());
@@ -210,16 +211,33 @@ public sealed class ReplayVerifyLeashScenarioTests
             new WorldCommand(WorldCommandKind.EnterZone, kiterId, zoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(14) + Half, Fix32.FromInt(14) + Half)))));
 
         ImmutableArray<string>.Builder checksums = ImmutableArray.CreateBuilder<string>(160);
+        bool sawLeashing = false;
         for (int tick = 0; tick < 160; tick++)
         {
             state = Simulation.Step(config, state, new Inputs(ImmutableArray<WorldCommand>.Empty));
+            ZoneState tickZone = Assert.Single(state.Zones);
+            EntityState tickNpc = tickZone.Entities.Single(e => e.Id == npcId);
+            sawLeashing |= tickNpc.Leash.IsLeashing;
             checksums.Add(StateChecksum.ComputeGlobalChecksum(state));
         }
 
         ZoneState zone = Assert.Single(state.Zones);
-        finalNpc = zone.Entities.Single(e => e.Id == npcId);
-        return checksums.ToImmutable();
+        EntityState finalNpc = zone.Entities.Single(e => e.Id == npcId);
+        return new ReplayOutcome(checksums.ToImmutable(), finalNpc, sawLeashing);
     }
+
+    private static bool IsWithinAnchorRadius(EntityState npc)
+    {
+        Fix32 dx = npc.Pos.X - npc.Leash.AnchorX;
+        Fix32 dy = npc.Pos.Y - npc.Leash.AnchorY;
+        Fix32 distSq = (dx * dx) + (dy * dy);
+        return distSq <= npc.Leash.RadiusSq;
+    }
+
+    private readonly record struct ReplayOutcome(
+        ImmutableArray<string> Checksums,
+        EntityState FinalNpc,
+        bool SawLeashing);
 
     private static ZoneDefinitions BuildZone()
     {
