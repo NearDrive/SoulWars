@@ -155,7 +155,9 @@ public static class EncounterSystem
                 Kind: EntityKind.Npc,
                 NextWanderChangeTick: state.Tick + config.NpcWanderPeriodTicks,
                 WanderX: 0,
-                WanderY: 0));
+                WanderY: 0,
+                Leash: LeashComponent.Create(new Vec2Fix(action.X, action.Y), Fix32.FromInt(12)),
+                ResetOnLeash: ResetOnLeashComponent.Default));
         }
 
         ZoneState updatedZone = zone.WithEntities(builder.ToImmutable());

@@ -8,6 +8,7 @@ public static class Simulation
     private const int DefaultAttackDamage = 10;
     private const int DefaultAttackCooldownTicks = 10;
     private const int NpcSpawnMaxAttempts = 64;
+    private static readonly Fix32 DefaultNpcLeashRadius = Fix32.FromInt(12);
     private static readonly Fix32 LootPickupRange = Fix32.FromInt(3) / Fix32.FromInt(2);
     private const string DefaultNpcArchetypeId = "npc.default";
     public const long DefaultStartingGold = 1000;
@@ -289,6 +290,7 @@ public static class Simulation
         updated = updated.WithCombatLogEvents(CombatEventBuffer.TrimCombatLog(retainedCombatLog, config.MaxCombatLogEventsRetained));
         updated = updated.WithProjectileEvents(tickProjectileEvents.ToImmutable());
         updated = ApplyThreatFromCombatEvents(updated);
+        updated = ApplyLeashSystem(updated);
 
         foreach (ZoneState zone in updated.Zones.OrderBy(z => z.Id.Value).ToArray())
         {
@@ -418,6 +420,131 @@ public static class Simulation
         return current;
     }
 
+    private static WorldState ApplyLeashSystem(WorldState state)
+    {
+        WorldState current = state;
+        foreach (ZoneState zone in state.Zones.OrderBy(z => z.Id.Value))
+        {
+            ImmutableArray<EntityState> ordered = zone.Entities.OrderBy(e => e.Id.Value).ToImmutableArray();
+            ImmutableArray<EntityState>.Builder next = ImmutableArray.CreateBuilder<EntityState>(ordered.Length);
+            bool changed = false;
+
+            for (int i = 0; i < ordered.Length; i++)
+            {
+                EntityState entity = ordered[i];
+                if (entity.Kind != EntityKind.Npc || !entity.IsAlive)
+                {
+                    next.Add(entity);
+                    continue;
+                }
+
+                LeashComponent leash = entity.Leash;
+                if (leash.RadiusSq.Raw <= 0)
+                {
+                    next.Add(entity);
+                    continue;
+                }
+
+                Vec2Fix anchor = new(leash.AnchorX, leash.AnchorY);
+                Fix32 arrivalEpsilon = entity.NavAgent.Equals(default(NavAgentComponent))
+                    ? NavAgentComponent.Default.ArrivalEpsilon
+                    : entity.NavAgent.ArrivalEpsilon;
+                Fix32 arrivalEpsilonSq = arrivalEpsilon * arrivalEpsilon;
+
+                Fix32 dx = entity.Pos.X - anchor.X;
+                Fix32 dy = entity.Pos.Y - anchor.Y;
+                Fix32 distSq = (dx * dx) + (dy * dy);
+
+                if (!leash.IsLeashing && distSq > leash.RadiusSq)
+                {
+                    leash = leash with { IsLeashing = true };
+                    MoveIntentComponent moveIntent = entity.MoveIntent with
+                    {
+                        Type = MoveIntentType.GoToPoint,
+                        TargetEntityId = default,
+                        TargetX = leash.AnchorX,
+                        TargetY = leash.AnchorY,
+                        NextRepathTick = state.Tick,
+                        Path = ImmutableArray<TileCoord>.Empty,
+                        PathLen = 0,
+                        PathIndex = 0
+                    };
+
+                    EntityState updatedEntity = entity with
+                    {
+                        Leash = leash,
+                        MoveIntent = moveIntent,
+                        Threat = entity.ResetOnLeash.ClearThreat ? ThreatComponent.Empty : entity.Threat,
+                        WanderX = 0,
+                        WanderY = 0
+                    };
+
+                    next.Add(updatedEntity);
+                    changed = true;
+                    continue;
+                }
+
+                if (leash.IsLeashing && distSq <= arrivalEpsilonSq)
+                {
+                    leash = leash with { IsLeashing = false };
+                    MoveIntentComponent holdIntent = entity.MoveIntent with
+                    {
+                        Type = MoveIntentType.Hold,
+                        TargetEntityId = default,
+                        Path = ImmutableArray<TileCoord>.Empty,
+                        PathLen = 0,
+                        PathIndex = 0
+                    };
+
+                    EntityState updatedEntity = entity with
+                    {
+                        Leash = leash,
+                        MoveIntent = holdIntent,
+                        Threat = entity.ResetOnLeash.ClearThreat ? ThreatComponent.Empty : entity.Threat,
+                        Hp = entity.ResetOnLeash.ResetHp ? entity.MaxHp : entity.Hp,
+                        StatusEffects = entity.ResetOnLeash.ClearStatuses ? StatusEffectsComponent.Empty : entity.StatusEffects,
+                        WanderX = 0,
+                        WanderY = 0
+                    };
+
+                    next.Add(updatedEntity);
+                    changed = true;
+                    continue;
+                }
+
+                if (leash.IsLeashing)
+                {
+                    MoveIntentComponent moveIntent = entity.MoveIntent with
+                    {
+                        Type = MoveIntentType.GoToPoint,
+                        TargetEntityId = default,
+                        TargetX = leash.AnchorX,
+                        TargetY = leash.AnchorY
+                    };
+
+                    EntityState updatedEntity = entity with
+                    {
+                        MoveIntent = moveIntent,
+                        Threat = entity.ResetOnLeash.ClearThreat ? ThreatComponent.Empty : entity.Threat
+                    };
+
+                    next.Add(updatedEntity);
+                    changed = changed || !Equals(updatedEntity, entity);
+                    continue;
+                }
+
+                next.Add(entity);
+            }
+
+            if (changed)
+            {
+                current = current.WithZoneUpdated(zone.WithEntities(next.ToImmutable()));
+            }
+        }
+
+        return current;
+    }
+
     private static ZoneState RunNpcAiAndApply(SimulationConfig config, int tick, ZoneState zone, SimulationInstrumentation? instrumentation)
     {
         List<WorldCommand> npcCommands = new();
@@ -441,8 +568,19 @@ public static class Simulation
             }
 
             EntityState npc = entity;
-            (EntityState? target, ThreatComponent sanitizedThreat, Fix32 targetDistSq) = SelectNpcTarget(ordered, orderedIds, npc, aggroRangeSq);
-            npc = npc with { Threat = sanitizedThreat };
+            bool isLeashing = npc.Leash.IsLeashing;
+
+            EntityState? target = null;
+            Fix32 targetDistSq = new(int.MaxValue);
+            if (isLeashing)
+            {
+                npc = npc with { Threat = npc.ResetOnLeash.ClearThreat ? ThreatComponent.Empty : npc.Threat };
+            }
+            else
+            {
+                (target, ThreatComponent sanitizedThreat, targetDistSq) = SelectNpcTarget(ordered, orderedIds, npc, aggroRangeSq);
+                npc = npc with { Threat = sanitizedThreat };
+            }
 
             MoveIntentComponent moveIntent = npc.MoveIntent;
             if (moveIntent.RepathEveryTicks <= 0)
@@ -452,7 +590,17 @@ public static class Simulation
 
             bool targetChanged = false;
 
-            if (target is not null)
+            if (isLeashing)
+            {
+                moveIntent = moveIntent with
+                {
+                    Type = MoveIntentType.GoToPoint,
+                    TargetEntityId = default,
+                    TargetX = npc.Leash.AnchorX,
+                    TargetY = npc.Leash.AnchorY
+                };
+            }
+            else if (target is not null)
             {
                 targetChanged = moveIntent.Type != MoveIntentType.ChaseEntity
                     || moveIntent.TargetEntityId.Value != target.Id.Value;
@@ -567,7 +715,7 @@ public static class Simulation
                 }
             }
 
-            if (target is not null)
+            if (!isLeashing && target is not null)
             {
                 Fix32 attackRangeSq = npc.AttackRange * npc.AttackRange;
                 bool canAttack = tick - npc.LastAttackTick >= npc.AttackCooldownTicks;
@@ -1381,7 +1529,9 @@ public static class Simulation
                 Kind: EntityKind.Npc,
                 NextWanderChangeTick: 0,
                 WanderX: 0,
-                WanderY: 0));
+                WanderY: 0,
+                Leash: LeashComponent.Create(spawn, DefaultNpcLeashRadius),
+                ResetOnLeash: ResetOnLeashComponent.Default));
         }
 
         return npcs
@@ -1443,7 +1593,9 @@ public static class Simulation
                 Kind: EntityKind.Npc,
                 NextWanderChangeTick: 0,
                 WanderX: 0,
-                WanderY: 0));
+                WanderY: 0,
+                Leash: LeashComponent.Create(position, DefaultNpcLeashRadius),
+                ResetOnLeash: ResetOnLeashComponent.Default));
 
         }
 
@@ -2548,6 +2700,11 @@ public static class Simulation
         if (!caster.IsAlive)
         {
             return CastResult.Rejected_NoSuchCaster;
+        }
+
+        if (caster.Kind == EntityKind.Npc && caster.Leash.IsLeashing)
+        {
+            return CastResult.Rejected_InvalidTarget;
         }
 
         if (caster.StatusEffects.HasStun)
