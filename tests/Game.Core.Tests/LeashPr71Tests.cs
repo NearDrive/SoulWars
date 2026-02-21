@@ -112,8 +112,8 @@ public sealed class ResetStateDeterminismTests
         Assert.True(npcB.Leash.IsLeashing);
         Assert.Empty(npcA.Threat.OrderedEntries());
         Assert.Empty(npcB.Threat.OrderedEntries());
-        Assert.NotEmpty(npcA.StatusEffects.OrderedEffects());
-        Assert.NotEmpty(npcB.StatusEffects.OrderedEffects());
+        Assert.False((npcA.StatusEffects.Effects.IsDefault ? ImmutableArray<StatusEffectInstance>.Empty : npcA.StatusEffects.Effects).IsEmpty);
+        Assert.False((npcB.StatusEffects.Effects.IsDefault ? ImmutableArray<StatusEffectInstance>.Empty : npcB.StatusEffects.Effects).IsEmpty);
         Assert.Equal(StateChecksum.ComputeGlobalChecksum(resultA), StateChecksum.ComputeGlobalChecksum(resultB));
     }
 
