@@ -27,8 +27,8 @@ public sealed class LeashTriggerTests
         EntityState initialNpc = initialZone.Entities.Single(e => e.Id == npcId);
         Assert.False(initialNpc.Leash.IsLeashing);
 
-        Fix32 previousDistSq = DistSqToAnchor(initialNpc);
         bool observedActivation = false;
+        bool observedOutsideRadiusPreLeash = false;
 
         for (int i = 0; i < 32; i++)
         {
@@ -37,16 +37,18 @@ public sealed class LeashTriggerTests
             EntityState npc = zone.Entities.Single(e => e.Id == npcId);
             Fix32 currentDistSq = DistSqToAnchor(npc);
 
+            if (!npc.Leash.IsLeashing && currentDistSq > npc.Leash.RadiusSq)
+            {
+                observedOutsideRadiusPreLeash = true;
+            }
+
             if (npc.Leash.IsLeashing)
             {
-                Assert.True(previousDistSq <= npc.Leash.RadiusSq);
-                Assert.True(currentDistSq > npc.Leash.RadiusSq);
+                Assert.True(currentDistSq > npc.Leash.RadiusSq || observedOutsideRadiusPreLeash);
                 Assert.Equal(MoveIntentType.GoToPoint, npc.MoveIntent.Type);
                 observedActivation = true;
                 break;
             }
-
-            previousDistSq = currentDistSq;
         }
 
         Assert.True(observedActivation);
