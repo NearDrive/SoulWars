@@ -196,6 +196,8 @@ public readonly record struct ComponentMask(uint Bits)
     public const uint ThreatBit = 1u << 4;
     public const uint MoveIntentBit = 1u << 5;
     public const uint NavAgentBit = 1u << 6;
+    public const uint LeashBit = 1u << 7;
+    public const uint ResetOnLeashBit = 1u << 8;
 
     public bool Has(uint bit) => (Bits & bit) != 0;
 }
@@ -241,6 +243,30 @@ public readonly record struct NavAgentComponent(Fix32 ArrivalEpsilon)
     public static NavAgentComponent Default => new(new Fix32(Fix32.OneRaw / 8));
 }
 
+public readonly record struct LeashComponent(
+    Fix32 AnchorX,
+    Fix32 AnchorY,
+    Fix32 Radius,
+    Fix32 RadiusSq,
+    bool IsLeashing)
+{
+    public static LeashComponent Disabled => new(Fix32.Zero, Fix32.Zero, Fix32.Zero, Fix32.Zero, false);
+
+    public static LeashComponent Create(Vec2Fix anchor, Fix32 radius)
+    {
+        Fix32 safeRadius = radius < Fix32.Zero ? Fix32.Zero : radius;
+        return new LeashComponent(anchor.X, anchor.Y, safeRadius, safeRadius * safeRadius, false);
+    }
+}
+
+public readonly record struct ResetOnLeashComponent(
+    bool ClearThreat,
+    bool ResetHp,
+    bool ClearStatuses)
+{
+    public static ResetOnLeashComponent Default => new(true, false, false);
+}
+
 public sealed record EntityState(
     EntityId Id,
     Vec2Fix Pos,
@@ -261,7 +287,9 @@ public sealed record EntityState(
     DefenseStatsComponent DefenseStats = default,
     StatusEffectsComponent StatusEffects = default,
     SkillCooldownsComponent SkillCooldowns = default,
-    ThreatComponent Threat = default);
+    ThreatComponent Threat = default,
+    LeashComponent Leash = default,
+    ResetOnLeashComponent ResetOnLeash = default);
 
 public sealed record ZoneEntities(
     ImmutableArray<EntityId> AliveIds,
@@ -275,7 +303,9 @@ public sealed record ZoneEntities(
     ImmutableArray<NavAgentComponent> NavAgents,
     ImmutableArray<StatusEffectsComponent> StatusEffects = default,
     ImmutableArray<SkillCooldownsComponent> SkillCooldowns = default,
-    ImmutableArray<ThreatComponent> Threat = default)
+    ImmutableArray<ThreatComponent> Threat = default,
+    ImmutableArray<LeashComponent> Leash = default,
+    ImmutableArray<ResetOnLeashComponent> ResetOnLeash = default)
 {
     public static ZoneEntities Empty => new(
         ImmutableArray<EntityId>.Empty,
@@ -289,7 +319,9 @@ public sealed record ZoneEntities(
         ImmutableArray<NavAgentComponent>.Empty,
         ImmutableArray<StatusEffectsComponent>.Empty,
         ImmutableArray<SkillCooldownsComponent>.Empty,
-        ImmutableArray<ThreatComponent>.Empty);
+        ImmutableArray<ThreatComponent>.Empty,
+        ImmutableArray<LeashComponent>.Empty,
+        ImmutableArray<ResetOnLeashComponent>.Empty);
 
     public static int FindIndex(ImmutableArray<EntityId> ids, EntityId id)
     {
@@ -337,6 +369,10 @@ public sealed record ZoneEntities(
             SkillCooldownsComponent skillCooldowns = i < skillCooldownCount ? SkillCooldowns[i] : SkillCooldownsComponent.Empty;
             int threatCount = Threat.IsDefault ? 0 : Threat.Length;
             ThreatComponent threat = i < threatCount ? Threat[i] : ThreatComponent.Empty;
+            int leashCount = Leash.IsDefault ? 0 : Leash.Length;
+            LeashComponent leash = i < leashCount ? Leash[i] : LeashComponent.Disabled;
+            int resetOnLeashCount = ResetOnLeash.IsDefault ? 0 : ResetOnLeash.Length;
+            ResetOnLeashComponent resetOnLeash = i < resetOnLeashCount ? ResetOnLeash[i] : ResetOnLeashComponent.Default;
             builder.Add(new EntityState(
                 Id: AliveIds[i],
                 Pos: position.Pos,
@@ -357,7 +393,9 @@ public sealed record ZoneEntities(
                 NavAgent: navAgent,
                 StatusEffects: status,
                 SkillCooldowns: skillCooldowns,
-                Threat: threat));
+                Threat: threat,
+                Leash: leash,
+                ResetOnLeash: resetOnLeash));
         }
 
         return builder.MoveToImmutable();
@@ -381,6 +419,8 @@ public sealed record ZoneEntities(
         ImmutableArray<StatusEffectsComponent>.Builder statusEffects = ImmutableArray.CreateBuilder<StatusEffectsComponent>(ordered.Length);
         ImmutableArray<SkillCooldownsComponent>.Builder skillCooldowns = ImmutableArray.CreateBuilder<SkillCooldownsComponent>(ordered.Length);
         ImmutableArray<ThreatComponent>.Builder threat = ImmutableArray.CreateBuilder<ThreatComponent>(ordered.Length);
+        ImmutableArray<LeashComponent>.Builder leash = ImmutableArray.CreateBuilder<LeashComponent>(ordered.Length);
+        ImmutableArray<ResetOnLeashComponent>.Builder resetOnLeash = ImmutableArray.CreateBuilder<ResetOnLeashComponent>(ordered.Length);
 
         foreach (EntityState entity in ordered)
         {
@@ -393,6 +433,8 @@ public sealed record ZoneEntities(
                 bits |= ComponentMask.ThreatBit;
                 bits |= ComponentMask.MoveIntentBit;
                 bits |= ComponentMask.NavAgentBit;
+                bits |= ComponentMask.LeashBit;
+                bits |= ComponentMask.ResetOnLeashBit;
             }
 
             ids.Add(entity.Id);
@@ -413,6 +455,8 @@ public sealed record ZoneEntities(
             statusEffects.Add(entity.StatusEffects);
             skillCooldowns.Add(entity.SkillCooldowns);
             threat.Add(entity.Threat);
+            leash.Add(entity.Kind == EntityKind.Npc ? entity.Leash : LeashComponent.Disabled);
+            resetOnLeash.Add(entity.Kind == EntityKind.Npc ? entity.ResetOnLeash : default);
         }
 
         return new ZoneEntities(
@@ -427,7 +471,9 @@ public sealed record ZoneEntities(
             navAgents.MoveToImmutable(),
             statusEffects.MoveToImmutable(),
             skillCooldowns.MoveToImmutable(),
-            threat.MoveToImmutable());
+            threat.MoveToImmutable(),
+            leash.MoveToImmutable(),
+            resetOnLeash.MoveToImmutable());
     }
 }
 
