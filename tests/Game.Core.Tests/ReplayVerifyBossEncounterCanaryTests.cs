@@ -128,7 +128,7 @@ internal static class MovingBossCanaryScenario
         NpcAggroRange: Fix32.FromInt(64),
         SkillDefinitions: ImmutableArray.Create(
             new SkillDefinition(new SkillId(1), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 12, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 1),
-            new SkillDefinition(new SkillId(2), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 20, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 10),
+            new SkillDefinition(new SkillId(2), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 10, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 8),
             new SkillDefinition(new SkillId(3), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 15, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 1)),
         AiBudgets: new AiBudgetConfig(MaxPathExpansionsPerTick: 192, MaxRepathsPerTick: 1, MaxAiDecisionsPerTick: 8),
         Invariants: InvariantOptions.Enabled);
@@ -187,14 +187,14 @@ internal static class MovingBossCanaryScenario
 
         ImmutableArray<WorldCommand>.Builder commands = ImmutableArray.CreateBuilder<WorldCommand>();
 
-        bool dpsBurstWindow = (tick >= 72 && tick <= 90) || (tick >= 132 && tick <= 150);
+        bool dpsRetargetPhase = tick >= 60 && tick <= 170;
 
-        if (tick < 220 && tick % 4 == 0 && !dpsBurstWindow)
+        if (tick < 220 && tick % 4 == 0 && !dpsRetargetPhase)
         {
             commands.Add(new WorldCommand(WorldCommandKind.CastSkill, TankId, ZoneId, TargetEntityId: bossId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity));
         }
 
-        if (tick is 45 or 72 or 78 or 84 or 90 or 132 or 138 or 144 or 150 or 165)
+        if (tick is 65 or 80 or 95 or 110 or 125 or 140 or 155)
         {
             commands.Add(new WorldCommand(WorldCommandKind.CastSkill, DpsId, ZoneId, TargetEntityId: bossId, SkillId: new SkillId(2), TargetKind: CastTargetKind.Entity));
         }
