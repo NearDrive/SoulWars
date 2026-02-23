@@ -38,7 +38,7 @@ public static class WorldStateSerializer
         EncounterRegistry EncounterRegistry);
 
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 10;
+    private const int CurrentVersion = 11;
     public static int SerializerVersion => CurrentVersion;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
@@ -137,7 +137,7 @@ public static class WorldStateSerializer
         }
 
         int version = reader.ReadInt32();
-        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or CurrentVersion))
+        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or CurrentVersion))
         {
             throw new InvalidDataException($"Unsupported world-state version '{version}'.");
         }
@@ -383,6 +383,18 @@ public static class WorldStateSerializer
         EnsureEqualLength(count, entities.Ai.Length, nameof(entities.Ai));
         EnsureEqualLength(count, entities.MoveIntents.Length, nameof(entities.MoveIntents));
         EnsureEqualLength(count, entities.NavAgents.Length, nameof(entities.NavAgents));
+        int leashCount = entities.Leash.IsDefault ? 0 : entities.Leash.Length;
+        if (leashCount != 0)
+        {
+            EnsureEqualLength(count, leashCount, nameof(entities.Leash));
+        }
+
+        int resetOnLeashCount = entities.ResetOnLeash.IsDefault ? 0 : entities.ResetOnLeash.Length;
+        if (resetOnLeashCount != 0)
+        {
+            EnsureEqualLength(count, resetOnLeashCount, nameof(entities.ResetOnLeash));
+        }
+
         int threatCount = entities.Threat.IsDefault ? 0 : entities.Threat.Length;
         if (threatCount != 0)
         {
@@ -479,6 +491,24 @@ public static class WorldStateSerializer
                 }
             }
 
+            if (mask.Has(ComponentMask.LeashBit))
+            {
+                LeashComponent leash = leashCount == 0 ? LeashComponent.Disabled : entities.Leash[i];
+                writer.Write(leash.AnchorX.Raw);
+                writer.Write(leash.AnchorY.Raw);
+                writer.Write(leash.Radius.Raw);
+                writer.Write(leash.RadiusSq.Raw);
+                writer.Write(leash.IsLeashing);
+            }
+
+            if (mask.Has(ComponentMask.ResetOnLeashBit))
+            {
+                ResetOnLeashComponent resetOnLeash = resetOnLeashCount == 0 ? ResetOnLeashComponent.Default : entities.ResetOnLeash[i];
+                writer.Write(resetOnLeash.ClearThreat);
+                writer.Write(resetOnLeash.ResetHp);
+                writer.Write(resetOnLeash.ClearStatuses);
+            }
+
         }
     }
 
@@ -497,6 +527,8 @@ public static class WorldStateSerializer
         ImmutableArray<MoveIntentComponent>.Builder moveIntents = ImmutableArray.CreateBuilder<MoveIntentComponent>(entityCount);
         ImmutableArray<NavAgentComponent>.Builder navAgents = ImmutableArray.CreateBuilder<NavAgentComponent>(entityCount);
         ImmutableArray<ThreatComponent>.Builder threat = ImmutableArray.CreateBuilder<ThreatComponent>(entityCount);
+        ImmutableArray<LeashComponent>.Builder leash = ImmutableArray.CreateBuilder<LeashComponent>(entityCount);
+        ImmutableArray<ResetOnLeashComponent>.Builder resetOnLeash = ImmutableArray.CreateBuilder<ResetOnLeashComponent>(entityCount);
 
         int previousEntityId = int.MinValue;
 
@@ -526,6 +558,8 @@ public static class WorldStateSerializer
             MoveIntentComponent moveIntent = MoveIntentComponent.Default;
             NavAgentComponent navAgent = NavAgentComponent.Default;
             ThreatComponent entityThreat = ThreatComponent.Empty;
+            LeashComponent entityLeash = LeashComponent.Disabled;
+            ResetOnLeashComponent entityResetOnLeash = ResetOnLeashComponent.Default;
 
             if (mask.Has(ComponentMask.PositionBit))
             {
@@ -639,6 +673,24 @@ public static class WorldStateSerializer
                 entityThreat = new ThreatComponent(entries.MoveToImmutable());
             }
 
+            if (mask.Has(ComponentMask.LeashBit) && snapshotVersion >= 11)
+            {
+                entityLeash = new LeashComponent(
+                    AnchorX: new Fix32(reader.ReadInt32()),
+                    AnchorY: new Fix32(reader.ReadInt32()),
+                    Radius: new Fix32(reader.ReadInt32()),
+                    RadiusSq: new Fix32(reader.ReadInt32()),
+                    IsLeashing: reader.ReadBoolean());
+            }
+
+            if (mask.Has(ComponentMask.ResetOnLeashBit) && snapshotVersion >= 11)
+            {
+                entityResetOnLeash = new ResetOnLeashComponent(
+                    ClearThreat: reader.ReadBoolean(),
+                    ResetHp: reader.ReadBoolean(),
+                    ClearStatuses: reader.ReadBoolean());
+            }
+
             ids.Add(new EntityId(entityIdValue));
             masks.Add(mask);
             kinds.Add((EntityKind)kindRaw);
@@ -649,6 +701,8 @@ public static class WorldStateSerializer
             moveIntents.Add(moveIntent);
             navAgents.Add(navAgent);
             threat.Add(entityThreat);
+            leash.Add(entityLeash);
+            resetOnLeash.Add(entityResetOnLeash);
         }
 
         return new ZoneEntities(
@@ -663,7 +717,9 @@ public static class WorldStateSerializer
             navAgents.MoveToImmutable(),
             ImmutableArray<StatusEffectsComponent>.Empty,
             ImmutableArray<SkillCooldownsComponent>.Empty,
-            threat.MoveToImmutable());
+            threat.MoveToImmutable(),
+            leash.MoveToImmutable(),
+            resetOnLeash.MoveToImmutable());
     }
 
     private static void WriteLootEntities(BinaryWriter writer, ImmutableArray<LootEntityState> lootEntities)
