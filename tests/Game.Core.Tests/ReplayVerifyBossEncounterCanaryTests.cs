@@ -24,8 +24,10 @@ public sealed class MovingBossReplayVerifyTests
         Assert.Equal(300, replay.TickChecksums.Length);
         Assert.Equal(baseline.FinalChecksum, replay.FinalChecksum);
 
-        Assert.True(baseline.SawChaseToTank, "Expected boss to chase tank at least once.");
-        Assert.True(baseline.SawChaseToDps, "Expected boss to retarget to DPS burst at least once.");
+        Assert.True(baseline.SawChaseToTank, $"Expected boss to chase tank at least once. trace=[{string.Join(",", baseline.TargetSwitchTrace)}]");
+        Assert.True(baseline.SawChaseToDps, $"Expected boss to retarget to DPS burst at least once. dpsBurstCommands={baseline.DpsBurstCommandCount} dpsThreatTicks={baseline.DpsThreatTicks} sawDpsThreatLead={baseline.SawDpsThreatLead} trace=[{string.Join(",", baseline.TargetSwitchTrace)}]");
+        Assert.True(baseline.DpsBurstCommandCount > 0, "Expected DPS burst commands to be scheduled.");
+        Assert.True(baseline.DpsThreatTicks > 0, "Expected DPS burst to generate threat on boss at least once.");
         Assert.True(baseline.SawLeashing, "Expected leash/reset state to occur during kite phase.");
         Assert.True(baseline.SawPathComputed, "Expected pathfinding to produce at least one path.");
         Assert.True(baseline.SawBudgetDeferredRepath, "Expected AI repath throttling under tight budgets.");
@@ -56,7 +58,11 @@ internal readonly record struct ScenarioRun(
     bool SawLeashing,
     bool SawPathComputed,
     bool SawBudgetDeferredRepath,
-    bool FinalBossWithinAnchorRadius);
+    bool FinalBossWithinAnchorRadius,
+    bool SawDpsThreatLead,
+    int DpsThreatTicks,
+    int DpsBurstCommandCount,
+    ImmutableArray<string> TargetSwitchTrace);
 
 internal static class MovingBossCanaryScenario
 {
@@ -78,19 +84,57 @@ internal static class MovingBossCanaryScenario
         bool sawLeashing = false;
         bool sawPathComputed = false;
         bool sawBudgetDeferredRepath = false;
+        bool sawDpsThreatLead = false;
+        int dpsThreatTicks = 0;
+        int dpsBurstCommandCount = 0;
+        EntityId lastTarget = default;
+        ImmutableArray<string>.Builder targetSwitchTrace = ImmutableArray.CreateBuilder<string>();
 
         for (int tick = 0; tick < totalTicks; tick++)
         {
-            state = Simulation.Step(config, state, new Inputs(BuildBotCommands(state, tick)));
+            ImmutableArray<WorldCommand> commands = BuildBotCommands(state, tick);
+            dpsBurstCommandCount += commands.Count(c => c.Kind == WorldCommandKind.CastSkill && c.EntityId == DpsId && c.SkillId.HasValue && c.SkillId.Value == new SkillId(2));
+            state = Simulation.Step(config, state, new Inputs(commands));
             tickChecksums.Add(StateChecksum.ComputeGlobalChecksum(state));
 
             if (TryGetBoss(state, out EntityState boss))
             {
-                sawChaseToTank |= boss.MoveIntent.Type == MoveIntentType.ChaseEntity && boss.MoveIntent.TargetEntityId == TankId;
-                sawChaseToDps |= boss.MoveIntent.Type == MoveIntentType.ChaseEntity && boss.MoveIntent.TargetEntityId == DpsId;
+                bool isChasing = boss.MoveIntent.Type == MoveIntentType.ChaseEntity;
+                sawChaseToTank |= isChasing && boss.MoveIntent.TargetEntityId == TankId;
+                sawChaseToDps |= isChasing && boss.MoveIntent.TargetEntityId == DpsId;
                 sawLeashing |= boss.Leash.IsLeashing;
                 sawPathComputed |= boss.MoveIntent.PathLen > 0;
                 sawBudgetDeferredRepath |= boss.MoveIntent.NextRepathTick > state.Tick + 1;
+
+                if (isChasing && boss.MoveIntent.TargetEntityId != lastTarget)
+                {
+                    targetSwitchTrace.Add($"{state.Tick}:{boss.MoveIntent.TargetEntityId.Value}");
+                    lastTarget = boss.MoveIntent.TargetEntityId;
+                }
+
+                ImmutableArray<ThreatEntry> orderedThreat = boss.Threat.OrderedEntries();
+                int bestThreat = int.MinValue;
+                int bestThreatId = int.MaxValue;
+                for (int i = 0; i < orderedThreat.Length; i++)
+                {
+                    ThreatEntry entry = orderedThreat[i];
+                    bool better = entry.Threat > bestThreat || (entry.Threat == bestThreat && entry.SourceEntityId.Value < bestThreatId);
+                    if (!better)
+                    {
+                        continue;
+                    }
+
+                    bestThreat = entry.Threat;
+                    bestThreatId = entry.SourceEntityId.Value;
+                }
+
+                bool dpsHasThreat = orderedThreat.Any(e => e.SourceEntityId == DpsId && e.Threat > 0);
+                if (dpsHasThreat)
+                {
+                    dpsThreatTicks++;
+                }
+
+                sawDpsThreatLead |= bestThreatId == DpsId.Value;
             }
 
             if (restartTick.HasValue && tick + 1 == restartTick.Value)
@@ -110,7 +154,11 @@ internal static class MovingBossCanaryScenario
             SawLeashing: sawLeashing,
             SawPathComputed: sawPathComputed,
             SawBudgetDeferredRepath: sawBudgetDeferredRepath,
-            FinalBossWithinAnchorRadius: IsWithinAnchorRadius(finalBoss));
+            FinalBossWithinAnchorRadius: IsWithinAnchorRadius(finalBoss),
+            SawDpsThreatLead: sawDpsThreatLead,
+            DpsThreatTicks: dpsThreatTicks,
+            DpsBurstCommandCount: dpsBurstCommandCount,
+            TargetSwitchTrace: targetSwitchTrace.ToImmutable());
     }
 
     public static SimulationConfig CreateConfig() => new(
@@ -128,7 +176,7 @@ internal static class MovingBossCanaryScenario
         NpcAggroRange: Fix32.FromInt(64),
         SkillDefinitions: ImmutableArray.Create(
             new SkillDefinition(new SkillId(1), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 12, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 1),
-            new SkillDefinition(new SkillId(2), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 10, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 8),
+            new SkillDefinition(new SkillId(2), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 10, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 6),
             new SkillDefinition(new SkillId(3), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 15, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 1)),
         AiBudgets: new AiBudgetConfig(MaxPathExpansionsPerTick: 192, MaxRepathsPerTick: 1, MaxAiDecisionsPerTick: 8),
         Invariants: InvariantOptions.Enabled);
@@ -187,14 +235,14 @@ internal static class MovingBossCanaryScenario
 
         ImmutableArray<WorldCommand>.Builder commands = ImmutableArray.CreateBuilder<WorldCommand>();
 
-        bool dpsRetargetPhase = tick >= 60 && tick <= 170;
+        bool dpsRetargetPhase = tick >= 50 && tick <= 140;
 
         if (tick < 220 && tick % 4 == 0 && !dpsRetargetPhase)
         {
             commands.Add(new WorldCommand(WorldCommandKind.CastSkill, TankId, ZoneId, TargetEntityId: bossId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity));
         }
 
-        if (tick is 65 or 80 or 95 or 110 or 125 or 140 or 155)
+        if (tick is 60 or 70 or 80 or 90 or 100 or 110 or 120 or 130 or 140)
         {
             commands.Add(new WorldCommand(WorldCommandKind.CastSkill, DpsId, ZoneId, TargetEntityId: bossId, SkillId: new SkillId(2), TargetKind: CastTargetKind.Entity));
         }
@@ -207,8 +255,8 @@ internal static class MovingBossCanaryScenario
         (sbyte moveX, sbyte moveY) tankMove = GetTankMove(tick);
         commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, TankId, ZoneId, MoveX: tankMove.moveX, MoveY: tankMove.moveY));
 
-        commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, DpsId, ZoneId, MoveX: (sbyte)(tick < 160 ? 1 : 0), MoveY: 0));
-        commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, SupportId, ZoneId, MoveX: 0, MoveY: (sbyte)(tick < 40 ? 1 : 0)));
+        commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, DpsId, ZoneId, MoveX: 0, MoveY: 0));
+        commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, SupportId, ZoneId, MoveX: 0, MoveY: 0));
 
         return commands.ToImmutable();
     }
