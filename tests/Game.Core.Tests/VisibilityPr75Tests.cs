@@ -21,12 +21,20 @@ public sealed class VisibilityGridDeterminismTests
 
         ImmutableArray<FactionId> factionsA = zoneA.Visibility.GetFactionIdsOrdered();
         ImmutableArray<FactionId> factionsB = zoneB.Visibility.GetFactionIdsOrdered();
-        Assert.Equal(factionsA, factionsB);
 
-        for (int i = 0; i < factionsA.Length; i++)
+        int[] factionValuesA = factionsA.Select(f => f.Value).ToArray();
+        int[] factionValuesB = factionsB.Select(f => f.Value).ToArray();
+        int firstDifferentIndex = FindFirstDifferentIndex(factionValuesA, factionValuesB);
+        bool sequenceEqualByValue = factionValuesA.SequenceEqual(factionValuesB);
+
+        Assert.True(sequenceEqualByValue,
+            $"Faction visibility ordering mismatch. expectedType={factionsA.GetType().FullName} actualType={factionsB.GetType().FullName} expectedCount={factionValuesA.Length} actualCount={factionValuesB.Length} expected=[{string.Join(',', factionValuesA)}] actual=[{string.Join(',', factionValuesB)}] sequenceEqualByValue={sequenceEqualByValue} firstDifferentIndex={firstDifferentIndex}");
+
+        for (int i = 0; i < factionValuesA.Length; i++)
         {
-            byte[] bytesA = zoneA.Visibility.GetPackedBytes(factionsA[i]);
-            byte[] bytesB = zoneB.Visibility.GetPackedBytes(factionsB[i]);
+            FactionId factionId = new(factionValuesA[i]);
+            byte[] bytesA = zoneA.Visibility.GetPackedBytes(factionId);
+            byte[] bytesB = zoneB.Visibility.GetPackedBytes(factionId);
             Assert.Equal(bytesA, bytesB);
         }
 
@@ -34,6 +42,21 @@ public sealed class VisibilityGridDeterminismTests
         WorldState restored = WorldStateSerializer.LoadFromBytes(snapshot);
 
         Assert.Equal(StateChecksum.Compute(runA), StateChecksum.Compute(restored));
+    }
+
+
+    private static int FindFirstDifferentIndex(int[] expected, int[] actual)
+    {
+        int minLength = Math.Min(expected.Length, actual.Length);
+        for (int i = 0; i < minLength; i++)
+        {
+            if (expected[i] != actual[i])
+            {
+                return i;
+            }
+        }
+
+        return expected.Length == actual.Length ? -1 : minLength;
     }
 
     private static WorldState RunDeterministicSequence()
