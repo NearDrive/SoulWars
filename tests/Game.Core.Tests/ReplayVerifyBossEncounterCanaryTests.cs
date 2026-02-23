@@ -28,7 +28,7 @@ public sealed class MovingBossReplayVerifyTests
         Assert.True(baseline.SawChaseToDps, $"Expected boss to retarget to DPS burst at least once. dpsBurstCommands={baseline.DpsBurstCommandCount} dpsThreatTicks={baseline.DpsThreatTicks} sawDpsThreatLead={baseline.SawDpsThreatLead} trace=[{string.Join(",", baseline.TargetSwitchTrace)}]");
         Assert.True(baseline.DpsBurstCommandCount > 0, "Expected DPS burst commands to be scheduled.");
         Assert.True(baseline.DpsThreatTicks > 0, "Expected DPS burst to generate threat on boss at least once.");
-        Assert.True(baseline.SawLeashing, "Expected leash/reset state to occur during kite phase.");
+        Assert.True(baseline.SawLeashing, $"Expected leash/reset state to occur during kite phase. maxDistSqRaw={baseline.MaxDistSqFromAnchorRaw} distBeyondLeashTicks={baseline.DistBeyondLeashTicks} leashTimeline=[{string.Join(",", baseline.LeashTimeline)}]");
         Assert.True(baseline.SawPathComputed, "Expected pathfinding to produce at least one path.");
         Assert.True(baseline.SawBudgetDeferredRepath, "Expected AI repath throttling under tight budgets.");
         Assert.True(baseline.FinalBossWithinAnchorRadius, "Expected final boss position to be within leash anchor radius after reset.");
@@ -62,7 +62,10 @@ internal readonly record struct ScenarioRun(
     bool SawDpsThreatLead,
     int DpsThreatTicks,
     int DpsBurstCommandCount,
-    ImmutableArray<string> TargetSwitchTrace);
+    ImmutableArray<string> TargetSwitchTrace,
+    int MaxDistSqFromAnchorRaw,
+    int DistBeyondLeashTicks,
+    ImmutableArray<string> LeashTimeline);
 
 internal static class MovingBossCanaryScenario
 {
@@ -87,8 +90,11 @@ internal static class MovingBossCanaryScenario
         bool sawDpsThreatLead = false;
         int dpsThreatTicks = 0;
         int dpsBurstCommandCount = 0;
+        int maxDistSqFromAnchorRaw = 0;
+        int distBeyondLeashTicks = 0;
         EntityId lastTarget = default;
         ImmutableArray<string>.Builder targetSwitchTrace = ImmutableArray.CreateBuilder<string>();
+        ImmutableArray<string>.Builder leashTimeline = ImmutableArray.CreateBuilder<string>();
 
         for (int tick = 0; tick < totalTicks; tick++)
         {
@@ -105,6 +111,20 @@ internal static class MovingBossCanaryScenario
                 sawLeashing |= boss.Leash.IsLeashing;
                 sawPathComputed |= boss.MoveIntent.PathLen > 0;
                 sawBudgetDeferredRepath |= boss.MoveIntent.NextRepathTick > state.Tick + 1;
+
+                Fix32 dxAnchor = boss.Pos.X - boss.Leash.AnchorX;
+                Fix32 dyAnchor = boss.Pos.Y - boss.Leash.AnchorY;
+                Fix32 distSqFromAnchor = (dxAnchor * dxAnchor) + (dyAnchor * dyAnchor);
+                maxDistSqFromAnchorRaw = Math.Max(maxDistSqFromAnchorRaw, distSqFromAnchor.Raw);
+                if (distSqFromAnchor > boss.Leash.RadiusSq)
+                {
+                    distBeyondLeashTicks++;
+                }
+
+                if (tick % 10 == 0 || boss.Leash.IsLeashing)
+                {
+                    leashTimeline.Add($"{state.Tick}:distSq={distSqFromAnchor.Raw}/radSq={boss.Leash.RadiusSq.Raw}/isLeashing={boss.Leash.IsLeashing}/intent={(int)boss.MoveIntent.Type}/target={boss.MoveIntent.TargetEntityId.Value}");
+                }
 
                 if (isChasing && boss.MoveIntent.TargetEntityId != lastTarget)
                 {
@@ -158,7 +178,10 @@ internal static class MovingBossCanaryScenario
             SawDpsThreatLead: sawDpsThreatLead,
             DpsThreatTicks: dpsThreatTicks,
             DpsBurstCommandCount: dpsBurstCommandCount,
-            TargetSwitchTrace: targetSwitchTrace.ToImmutable());
+            TargetSwitchTrace: targetSwitchTrace.ToImmutable(),
+            MaxDistSqFromAnchorRaw: maxDistSqFromAnchorRaw,
+            DistBeyondLeashTicks: distBeyondLeashTicks,
+            LeashTimeline: leashTimeline.ToImmutable());
     }
 
     public static SimulationConfig CreateConfig() => new(
@@ -278,15 +301,20 @@ internal static class MovingBossCanaryScenario
             return (1, 0);
         }
 
-        // Deterministic kite phase: force tank far from boss anchor so leash/reset triggers.
+        // Deterministic kite phase: first return to open x-lane, then pull north to force leash.
+        if (tick < 180)
+        {
+            return (-1, 0);
+        }
+
         if (tick < 250)
         {
-            return (1, 1);
+            return (0, 1);
         }
 
         if (tick < 280)
         {
-            return (-1, -1);
+            return (0, -1);
         }
 
         return (0, 0);
