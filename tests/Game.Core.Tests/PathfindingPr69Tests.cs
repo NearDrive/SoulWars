@@ -21,13 +21,13 @@ public sealed class PathDeterminismTests
 
         DeterministicAStar finder = new();
         TileCoord[] baselineBuffer = new TileCoord[64];
-        Assert.True(finder.TryFindPath(grid, start, goal, baselineBuffer, out int baselineLen, maxExpandedNodes: 256));
+        Assert.True(finder.TryFindPath(grid, start, goal, baselineBuffer, out int baselineLen, out _, maxExpandedNodes: 256));
         TileCoord[] baseline = baselineBuffer[..baselineLen];
 
         for (int i = 0; i < 20; i++)
         {
             TileCoord[] runBuffer = new TileCoord[64];
-            Assert.True(finder.TryFindPath(grid, start, goal, runBuffer, out int runLen, maxExpandedNodes: 256));
+            Assert.True(finder.TryFindPath(grid, start, goal, runBuffer, out int runLen, out _, maxExpandedNodes: 256));
             Assert.Equal(baselineLen, runLen);
             Assert.Equal(baseline, runBuffer[..runLen]);
         }
@@ -53,7 +53,7 @@ public sealed class PathTieBreakerTests
         DeterministicAStar finder = new();
         TileCoord[] buffer = new TileCoord[16];
 
-        Assert.True(finder.TryFindPath(grid, start, goal, buffer, out int len, maxExpandedNodes: 64));
+        Assert.True(finder.TryFindPath(grid, start, goal, buffer, out int len, out _, maxExpandedNodes: 64));
 
         TileCoord[] expected =
         [
@@ -70,7 +70,7 @@ public sealed class PathTieBreakerTests
 }
 
 [Trait("Category", "PR69")]
-public sealed class PathBudgetLimitTests
+public sealed class PathBudgetLimitPr69Tests
 {
     [Fact]
     public void InsufficientBudget_ReturnsFalseDeterministically()
@@ -93,6 +93,7 @@ public sealed class PathBudgetLimitTests
                 new TileCoord(4, 4),
                 buffer,
                 out int len,
+                out _,
                 maxExpandedNodes: 1);
 
             Assert.False(found);

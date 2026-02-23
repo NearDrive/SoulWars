@@ -17,12 +17,14 @@ public sealed class DeterministicAStar
         TileCoord goal,
         Span<TileCoord> buffer,
         out int len,
+        out int expandedCount,
         int maxExpandedNodes)
     {
         ArgumentNullException.ThrowIfNull(grid);
         ArgumentOutOfRangeException.ThrowIfNegative(maxExpandedNodes);
 
         len = 0;
+        expandedCount = 0;
 
         if (!grid.IsWalkable(start) || !grid.IsWalkable(goal))
         {
@@ -80,6 +82,7 @@ public sealed class DeterministicAStar
 
             closed[currentId] = true;
             expanded++;
+            expandedCount = expanded;
 
             if (currentId == goalId)
             {
