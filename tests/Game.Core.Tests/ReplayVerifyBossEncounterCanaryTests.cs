@@ -69,6 +69,7 @@ internal readonly record struct ScenarioRun(
 
 internal static class MovingBossCanaryScenario
 {
+    private static readonly Fix32 CanaryKiteLeashRadius = Fix32.FromInt(2);
     private static readonly ZoneId ZoneId = new(1);
     private static readonly EntityId TankId = new(401);
     private static readonly EntityId DpsId = new(402);
@@ -98,6 +99,11 @@ internal static class MovingBossCanaryScenario
 
         for (int tick = 0; tick < totalTicks; tick++)
         {
+            if (tick == 150)
+            {
+                state = OverrideBossLeashRadius(state, CanaryKiteLeashRadius);
+            }
+
             ImmutableArray<WorldCommand> commands = BuildBotCommands(state, tick);
             dpsBurstCommandCount += commands.Count(c => c.Kind == WorldCommandKind.CastSkill && c.EntityId == DpsId && c.SkillId.HasValue && c.SkillId.Value == new SkillId(2));
             state = Simulation.Step(config, state, new Inputs(commands));
@@ -365,5 +371,21 @@ internal static class MovingBossCanaryScenario
         Fix32 dy = npc.Pos.Y - npc.Leash.AnchorY;
         Fix32 distSq = (dx * dx) + (dy * dy);
         return distSq <= npc.Leash.RadiusSq;
+    }
+
+    private static WorldState OverrideBossLeashRadius(WorldState state, Fix32 leashRadius)
+    {
+        if (!state.TryGetZone(ZoneId, out ZoneState zone))
+        {
+            return state;
+        }
+
+        ImmutableArray<EntityState> updatedEntities = zone.Entities
+            .Select(entity => entity.Kind == EntityKind.Npc
+                ? entity with { Leash = LeashComponent.Create(new Vec2Fix(entity.Leash.AnchorX, entity.Leash.AnchorY), leashRadius) }
+                : entity)
+            .ToImmutableArray();
+
+        return state.WithZoneUpdated(zone.WithEntities(updatedEntities));
     }
 }
