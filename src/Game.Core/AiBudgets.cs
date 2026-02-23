@@ -3,7 +3,8 @@ namespace Game.Core;
 public readonly record struct AiBudgetConfig(
     int MaxPathExpansionsPerTick,
     int MaxRepathsPerTick,
-    int MaxAiDecisionsPerTick)
+    int MaxAiDecisionsPerTick,
+    bool IsConfigured = true)
 {
     public static AiBudgetConfig Default => new(
         MaxPathExpansionsPerTick: 4096,
@@ -13,7 +14,8 @@ public readonly record struct AiBudgetConfig(
     public AiBudgetConfig ClampNonNegative() => new(
         MaxPathExpansionsPerTick: Math.Max(0, MaxPathExpansionsPerTick),
         MaxRepathsPerTick: Math.Max(0, MaxRepathsPerTick),
-        MaxAiDecisionsPerTick: Math.Max(0, MaxAiDecisionsPerTick));
+        MaxAiDecisionsPerTick: Math.Max(0, MaxAiDecisionsPerTick),
+        IsConfigured: IsConfigured);
 }
 
 public struct AiBudgetState

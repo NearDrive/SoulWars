@@ -548,7 +548,8 @@ public static class Simulation
 
     private static ZoneState RunNpcAiAndApply(SimulationConfig config, int tick, ZoneState zone, SimulationInstrumentation? instrumentation)
     {
-        AiBudgetState budget = new(config.AiBudgets);
+        AiBudgetConfig configuredBudgets = config.AiBudgets.IsConfigured ? config.AiBudgets : AiBudgetConfig.Default;
+        AiBudgetState budget = new(configuredBudgets);
         List<WorldCommand> npcCommands = new();
         ImmutableArray<EntityState> ordered = zone.Entities
             .OrderBy(e => e.Id.Value)
