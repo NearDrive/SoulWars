@@ -307,6 +307,7 @@ public static class Simulation
         updated = ProcessVendorIntents(updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
         updated = EnsureWalletsForPlayers(updated);
         updated = updated.WithStatusEvents(tickStatusEvents.ToImmutable());
+        updated = RecalculateVisibility(updated);
 
         if (config.Invariants.EnableCoreInvariants)
         {
@@ -315,6 +316,54 @@ public static class Simulation
 
         _ = config.MaxSpeed;
         return updated;
+    }
+
+
+    private static WorldState RecalculateVisibility(WorldState state)
+    {
+        WorldState current = state;
+        foreach (ZoneState zone in state.Zones.OrderBy(z => z.Id.Value))
+        {
+            VisibilityGrid visibility = zone.Visibility;
+            if (visibility.Width != zone.Map.Width || visibility.Height != zone.Map.Height)
+            {
+                visibility = new VisibilityGrid(zone.Map.Width, zone.Map.Height);
+            }
+
+            visibility.ClearAll();
+            ImmutableArray<EntityState> orderedEntities = zone.Entities.OrderBy(e => e.Id.Value).ToImmutableArray();
+            for (int i = 0; i < orderedEntities.Length; i++)
+            {
+                EntityState entity = orderedEntities[i];
+                if (!entity.IsAlive || entity.VisionRadiusTiles <= 0)
+                {
+                    continue;
+                }
+
+                FactionId factionId = entity.FactionId;
+                visibility.EnsureFaction(factionId);
+                int centerX = Fix32.FloorToInt(entity.Pos.X);
+                int centerY = Fix32.FloorToInt(entity.Pos.Y);
+                int radius = entity.VisionRadiusTiles;
+
+                int minY = centerY - radius;
+                int maxY = centerY + radius;
+                int minX = centerX - radius;
+                int maxX = centerX + radius;
+
+                for (int y = minY; y <= maxY; y++)
+                {
+                    for (int x = minX; x <= maxX; x++)
+                    {
+                        visibility.SetVisible(factionId, x, y);
+                    }
+                }
+            }
+
+            current = current.WithZoneUpdated(zone with { Visibility = visibility });
+        }
+
+        return current;
     }
 
 

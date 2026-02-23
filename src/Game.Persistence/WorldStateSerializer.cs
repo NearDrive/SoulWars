@@ -38,7 +38,7 @@ public static class WorldStateSerializer
         EncounterRegistry EncounterRegistry);
 
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 11;
+    private const int CurrentVersion = 12;
     public static int SerializerVersion => CurrentVersion;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
@@ -83,6 +83,7 @@ public static class WorldStateSerializer
             writer.Write(zone.Id.Value);
             WriteMap(writer, zone.Map);
             WriteEntities(writer, zone.EntitiesData);
+            WriteVisibility(writer, zone.Visibility);
         }
 
         WriteLootEntities(writer, world.LootEntities.IsDefault ? ImmutableArray<LootEntityState>.Empty : world.LootEntities);
@@ -137,7 +138,7 @@ public static class WorldStateSerializer
         }
 
         int version = reader.ReadInt32();
-        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or CurrentVersion))
+        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or CurrentVersion))
         {
             throw new InvalidDataException($"Unsupported world-state version '{version}'.");
         }
@@ -191,8 +192,11 @@ public static class WorldStateSerializer
 
             TileMap map = ReadMap(reader);
             ZoneEntities entities = ReadEntities(reader, version, readDefenseForV4);
+            VisibilityGrid visibility = version >= 12
+                ? ReadVisibility(reader, map.Width, map.Height)
+                : new VisibilityGrid(map.Width, map.Height);
 
-            zones.Add(new ZoneState(new ZoneId(zoneIdValue), map, entities));
+            zones.Add(new ZoneState(new ZoneId(zoneIdValue), map, entities, ImmutableArray<PendingCastComponent>.Empty, ImmutableArray<ProjectileComponent>.Empty, visibility));
         }
 
         ImmutableArray<LootEntityState> lootEntities = version >= 2
@@ -401,6 +405,18 @@ public static class WorldStateSerializer
             EnsureEqualLength(count, threatCount, nameof(entities.Threat));
         }
 
+        int factionCount = entities.Factions.IsDefault ? 0 : entities.Factions.Length;
+        if (factionCount != 0)
+        {
+            EnsureEqualLength(count, factionCount, nameof(entities.Factions));
+        }
+
+        int visionCount = entities.VisionRadiiTiles.IsDefault ? 0 : entities.VisionRadiiTiles.Length;
+        if (visionCount != 0)
+        {
+            EnsureEqualLength(count, visionCount, nameof(entities.VisionRadiiTiles));
+        }
+
         EnsureSortedEntityIds(entities.AliveIds);
 
         writer.Write(count);
@@ -509,6 +525,10 @@ public static class WorldStateSerializer
                 writer.Write(resetOnLeash.ClearStatuses);
             }
 
+            FactionId factionId = factionCount == 0 ? FactionId.None : entities.Factions[i];
+            int visionRadiusTiles = visionCount == 0 ? 0 : entities.VisionRadiiTiles[i];
+            writer.Write(factionId.Value);
+            writer.Write(visionRadiusTiles);
         }
     }
 
@@ -529,6 +549,8 @@ public static class WorldStateSerializer
         ImmutableArray<ThreatComponent>.Builder threat = ImmutableArray.CreateBuilder<ThreatComponent>(entityCount);
         ImmutableArray<LeashComponent>.Builder leash = ImmutableArray.CreateBuilder<LeashComponent>(entityCount);
         ImmutableArray<ResetOnLeashComponent>.Builder resetOnLeash = ImmutableArray.CreateBuilder<ResetOnLeashComponent>(entityCount);
+        ImmutableArray<FactionId>.Builder factions = ImmutableArray.CreateBuilder<FactionId>(entityCount);
+        ImmutableArray<int>.Builder visionRadiiTiles = ImmutableArray.CreateBuilder<int>(entityCount);
 
         int previousEntityId = int.MinValue;
 
@@ -691,6 +713,9 @@ public static class WorldStateSerializer
                     ClearStatuses: reader.ReadBoolean());
             }
 
+            FactionId factionId = snapshotVersion >= 12 ? new FactionId(reader.ReadInt32()) : FactionId.None;
+            int visionRadiusTiles = snapshotVersion >= 12 ? reader.ReadInt32() : 0;
+
             ids.Add(new EntityId(entityIdValue));
             masks.Add(mask);
             kinds.Add((EntityKind)kindRaw);
@@ -703,6 +728,8 @@ public static class WorldStateSerializer
             threat.Add(entityThreat);
             leash.Add(entityLeash);
             resetOnLeash.Add(entityResetOnLeash);
+            factions.Add(factionId);
+            visionRadiiTiles.Add(visionRadiusTiles);
         }
 
         return new ZoneEntities(
@@ -719,7 +746,61 @@ public static class WorldStateSerializer
             ImmutableArray<SkillCooldownsComponent>.Empty,
             threat.MoveToImmutable(),
             leash.MoveToImmutable(),
-            resetOnLeash.MoveToImmutable());
+            resetOnLeash.MoveToImmutable(),
+            factions.MoveToImmutable(),
+            visionRadiiTiles.MoveToImmutable());
+    }
+
+    private static void WriteVisibility(BinaryWriter writer, VisibilityGrid visibility)
+    {
+        writer.Write(visibility.Width);
+        writer.Write(visibility.Height);
+        ImmutableArray<FactionId> factions = visibility.GetFactionIdsOrdered();
+        writer.Write(factions.Length);
+        for (int i = 0; i < factions.Length; i++)
+        {
+            FactionId factionId = factions[i];
+            byte[] bytes = visibility.GetPackedBytes(factionId);
+            writer.Write(factionId.Value);
+            writer.Write(bytes.Length);
+            writer.Write(bytes);
+        }
+    }
+
+    private static VisibilityGrid ReadVisibility(BinaryReader reader, int zoneWidth, int zoneHeight)
+    {
+        int width = reader.ReadInt32();
+        int height = reader.ReadInt32();
+        if (width != zoneWidth || height != zoneHeight)
+        {
+            throw new InvalidDataException("Visibility dimensions must match map dimensions.");
+        }
+
+        VisibilityGrid visibility = new(width, height);
+        int factionCount = reader.ReadInt32();
+        ValidateCount(factionCount, MaxEntityCountPerZone, nameof(factionCount));
+        int previousFactionId = int.MinValue;
+        for (int i = 0; i < factionCount; i++)
+        {
+            int factionIdValue = reader.ReadInt32();
+            if (factionIdValue <= previousFactionId)
+            {
+                throw new InvalidDataException("Visibility factions are not in strictly ascending FactionId order.");
+            }
+
+            previousFactionId = factionIdValue;
+            int byteCount = reader.ReadInt32();
+            ValidateCount(byteCount, (width * height + 7) / 8, nameof(byteCount));
+            byte[] bytes = reader.ReadBytes(byteCount);
+            if (bytes.Length != byteCount)
+            {
+                throw new InvalidDataException("Unexpected end of stream while reading visibility data.");
+            }
+
+            visibility.SetPackedBytes(new FactionId(factionIdValue), bytes);
+        }
+
+        return visibility;
     }
 
     private static void WriteLootEntities(BinaryWriter writer, ImmutableArray<LootEntityState> lootEntities)

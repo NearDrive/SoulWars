@@ -269,6 +269,105 @@ public readonly record struct ResetOnLeashComponent(
     public static ResetOnLeashComponent Default => new(true, false, false);
 }
 
+public readonly record struct FactionId(int Value)
+{
+    public static readonly FactionId None = new(0);
+}
+
+public sealed class VisibilityGrid
+{
+    private readonly SortedDictionary<int, bool[]> _tilesByFaction = new();
+
+    public VisibilityGrid(int width, int height)
+    {
+        if (width < 0 || height < 0)
+        {
+            throw new ArgumentOutOfRangeException(width < 0 ? nameof(width) : nameof(height));
+        }
+
+        Width = width;
+        Height = height;
+        TileCount = checked(width * height);
+    }
+
+    public int Width { get; }
+    public int Height { get; }
+    public int TileCount { get; }
+
+    public void ClearAll()
+    {
+        foreach ((_, bool[] tiles) in _tilesByFaction)
+        {
+            Array.Clear(tiles, 0, tiles.Length);
+        }
+    }
+
+    public void EnsureFaction(FactionId factionId)
+    {
+        if (!_tilesByFaction.ContainsKey(factionId.Value))
+        {
+            _tilesByFaction.Add(factionId.Value, new bool[TileCount]);
+        }
+    }
+
+    public void SetVisible(FactionId factionId, int x, int y)
+    {
+        if (!IsInBounds(x, y))
+        {
+            return;
+        }
+
+        EnsureFaction(factionId);
+        _tilesByFaction[factionId.Value][TileIndex(x, y)] = true;
+    }
+
+    public bool IsVisible(FactionId factionId, int x, int y)
+    {
+        if (!IsInBounds(x, y))
+        {
+            return false;
+        }
+
+        return _tilesByFaction.TryGetValue(factionId.Value, out bool[]? tiles) && tiles[TileIndex(x, y)];
+    }
+
+    public int TileIndex(int x, int y) => checked((y * Width) + x);
+
+    public ImmutableArray<FactionId> GetFactionIdsOrdered()
+        => _tilesByFaction.Keys.Select(id => new FactionId(id)).ToImmutableArray();
+
+    public byte[] GetPackedBytes(FactionId factionId)
+    {
+        EnsureFaction(factionId);
+        bool[] tiles = _tilesByFaction[factionId.Value];
+        byte[] packed = new byte[(tiles.Length + 7) / 8];
+        for (int i = 0; i < tiles.Length; i++)
+        {
+            if (tiles[i])
+            {
+                packed[i >> 3] |= (byte)(1 << (i & 7));
+            }
+        }
+
+        return packed;
+    }
+
+    public void SetPackedBytes(FactionId factionId, ReadOnlySpan<byte> packed)
+    {
+        EnsureFaction(factionId);
+        bool[] tiles = _tilesByFaction[factionId.Value];
+        for (int i = 0; i < tiles.Length; i++)
+        {
+            int byteIndex = i >> 3;
+            byte mask = (byte)(1 << (i & 7));
+            tiles[i] = byteIndex < packed.Length && (packed[byteIndex] & mask) != 0;
+        }
+    }
+
+    private bool IsInBounds(int x, int y)
+        => x >= 0 && y >= 0 && x < Width && y < Height;
+}
+
 public sealed record EntityState(
     EntityId Id,
     Vec2Fix Pos,
@@ -291,7 +390,9 @@ public sealed record EntityState(
     SkillCooldownsComponent SkillCooldowns = default,
     ThreatComponent Threat = default,
     LeashComponent Leash = default,
-    ResetOnLeashComponent ResetOnLeash = default);
+    ResetOnLeashComponent ResetOnLeash = default,
+    FactionId FactionId = default,
+    int VisionRadiusTiles = 0);
 
 public sealed record ZoneEntities(
     ImmutableArray<EntityId> AliveIds,
@@ -307,7 +408,9 @@ public sealed record ZoneEntities(
     ImmutableArray<SkillCooldownsComponent> SkillCooldowns = default,
     ImmutableArray<ThreatComponent> Threat = default,
     ImmutableArray<LeashComponent> Leash = default,
-    ImmutableArray<ResetOnLeashComponent> ResetOnLeash = default)
+    ImmutableArray<ResetOnLeashComponent> ResetOnLeash = default,
+    ImmutableArray<FactionId> Factions = default,
+    ImmutableArray<int> VisionRadiiTiles = default)
 {
     public static ZoneEntities Empty => new(
         ImmutableArray<EntityId>.Empty,
@@ -323,7 +426,9 @@ public sealed record ZoneEntities(
         ImmutableArray<SkillCooldownsComponent>.Empty,
         ImmutableArray<ThreatComponent>.Empty,
         ImmutableArray<LeashComponent>.Empty,
-        ImmutableArray<ResetOnLeashComponent>.Empty);
+        ImmutableArray<ResetOnLeashComponent>.Empty,
+        ImmutableArray<FactionId>.Empty,
+        ImmutableArray<int>.Empty);
 
     public static int FindIndex(ImmutableArray<EntityId> ids, EntityId id)
     {
@@ -375,6 +480,10 @@ public sealed record ZoneEntities(
             LeashComponent leash = i < leashCount ? Leash[i] : LeashComponent.Disabled;
             int resetOnLeashCount = ResetOnLeash.IsDefault ? 0 : ResetOnLeash.Length;
             ResetOnLeashComponent resetOnLeash = i < resetOnLeashCount ? ResetOnLeash[i] : ResetOnLeashComponent.Default;
+            int factionCount = Factions.IsDefault ? 0 : Factions.Length;
+            FactionId factionId = i < factionCount ? Factions[i] : FactionId.None;
+            int visionCount = VisionRadiiTiles.IsDefault ? 0 : VisionRadiiTiles.Length;
+            int visionRadiusTiles = i < visionCount ? VisionRadiiTiles[i] : 0;
             builder.Add(new EntityState(
                 Id: AliveIds[i],
                 Pos: position.Pos,
@@ -397,7 +506,9 @@ public sealed record ZoneEntities(
                 SkillCooldowns: skillCooldowns,
                 Threat: threat,
                 Leash: leash,
-                ResetOnLeash: resetOnLeash));
+                ResetOnLeash: resetOnLeash,
+                FactionId: factionId,
+                VisionRadiusTiles: visionRadiusTiles));
         }
 
         return builder.MoveToImmutable();
@@ -423,6 +534,8 @@ public sealed record ZoneEntities(
         ImmutableArray<ThreatComponent>.Builder threat = ImmutableArray.CreateBuilder<ThreatComponent>(ordered.Length);
         ImmutableArray<LeashComponent>.Builder leash = ImmutableArray.CreateBuilder<LeashComponent>(ordered.Length);
         ImmutableArray<ResetOnLeashComponent>.Builder resetOnLeash = ImmutableArray.CreateBuilder<ResetOnLeashComponent>(ordered.Length);
+        ImmutableArray<FactionId>.Builder factions = ImmutableArray.CreateBuilder<FactionId>(ordered.Length);
+        ImmutableArray<int>.Builder visionRadiiTiles = ImmutableArray.CreateBuilder<int>(ordered.Length);
 
         foreach (EntityState entity in ordered)
         {
@@ -459,6 +572,8 @@ public sealed record ZoneEntities(
             threat.Add(entity.Threat);
             leash.Add(entity.Kind == EntityKind.Npc ? entity.Leash : LeashComponent.Disabled);
             resetOnLeash.Add(entity.Kind == EntityKind.Npc ? entity.ResetOnLeash : default);
+            factions.Add(entity.FactionId);
+            visionRadiiTiles.Add(Math.Max(0, entity.VisionRadiusTiles));
         }
 
         return new ZoneEntities(
@@ -475,19 +590,21 @@ public sealed record ZoneEntities(
             skillCooldowns.MoveToImmutable(),
             threat.MoveToImmutable(),
             leash.MoveToImmutable(),
-            resetOnLeash.MoveToImmutable());
+            resetOnLeash.MoveToImmutable(),
+            factions.MoveToImmutable(),
+            visionRadiiTiles.MoveToImmutable());
     }
 }
 
-public sealed record ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData, ImmutableArray<PendingCastComponent> PendingCasts, ImmutableArray<ProjectileComponent> Projectiles)
+public sealed record ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData, ImmutableArray<PendingCastComponent> PendingCasts, ImmutableArray<ProjectileComponent> Projectiles, VisibilityGrid Visibility)
 {
     public ZoneState(ZoneId Id, TileMap Map, ImmutableArray<EntityState> Entities)
-        : this(Id, Map, ZoneEntities.FromEntityStates(Entities), ImmutableArray<PendingCastComponent>.Empty, ImmutableArray<ProjectileComponent>.Empty)
+        : this(Id, Map, ZoneEntities.FromEntityStates(Entities), ImmutableArray<PendingCastComponent>.Empty, ImmutableArray<ProjectileComponent>.Empty, new VisibilityGrid(Map.Width, Map.Height))
     {
     }
 
     public ZoneState(ZoneId Id, TileMap Map, ZoneEntities EntitiesData)
-        : this(Id, Map, EntitiesData, ImmutableArray<PendingCastComponent>.Empty, ImmutableArray<ProjectileComponent>.Empty)
+        : this(Id, Map, EntitiesData, ImmutableArray<PendingCastComponent>.Empty, ImmutableArray<ProjectileComponent>.Empty, new VisibilityGrid(Map.Width, Map.Height))
     {
     }
 
