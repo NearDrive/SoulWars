@@ -54,6 +54,7 @@ public sealed class AiDecisionBudgetTests
             .ToImmutableArray();
 
         Assert.Equal(10, npcs.Length);
+        int expectedDeferredRepathTick = state.Tick + 1;
 
         int repathed = npcs.Count(n => n.MoveIntent.PathLen > 0 && n.MoveIntent.NextRepathTick > 1);
         Assert.Equal(3, repathed);
@@ -67,7 +68,7 @@ public sealed class AiDecisionBudgetTests
         foreach (EntityState npc in npcs.Skip(3))
         {
             Assert.Equal(0, npc.MoveIntent.PathLen);
-            Assert.Equal(1, npc.MoveIntent.NextRepathTick);
+            Assert.Equal(expectedDeferredRepathTick, npc.MoveIntent.NextRepathTick);
         }
     }
 }
