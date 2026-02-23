@@ -202,8 +202,9 @@ public sealed class ServerHostIntegrationTests
             sbyte moveX = (sbyte)deterministic.Next(-1, 2);
             sbyte moveY = (sbyte)deterministic.Next(-1, 2);
 
-            int targetTick = logicalTick + 1;
-            client.SendInput(targetTick, moveX, moveY);
+            int previousTick = logicalTick;
+            int targetTick = previousTick + 1;
+            client.SendInput(previousTick + 1, moveX, moveY);
             runtime.StepOnce();
 
             currentSnapshot = await WaitForMessageAsync<Snapshot>(
