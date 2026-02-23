@@ -1,5 +1,5 @@
-using System.Collections.Immutable;
 using System;
+using System.Collections.Immutable;
 using System.Linq;
 using Game.Core;
 using Game.Persistence;
@@ -7,49 +7,42 @@ using Xunit;
 
 namespace Game.Core.Tests;
 
-public sealed class BossEncounterCanaryReplayVerifyTests
+public sealed class MovingBossReplayVerifyTests
 {
     [Fact]
-    [Trait("Category", "PR68")]
+    [Trait("Category", "PR74")]
     [Trait("Category", "ReplayVerify")]
     [Trait("Category", "Canary")]
-    public void ReplayVerify_BossEncounter_Canary_HasStableTickChecksums_AndCombatLogCount()
+    public void ReplayVerify_MovingBoss_Canary_HasNoDivergence_AndExpectedBehavior()
     {
-        SimulationConfig config = BossEncounterCanaryScenario.CreateConfig();
+        SimulationConfig config = MovingBossCanaryScenario.CreateConfig();
 
-        ScenarioRun baseline = BossEncounterCanaryScenario.Run(config, restartTick: null);
-        ScenarioRun replay = BossEncounterCanaryScenario.Run(config, restartTick: null);
+        ScenarioRun baseline = MovingBossCanaryScenario.Run(config, restartTick: null);
+        ScenarioRun replay = MovingBossCanaryScenario.Run(config, restartTick: null);
 
-        Assert.Equal(baseline.TickChecksums.Length, replay.TickChecksums.Length);
-
-        int? firstDivergentTick = null;
-        for (int i = 0; i < baseline.TickChecksums.Length; i++)
-        {
-            if (!string.Equals(baseline.TickChecksums[i], replay.TickChecksums[i], StringComparison.Ordinal))
-            {
-                firstDivergentTick = i + 1;
-                break;
-            }
-        }
-
-        Assert.Null(firstDivergentTick);
-        Assert.Equal(baseline.FinalChecksum, replay.FinalChecksum);
-        Assert.Equal(baseline.CombatEventCount, replay.CombatEventCount);
-        Assert.True(baseline.BossAggroDirectionTrace.SequenceEqual(replay.BossAggroDirectionTrace));
         Assert.Equal(300, baseline.TickChecksums.Length);
+        Assert.Equal(baseline.TickChecksums, replay.TickChecksums);
+        Assert.Equal(baseline.FinalChecksum, replay.FinalChecksum);
+
+        Assert.True(baseline.SawChaseToTank, "Expected boss to chase tank at least once.");
+        Assert.True(baseline.SawChaseToDps, "Expected boss to retarget to DPS burst at least once.");
+        Assert.True(baseline.SawLeashing, "Expected leash/reset state to occur during kite phase.");
+        Assert.True(baseline.SawPathComputed, "Expected pathfinding to produce at least one path.");
+        Assert.True(baseline.SawBudgetDeferredRepath, "Expected AI repath throttling under tight budgets.");
+        Assert.True(baseline.FinalBossWithinAnchorRadius, "Expected final boss position to be within leash anchor radius after reset.");
     }
 }
 
-public sealed class BossEncounterRestartDeterminismTests
+public sealed class MovingBossRestartDeterminismTests
 {
     [Fact]
-    [Trait("Category", "PR68")]
-    public void BossEncounter_RestartAtTick150_MatchesNoRestart_FinalChecksum()
+    [Trait("Category", "PR74")]
+    public void MovingBoss_RestartAtTick150_MatchesNoRestart_FinalChecksum()
     {
-        SimulationConfig config = BossEncounterCanaryScenario.CreateConfig();
+        SimulationConfig config = MovingBossCanaryScenario.CreateConfig();
 
-        ScenarioRun baseline = BossEncounterCanaryScenario.Run(config, restartTick: null);
-        ScenarioRun resumed = BossEncounterCanaryScenario.Run(config, restartTick: 150);
+        ScenarioRun baseline = MovingBossCanaryScenario.Run(config, restartTick: null);
+        ScenarioRun resumed = MovingBossCanaryScenario.Run(config, restartTick: 150);
 
         Assert.Equal(baseline.FinalChecksum, resumed.FinalChecksum);
     }
@@ -58,34 +51,47 @@ public sealed class BossEncounterRestartDeterminismTests
 internal readonly record struct ScenarioRun(
     string FinalChecksum,
     ImmutableArray<string> TickChecksums,
-    int CombatEventCount,
-    ImmutableArray<int> BossAggroDirectionTrace);
+    bool SawChaseToTank,
+    bool SawChaseToDps,
+    bool SawLeashing,
+    bool SawPathComputed,
+    bool SawBudgetDeferredRepath,
+    bool FinalBossWithinAnchorRadius);
 
-internal static class BossEncounterCanaryScenario
+internal static class MovingBossCanaryScenario
 {
     private static readonly ZoneId ZoneId = new(1);
-    private static readonly EntityId TankId = new(201);
-    private static readonly EntityId DpsId = new(202);
-    private static readonly EntityId SupportId = new(203);
+    private static readonly EntityId TankId = new(401);
+    private static readonly EntityId DpsId = new(402);
+    private static readonly EntityId SupportId = new(403);
 
     public static ScenarioRun Run(SimulationConfig config, int? restartTick)
     {
         WorldState state = Simulation.CreateInitialState(config, CreateZoneDefinitions());
-
         state = EnterPartyMembers(state, config);
-        state = CreatePartyAndInstance(state, config);
 
         const int totalTicks = 300;
         ImmutableArray<string>.Builder tickChecksums = ImmutableArray.CreateBuilder<string>(totalTicks);
-        ImmutableArray<int>.Builder aggroTrace = ImmutableArray.CreateBuilder<int>(totalTicks);
-        int combatEventCount = 0;
+
+        bool sawChaseToTank = false;
+        bool sawChaseToDps = false;
+        bool sawLeashing = false;
+        bool sawPathComputed = false;
+        bool sawBudgetDeferredRepath = false;
 
         for (int tick = 0; tick < totalTicks; tick++)
         {
             state = Simulation.Step(config, state, new Inputs(BuildBotCommands(state, tick)));
-            tickChecksums.Add(StateChecksum.Compute(state));
-            combatEventCount += state.CombatEvents.IsDefault ? 0 : state.CombatEvents.Length;
-            aggroTrace.Add(GetBossAggroDirection(state));
+            tickChecksums.Add(StateChecksum.ComputeGlobalChecksum(state));
+
+            if (TryGetBoss(state, out EntityState boss))
+            {
+                sawChaseToTank |= boss.MoveIntent.Type == MoveIntentType.ChaseEntity && boss.MoveIntent.TargetEntityId == TankId;
+                sawChaseToDps |= boss.MoveIntent.Type == MoveIntentType.ChaseEntity && boss.MoveIntent.TargetEntityId == DpsId;
+                sawLeashing |= boss.Leash.IsLeashing;
+                sawPathComputed |= boss.MoveIntent.PathLen > 0;
+                sawBudgetDeferredRepath |= boss.MoveIntent.NextRepathTick > state.Tick + 1;
+            }
 
             if (restartTick.HasValue && tick + 1 == restartTick.Value)
             {
@@ -94,15 +100,21 @@ internal static class BossEncounterCanaryScenario
             }
         }
 
+        Assert.True(TryGetBoss(state, out EntityState finalBoss), "Boss should exist at end of run.");
+
         return new ScenarioRun(
-            FinalChecksum: StateChecksum.Compute(state),
+            FinalChecksum: StateChecksum.ComputeGlobalChecksum(state),
             TickChecksums: tickChecksums.ToImmutable(),
-            CombatEventCount: combatEventCount,
-            BossAggroDirectionTrace: aggroTrace.ToImmutable());
+            SawChaseToTank: sawChaseToTank,
+            SawChaseToDps: sawChaseToDps,
+            SawLeashing: sawLeashing,
+            SawPathComputed: sawPathComputed,
+            SawBudgetDeferredRepath: sawBudgetDeferredRepath,
+            FinalBossWithinAnchorRadius: IsWithinAnchorRadius(finalBoss));
     }
 
     public static SimulationConfig CreateConfig() => new(
-        Seed: 6801,
+        Seed: 7401,
         TickHz: 20,
         DtFix: new Fix32(3277),
         MoveSpeed: Fix32.FromInt(4),
@@ -113,39 +125,42 @@ internal static class BossEncounterCanaryScenario
         MapHeight: 32,
         NpcCountPerZone: 0,
         NpcWanderPeriodTicks: 9999,
-        NpcAggroRange: Fix32.FromInt(32),
+        NpcAggroRange: Fix32.FromInt(64),
         SkillDefinitions: ImmutableArray.Create(
-            new SkillDefinition(new SkillId(1), Fix32.FromInt(32).Raw, 0, MaxTargets: 1, CooldownTicks: 12, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 2), // tank steady
-            new SkillDefinition(new SkillId(2), Fix32.FromInt(32).Raw, 0, MaxTargets: 1, CooldownTicks: 1, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 8), // dps burst
-            new SkillDefinition(new SkillId(3), Fix32.FromInt(32).Raw, 0, MaxTargets: 1, CooldownTicks: 30, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 1), // support soft dps
-            new SkillDefinition(new SkillId(10), Fix32.FromInt(32).Raw, 0, MaxTargets: 8, CooldownTicks: 1, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Self, BaseAmount: 3), // encounter aoe
-            new SkillDefinition(new SkillId(11), Fix32.FromInt(32).Raw, 0, MaxTargets: 1, CooldownTicks: 1, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 4)),
+            new SkillDefinition(new SkillId(1), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 4, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 2),
+            new SkillDefinition(new SkillId(2), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 20, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 14),
+            new SkillDefinition(new SkillId(3), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 15, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 1)),
+        AiBudgets: new AiBudgetConfig(PathExpansionPerTick: 192, RepathDecisionsPerTick: 1, DecisionChecksPerTick: 8),
         Invariants: InvariantOptions.Enabled);
 
     private static ZoneDefinitions CreateZoneDefinitions()
     {
         EncounterDefinition encounter = new(
-            new EncounterId(6801),
-            "boss-encounter-canary",
+            new EncounterId(7401),
+            "moving-boss-canary",
             Version: 1,
             ZoneId,
             ImmutableArray.Create(
                 new EncounterPhaseDefinition(ImmutableArray.Create(
-                    new EncounterTriggerDefinition(EncounterTriggerKind.OnTick, AtTickOffset: 10, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.SpawnNpc, X: Fix32.FromInt(10), Y: Fix32.FromInt(10), Count: 1))),
-                    new EncounterTriggerDefinition(EncounterTriggerKind.OnHpBelowPct, Target: EntityRef.Boss, Pct: 70, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.SetPhase, PhaseIndex: 1))))),
-                new EncounterPhaseDefinition(ImmutableArray.Create(
-                    new EncounterTriggerDefinition(EncounterTriggerKind.OnTick, AtTickOffset: 60, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.CastSkill, Caster: EntityRef.Boss, SkillId: new SkillId(10), Target: TargetSpec.Self))),
-                    new EncounterTriggerDefinition(EncounterTriggerKind.OnTick, AtTickOffset: 120, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.SpawnNpc, X: Fix32.FromInt(12), Y: Fix32.FromInt(12), Count: 3))),
-                    new EncounterTriggerDefinition(EncounterTriggerKind.OnTick, AtTickOffset: 180, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.CastSkill, Caster: EntityRef.Boss, SkillId: new SkillId(10), Target: TargetSpec.Self))),
-                    new EncounterTriggerDefinition(EncounterTriggerKind.OnHpBelowPct, Target: EntityRef.Boss, Pct: 30, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.SetPhase, PhaseIndex: 2))))),
-                new EncounterPhaseDefinition(ImmutableArray.Create(
-                    new EncounterTriggerDefinition(EncounterTriggerKind.OnTick, AtTickOffset: 240, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.ApplyStatus, StatusSource: EntityRef.Boss, StatusTarget: EntityRef.Boss, StatusType: StatusEffectType.Slow, StatusDurationTicks: 60, StatusMagnitudeRaw: new Fix32(Fix32.OneRaw / 2).Raw))),
-                    new EncounterTriggerDefinition(EncounterTriggerKind.OnTick, AtTickOffset: 270, Actions: ImmutableArray.Create(new EncounterActionDefinition(EncounterActionKind.CastSkill, Caster: EntityRef.Boss, SkillId: new SkillId(11), Target: TargetSpec.Entity(EntityRef.FromEntityId(TankId)))))))));
+                    new EncounterTriggerDefinition(
+                        EncounterTriggerKind.OnTick,
+                        AtTickOffset: 1,
+                        Actions: ImmutableArray.Create(new EncounterActionDefinition(
+                            EncounterActionKind.SpawnNpc,
+                            NpcArchetype: "boss",
+                            X: Fix32.FromInt(6),
+                            Y: Fix32.FromInt(6),
+                            Count: 1)))))));
+
+        ImmutableArray<ZoneAabb> maze = ImmutableArray.Create(
+            new ZoneAabb(Fix32.FromInt(10), Fix32.FromInt(0), Fix32.FromInt(11), Fix32.FromInt(22)),
+            new ZoneAabb(Fix32.FromInt(20), Fix32.FromInt(10), Fix32.FromInt(21), Fix32.FromInt(32)),
+            new ZoneAabb(Fix32.FromInt(10), Fix32.FromInt(10), Fix32.FromInt(20), Fix32.FromInt(11)));
 
         ZoneDefinition zone = new(
             ZoneId,
             new ZoneBounds(Fix32.Zero, Fix32.Zero, Fix32.FromInt(32), Fix32.FromInt(32)),
-            ImmutableArray<ZoneAabb>.Empty,
+            maze,
             ImmutableArray<NpcSpawnDefinition>.Empty,
             null,
             null,
@@ -157,46 +172,26 @@ internal static class BossEncounterCanaryScenario
     private static WorldState EnterPartyMembers(WorldState state, SimulationConfig config)
     {
         return Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
-            new WorldCommand(WorldCommandKind.EnterZone, TankId, ZoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(8), Fix32.FromInt(10))),
-            new WorldCommand(WorldCommandKind.EnterZone, DpsId, ZoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(12), Fix32.FromInt(10))),
-            new WorldCommand(WorldCommandKind.EnterZone, SupportId, ZoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(9), Fix32.FromInt(10))))));
-    }
-
-    private static WorldState CreatePartyAndInstance(WorldState state, SimulationConfig config)
-    {
-        PartyRegistry parties = state.PartyRegistryOrEmpty.CreateParty(TankId);
-        state = state with { PartyRegistry = parties };
-
-        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
-            new WorldCommand(WorldCommandKind.InviteToParty, TankId, ZoneId, InviteePlayerId: DpsId),
-            new WorldCommand(WorldCommandKind.InviteToParty, TankId, ZoneId, InviteePlayerId: SupportId))));
-
-        ImmutableArray<PartyInvite> invites = state.PartyInviteRegistryOrEmpty.Invites;
-        PartyInvite dpsInvite = invites.Single(i => i.InviteeId == DpsId);
-        PartyInvite supportInvite = invites.Single(i => i.InviteeId == SupportId);
-
-        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
-            new WorldCommand(WorldCommandKind.AcceptPartyInvite, DpsId, ZoneId, PartyId: dpsInvite.PartyId),
-            new WorldCommand(WorldCommandKind.AcceptPartyInvite, SupportId, ZoneId, PartyId: supportInvite.PartyId))));
-
-        PartyState party = Assert.Single(state.PartyRegistryOrEmpty.Parties);
-        (InstanceRegistry instanceRegistry, ZoneInstanceState instance) = state.InstanceRegistryOrEmpty.CreateInstance(config.Seed, party.Id, ZoneId, creationTick: state.Tick);
-        Assert.Equal(party.Id, instance.PartyId);
-        return state with { InstanceRegistry = instanceRegistry };
+            new WorldCommand(WorldCommandKind.EnterZone, TankId, ZoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(8), Fix32.FromInt(8))),
+            new WorldCommand(WorldCommandKind.EnterZone, DpsId, ZoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(14), Fix32.FromInt(8))),
+            new WorldCommand(WorldCommandKind.EnterZone, SupportId, ZoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(9), Fix32.FromInt(9))))));
     }
 
     private static ImmutableArray<WorldCommand> BuildBotCommands(WorldState state, int tick)
     {
-        if (tick >= 256 || !TryGetBossId(state, out EntityId bossId))
+        if (!TryGetBossId(state, out EntityId bossId))
         {
             return ImmutableArray<WorldCommand>.Empty;
         }
 
         ImmutableArray<WorldCommand>.Builder commands = ImmutableArray.CreateBuilder<WorldCommand>();
 
-        commands.Add(new WorldCommand(WorldCommandKind.CastSkill, TankId, ZoneId, TargetEntityId: bossId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity));
+        if (tick < 210)
+        {
+            commands.Add(new WorldCommand(WorldCommandKind.CastSkill, TankId, ZoneId, TargetEntityId: bossId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity));
+        }
 
-        if ((tick + 30) % 60 == 0)
+        if (tick is 45 or 70 or 95 or 120)
         {
             commands.Add(new WorldCommand(WorldCommandKind.CastSkill, DpsId, ZoneId, TargetEntityId: bossId, SkillId: new SkillId(2), TargetKind: CastTargetKind.Entity));
         }
@@ -206,7 +201,43 @@ internal static class BossEncounterCanaryScenario
             commands.Add(new WorldCommand(WorldCommandKind.CastSkill, SupportId, ZoneId, TargetEntityId: bossId, SkillId: new SkillId(3), TargetKind: CastTargetKind.Entity));
         }
 
+        (int moveX, int moveY) tankMove = GetTankMove(tick);
+        commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, TankId, ZoneId, MoveX: tankMove.moveX, MoveY: tankMove.moveY));
+
+        commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, DpsId, ZoneId, MoveX: tick < 160 ? 1 : 0, MoveY: 0));
+        commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, SupportId, ZoneId, MoveX: 0, MoveY: tick < 40 ? 1 : 0));
+
         return commands.ToImmutable();
+    }
+
+    private static (int moveX, int moveY) GetTankMove(int tick)
+    {
+        if (tick < 30)
+        {
+            return (1, 0);
+        }
+
+        if (tick < 80)
+        {
+            return (0, 1);
+        }
+
+        if (tick < 150)
+        {
+            return (1, 0);
+        }
+
+        if (tick < 210)
+        {
+            return (0, 1);
+        }
+
+        if (tick < 260)
+        {
+            return (-1, -1);
+        }
+
+        return (0, 0);
     }
 
     private static bool TryGetBossId(WorldState state, out EntityId bossId)
@@ -217,35 +248,43 @@ internal static class BossEncounterCanaryScenario
             return false;
         }
 
-        ImmutableArray<EncounterRuntimeState> runtimes = state.EncounterRegistryOrEmpty.RuntimeStates;
-        if (runtimes.IsDefaultOrEmpty)
+        bossId = zone.Entities
+            .Where(e => e.Kind == EntityKind.Npc)
+            .OrderBy(e => e.Id.Value)
+            .Select(e => e.Id)
+            .FirstOrDefault();
+
+        return bossId.Value > 0;
+    }
+
+    private static bool TryGetBoss(WorldState state, out EntityState boss)
+    {
+        boss = default;
+        if (!state.TryGetZone(ZoneId, out ZoneState zone))
         {
             return false;
         }
 
-        EncounterRuntimeState runtime = runtimes[0];
-        if (runtime.BossEntityId.Value <= 0)
+        EntityState? candidate = zone.Entities
+            .Where(e => e.Kind == EntityKind.Npc)
+            .OrderBy(e => e.Id.Value)
+            .Cast<EntityState?>()
+            .FirstOrDefault();
+
+        if (candidate is null)
         {
             return false;
         }
 
-        bossId = runtime.BossEntityId;
+        boss = candidate.Value;
         return true;
     }
 
-    private static int GetBossAggroDirection(WorldState state)
+    private static bool IsWithinAnchorRadius(EntityState npc)
     {
-        if (!state.TryGetZone(ZoneId, out ZoneState zone))
-        {
-            return 0;
-        }
-
-        if (!TryGetBossId(state, out EntityId bossId))
-        {
-            return 0;
-        }
-
-        int index = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, bossId);
-        return index < 0 ? 0 : zone.Entities[index].WanderX;
+        Fix32 dx = npc.Pos.X - npc.Leash.AnchorX;
+        Fix32 dy = npc.Pos.Y - npc.Leash.AnchorY;
+        Fix32 distSq = (dx * dx) + (dy * dy);
+        return distSq <= npc.Leash.RadiusSq;
     }
 }
