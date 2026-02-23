@@ -713,14 +713,22 @@ public static class Simulation
                         }
                         else
                         {
-                            moveIntent = moveIntent with
-                            {
-                                Type = MoveIntentType.Hold,
-                                Path = ImmutableArray<TileCoord>.Empty,
-                                PathLen = 0,
-                                PathIndex = 0,
-                                NextRepathTick = tick + moveIntent.RepathEveryTicks
-                            };
+                            moveIntent = moveIntent.Type == MoveIntentType.ChaseEntity
+                                ? moveIntent with
+                                {
+                                    Path = ImmutableArray<TileCoord>.Empty,
+                                    PathLen = 0,
+                                    PathIndex = 0,
+                                    NextRepathTick = tick + moveIntent.RepathEveryTicks
+                                }
+                                : moveIntent with
+                                {
+                                    Type = MoveIntentType.Hold,
+                                    Path = ImmutableArray<TileCoord>.Empty,
+                                    PathLen = 0,
+                                    PathIndex = 0,
+                                    NextRepathTick = tick + moveIntent.RepathEveryTicks
+                                };
                         }
                     }
                     else
@@ -734,14 +742,22 @@ public static class Simulation
                         }
                         else
                         {
-                            moveIntent = moveIntent with
-                            {
-                                Type = MoveIntentType.Hold,
-                                Path = ImmutableArray<TileCoord>.Empty,
-                                PathLen = 0,
-                                PathIndex = 0,
-                                NextRepathTick = tick + moveIntent.RepathEveryTicks
-                            };
+                            moveIntent = moveIntent.Type == MoveIntentType.ChaseEntity
+                                ? moveIntent with
+                                {
+                                    Path = ImmutableArray<TileCoord>.Empty,
+                                    PathLen = 0,
+                                    PathIndex = 0,
+                                    NextRepathTick = tick + moveIntent.RepathEveryTicks
+                                }
+                                : moveIntent with
+                                {
+                                    Type = MoveIntentType.Hold,
+                                    Path = ImmutableArray<TileCoord>.Empty,
+                                    PathLen = 0,
+                                    PathIndex = 0,
+                                    NextRepathTick = tick + moveIntent.RepathEveryTicks
+                                };
                         }
                     }
                 }

@@ -42,6 +42,27 @@ public sealed class AggroRetargetCoreTests
         Assert.Equal(dpsId.Value, npc.MoveIntent.TargetEntityId.Value);
     }
 
+
+    [Fact]
+    public void Boss_KeepsChaseIntent_WhenPathBudgetIsZero_AndThreatTargetExists()
+    {
+        SimulationConfig config = CreateConfig(7411) with { AiBudgets = new AiBudgetConfig(0, 8, 32) };
+        WorldState state = Simulation.CreateInitialState(config, BuildZone());
+        ZoneId zoneId = new(1);
+        EntityId npcId = new(100001);
+        EntityId tankId = new(10);
+
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.EnterZone, tankId, zoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(3), Fix32.FromInt(3))))));
+
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.CastSkill, tankId, zoneId, TargetEntityId: npcId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity))));
+
+        EntityState npc = GetNpc(state, npcId);
+        Assert.Equal(MoveIntentType.ChaseEntity, npc.MoveIntent.Type);
+        Assert.Equal(tankId.Value, npc.MoveIntent.TargetEntityId.Value);
+    }
+
     private static WorldState ForceNpcRetargetCooldown(WorldState state, EntityId npcId, int futureTick)
     {
         ZoneState zone = Assert.Single(state.Zones);
