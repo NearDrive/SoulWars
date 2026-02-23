@@ -278,12 +278,13 @@ internal static class MovingBossCanaryScenario
             return (1, 0);
         }
 
-        if (tick < 210)
+        // Deterministic kite phase: force tank far from boss anchor so leash/reset triggers.
+        if (tick < 250)
         {
-            return (0, 1);
+            return (1, 1);
         }
 
-        if (tick < 260)
+        if (tick < 280)
         {
             return (-1, -1);
         }
