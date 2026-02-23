@@ -10,6 +10,7 @@ public static class Simulation
     private const int NpcSpawnMaxAttempts = 64;
     private static readonly Fix32 DefaultNpcLeashRadius = Fix32.FromInt(12);
     private static readonly Fix32 LootPickupRange = Fix32.FromInt(3) / Fix32.FromInt(2);
+    private const int DefaultRetargetCooldownTicks = 5;
     private const string DefaultNpcArchetypeId = "npc.default";
     public const long DefaultStartingGold = 1000;
 
@@ -554,7 +555,6 @@ public static class Simulation
 
         ImmutableArray<EntityState>.Builder postAiEntities = ImmutableArray.CreateBuilder<EntityState>(ordered.Length);
         ImmutableArray<EntityId> orderedIds = ordered.Select(e => e.Id).ToImmutableArray();
-        Fix32 aggroRangeSq = config.NpcAggroRange * config.NpcAggroRange;
         NavGrid navGrid = NavGrid.FromTileMap(zone.Map);
         DeterministicAStar pathfinder = new();
         TileCoord[] pathBuffer = new TileCoord[Math.Max(16, zone.Map.Width * zone.Map.Height)];
@@ -578,7 +578,7 @@ public static class Simulation
             }
             else
             {
-                (target, ThreatComponent sanitizedThreat, targetDistSq) = SelectNpcTarget(ordered, orderedIds, npc, aggroRangeSq);
+                (target, ThreatComponent sanitizedThreat, targetDistSq) = SelectNpcTarget(ordered, orderedIds, npc);
                 npc = npc with { Threat = sanitizedThreat };
             }
 
@@ -592,34 +592,37 @@ public static class Simulation
 
             if (isLeashing)
             {
-                moveIntent = moveIntent with
-                {
-                    Type = MoveIntentType.GoToPoint,
-                    TargetEntityId = default,
-                    TargetX = npc.Leash.AnchorX,
-                    TargetY = npc.Leash.AnchorY
-                };
+                // Leash system owns movement intent while leashing.
             }
             else if (target is not null)
             {
-                targetChanged = moveIntent.Type != MoveIntentType.ChaseEntity
-                    || moveIntent.TargetEntityId.Value != target.Id.Value;
+                bool isAlreadyChasingTarget = moveIntent.Type == MoveIntentType.ChaseEntity
+                    && moveIntent.TargetEntityId.Value == target.Id.Value;
 
-                moveIntent = moveIntent with
-                {
-                    Type = MoveIntentType.ChaseEntity,
-                    TargetEntityId = target.Id
-                };
+                targetChanged = moveIntent.Type == MoveIntentType.ChaseEntity
+                    && moveIntent.TargetEntityId.Value != 0
+                    && moveIntent.TargetEntityId.Value != target.Id.Value;
 
-                if (targetChanged)
+                bool canRetarget = !targetChanged || tick >= moveIntent.NextAllowedRetargetTick;
+                if (isAlreadyChasingTarget || canRetarget)
                 {
                     moveIntent = moveIntent with
                     {
-                        NextRepathTick = tick,
-                        Path = ImmutableArray<TileCoord>.Empty,
-                        PathLen = 0,
-                        PathIndex = 0
+                        Type = MoveIntentType.ChaseEntity,
+                        TargetEntityId = target.Id,
+                        NextAllowedRetargetTick = targetChanged ? tick + DefaultRetargetCooldownTicks : moveIntent.NextAllowedRetargetTick
                     };
+
+                    if (!isAlreadyChasingTarget)
+                    {
+                        moveIntent = moveIntent with
+                        {
+                            NextRepathTick = tick,
+                            Path = ImmutableArray<TileCoord>.Empty,
+                            PathLen = 0,
+                            PathIndex = 0
+                        };
+                    }
                 }
             }
             else
@@ -628,6 +631,7 @@ public static class Simulation
                 {
                     Type = MoveIntentType.Hold,
                     TargetEntityId = default,
+                    NextAllowedRetargetTick = 0,
                     Path = ImmutableArray<TileCoord>.Empty,
                     PathLen = 0,
                     PathIndex = 0
@@ -797,7 +801,7 @@ public static class Simulation
         return new Vec2Fix(Fix32.FromInt(tile.X) + half, Fix32.FromInt(tile.Y) + half);
     }
 
-    private static (EntityState? Target, ThreatComponent Threat, Fix32 DistSq) SelectNpcTarget(ImmutableArray<EntityState> ordered, ImmutableArray<EntityId> orderedIds, EntityState npc, Fix32 aggroRangeSq)
+    private static (EntityState? Target, ThreatComponent Threat, Fix32 DistSq) SelectNpcTarget(ImmutableArray<EntityState> ordered, ImmutableArray<EntityId> orderedIds, EntityState npc)
     {
         ThreatComponent threat = npc.Threat;
         ImmutableArray<ThreatEntry> entries = threat.OrderedEntries();
@@ -856,29 +860,7 @@ public static class Simulation
             return (threatTarget, threat, threatDistSq);
         }
 
-        EntityState? closestPlayer = null;
-        Fix32 closestDistSq = new(int.MaxValue);
-
-        foreach (EntityState candidate in ordered)
-        {
-            if (candidate.Kind != EntityKind.Player || !candidate.IsAlive)
-            {
-                continue;
-            }
-
-            Fix32 dx = candidate.Pos.X - npc.Pos.X;
-            Fix32 dy = candidate.Pos.Y - npc.Pos.Y;
-            Fix32 distSq = (dx * dx) + (dy * dy);
-            if (distSq > aggroRangeSq || distSq >= closestDistSq)
-            {
-                continue;
-            }
-
-            closestDistSq = distSq;
-            closestPlayer = candidate;
-        }
-
-        return (closestPlayer, threat, closestDistSq);
+        return (null, threat, new Fix32(int.MaxValue));
     }
 
     private static ZoneState TickDownZoneSkillCooldowns(ZoneState zone)
