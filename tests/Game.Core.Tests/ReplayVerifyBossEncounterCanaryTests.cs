@@ -260,18 +260,18 @@ internal static class MovingBossCanaryScenario
 
     private static bool TryGetBoss(WorldState state, out EntityState boss)
     {
-        boss = default;
+        boss = null!;
         if (!state.TryGetZone(ZoneId, out ZoneState zone))
         {
             return false;
         }
 
-        EntityState candidate = zone.Entities
+        EntityState? candidate = zone.Entities
             .Where(e => e.Kind == EntityKind.Npc)
             .OrderBy(e => e.Id.Value)
             .FirstOrDefault();
 
-        if (candidate.Id.Value <= 0)
+        if (candidate is null)
         {
             return false;
         }
