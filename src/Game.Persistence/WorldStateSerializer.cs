@@ -38,7 +38,7 @@ public static class WorldStateSerializer
         EncounterRegistry EncounterRegistry);
 
     private static readonly byte[] Magic = "SWWORLD\0"u8.ToArray();
-    private const int CurrentVersion = 9;
+    private const int CurrentVersion = 10;
     public static int SerializerVersion => CurrentVersion;
     private const int MaxZoneCount = 10_000;
     private const int MaxMapDimension = 16_384;
@@ -137,7 +137,7 @@ public static class WorldStateSerializer
         }
 
         int version = reader.ReadInt32();
-        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or CurrentVersion))
+        if (version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or CurrentVersion))
         {
             throw new InvalidDataException($"Unsupported world-state version '{version}'.");
         }
@@ -445,6 +445,7 @@ public static class WorldStateSerializer
                 writer.Write(moveIntent.TargetEntityId.Value);
                 writer.Write(moveIntent.TargetX.Raw);
                 writer.Write(moveIntent.TargetY.Raw);
+                writer.Write(moveIntent.NextAllowedRetargetTick);
                 writer.Write(moveIntent.RepathEveryTicks);
                 writer.Write(moveIntent.NextRepathTick);
                 writer.Write(moveIntent.PathLen);
@@ -578,6 +579,7 @@ public static class WorldStateSerializer
                 EntityId targetEntityId = new(reader.ReadInt32());
                 Fix32 targetX = new(reader.ReadInt32());
                 Fix32 targetY = new(reader.ReadInt32());
+                int nextAllowedRetargetTick = snapshotVersion >= 10 ? reader.ReadInt32() : 0;
                 int repathEveryTicks = reader.ReadInt32();
                 int nextRepathTick = reader.ReadInt32();
                 int pathLen = reader.ReadInt32();
@@ -596,6 +598,7 @@ public static class WorldStateSerializer
                     targetEntityId,
                     targetX,
                     targetY,
+                    nextAllowedRetargetTick,
                     repathEveryTicks,
                     nextRepathTick,
                     path.MoveToImmutable(),

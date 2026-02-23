@@ -156,7 +156,16 @@ public sealed class ServerHostIntegrationTests
         string first = await RunScenarioAndComputeChecksumAsync();
         string second = await RunScenarioAndComputeChecksumAsync();
 
-        Assert.Equal(first, second);
+        if (!string.Equals(first, second, StringComparison.Ordinal))
+        {
+            int firstDiff = 0;
+            while (firstDiff < first.Length && firstDiff < second.Length && first[firstDiff] == second[firstDiff])
+            {
+                firstDiff++;
+            }
+
+            throw new Xunit.Sdk.XunitException($"Determinism drift: first={first} second={second} firstDiffIndex={firstDiff}");
+        }
     }
 
     private static async Task<string> RunScenarioAndComputeChecksumAsync()
@@ -187,12 +196,14 @@ public sealed class ServerHostIntegrationTests
         Random deterministic = new(999);
 
         using IncrementalHash checksum = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        int logicalTick = currentSnapshot.Tick;
         for (int i = 0; i < inputCount; i++)
         {
-            int previousTick = currentSnapshot.Tick;
             sbyte moveX = (sbyte)deterministic.Next(-1, 2);
             sbyte moveY = (sbyte)deterministic.Next(-1, 2);
 
+            int previousTick = logicalTick;
+            int targetTick = previousTick + 1;
             client.SendInput(previousTick + 1, moveX, moveY);
             runtime.StepOnce();
 
@@ -200,9 +211,10 @@ public sealed class ServerHostIntegrationTests
                 runtime,
                 client,
                 TimeSpan.FromSeconds(2),
-                s => s.Tick > previousTick && s.Entities.Any(e => e.EntityId == ack.EntityId),
+                s => s.Tick == targetTick && s.Entities.Any(e => e.EntityId == ack.EntityId),
                 advanceServer: false);
 
+            logicalTick = targetTick;
             AppendSnapshot(checksum, currentSnapshot with { Tick = i + 1 });
         }
 

@@ -10,6 +10,7 @@ public static class Simulation
     private const int NpcSpawnMaxAttempts = 64;
     private static readonly Fix32 DefaultNpcLeashRadius = Fix32.FromInt(12);
     private static readonly Fix32 LootPickupRange = Fix32.FromInt(3) / Fix32.FromInt(2);
+    private const int DefaultRetargetCooldownTicks = 5;
     private const string DefaultNpcArchetypeId = "npc.default";
     public const long DefaultStartingGold = 1000;
 
@@ -592,34 +593,37 @@ public static class Simulation
 
             if (isLeashing)
             {
-                moveIntent = moveIntent with
-                {
-                    Type = MoveIntentType.GoToPoint,
-                    TargetEntityId = default,
-                    TargetX = npc.Leash.AnchorX,
-                    TargetY = npc.Leash.AnchorY
-                };
+                // Leash system owns movement intent while leashing.
             }
             else if (target is not null)
             {
-                targetChanged = moveIntent.Type != MoveIntentType.ChaseEntity
-                    || moveIntent.TargetEntityId.Value != target.Id.Value;
+                bool isAlreadyChasingTarget = moveIntent.Type == MoveIntentType.ChaseEntity
+                    && moveIntent.TargetEntityId.Value == target.Id.Value;
 
-                moveIntent = moveIntent with
-                {
-                    Type = MoveIntentType.ChaseEntity,
-                    TargetEntityId = target.Id
-                };
+                targetChanged = moveIntent.Type == MoveIntentType.ChaseEntity
+                    && moveIntent.TargetEntityId.Value != 0
+                    && moveIntent.TargetEntityId.Value != target.Id.Value;
 
-                if (targetChanged)
+                bool canRetarget = !targetChanged || tick >= moveIntent.NextAllowedRetargetTick;
+                if (isAlreadyChasingTarget || canRetarget)
                 {
                     moveIntent = moveIntent with
                     {
-                        NextRepathTick = tick,
-                        Path = ImmutableArray<TileCoord>.Empty,
-                        PathLen = 0,
-                        PathIndex = 0
+                        Type = MoveIntentType.ChaseEntity,
+                        TargetEntityId = target.Id,
+                        NextAllowedRetargetTick = targetChanged ? tick + DefaultRetargetCooldownTicks : moveIntent.NextAllowedRetargetTick
                     };
+
+                    if (!isAlreadyChasingTarget)
+                    {
+                        moveIntent = moveIntent with
+                        {
+                            NextRepathTick = tick,
+                            Path = ImmutableArray<TileCoord>.Empty,
+                            PathLen = 0,
+                            PathIndex = 0
+                        };
+                    }
                 }
             }
             else
@@ -628,6 +632,7 @@ public static class Simulation
                 {
                     Type = MoveIntentType.Hold,
                     TargetEntityId = default,
+                    NextAllowedRetargetTick = 0,
                     Path = ImmutableArray<TileCoord>.Empty,
                     PathLen = 0,
                     PathIndex = 0
