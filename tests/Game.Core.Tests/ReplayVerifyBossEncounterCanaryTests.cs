@@ -251,7 +251,7 @@ internal static class MovingBossCanaryScenario
     {
         return Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
             new WorldCommand(WorldCommandKind.EnterZone, TankId, ZoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(8), Fix32.FromInt(8))),
-            new WorldCommand(WorldCommandKind.EnterZone, DpsId, ZoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(14), Fix32.FromInt(8))),
+            new WorldCommand(WorldCommandKind.EnterZone, DpsId, ZoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(9), Fix32.FromInt(8))),
             new WorldCommand(WorldCommandKind.EnterZone, SupportId, ZoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(9), Fix32.FromInt(9))))));
     }
 
