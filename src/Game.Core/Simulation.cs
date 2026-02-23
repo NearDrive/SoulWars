@@ -555,6 +555,7 @@ public static class Simulation
 
         ImmutableArray<EntityState>.Builder postAiEntities = ImmutableArray.CreateBuilder<EntityState>(ordered.Length);
         ImmutableArray<EntityId> orderedIds = ordered.Select(e => e.Id).ToImmutableArray();
+        Fix32 aggroRangeSq = config.NpcAggroRange * config.NpcAggroRange;
         NavGrid navGrid = NavGrid.FromTileMap(zone.Map);
         DeterministicAStar pathfinder = new();
         TileCoord[] pathBuffer = new TileCoord[Math.Max(16, zone.Map.Width * zone.Map.Height)];
@@ -578,7 +579,7 @@ public static class Simulation
             }
             else
             {
-                (target, ThreatComponent sanitizedThreat, targetDistSq) = SelectNpcTarget(ordered, orderedIds, npc);
+                (target, ThreatComponent sanitizedThreat, targetDistSq) = SelectNpcTarget(ordered, orderedIds, npc, aggroRangeSq);
                 npc = npc with { Threat = sanitizedThreat };
             }
 
@@ -801,7 +802,7 @@ public static class Simulation
         return new Vec2Fix(Fix32.FromInt(tile.X) + half, Fix32.FromInt(tile.Y) + half);
     }
 
-    private static (EntityState? Target, ThreatComponent Threat, Fix32 DistSq) SelectNpcTarget(ImmutableArray<EntityState> ordered, ImmutableArray<EntityId> orderedIds, EntityState npc)
+    private static (EntityState? Target, ThreatComponent Threat, Fix32 DistSq) SelectNpcTarget(ImmutableArray<EntityState> ordered, ImmutableArray<EntityId> orderedIds, EntityState npc, Fix32 aggroRangeSq)
     {
         ThreatComponent threat = npc.Threat;
         ImmutableArray<ThreatEntry> entries = threat.OrderedEntries();
@@ -860,7 +861,29 @@ public static class Simulation
             return (threatTarget, threat, threatDistSq);
         }
 
-        return (null, threat, new Fix32(int.MaxValue));
+        EntityState? closestPlayer = null;
+        Fix32 closestDistSq = new(int.MaxValue);
+
+        foreach (EntityState candidate in ordered)
+        {
+            if (candidate.Kind != EntityKind.Player || !candidate.IsAlive)
+            {
+                continue;
+            }
+
+            Fix32 dx = candidate.Pos.X - npc.Pos.X;
+            Fix32 dy = candidate.Pos.Y - npc.Pos.Y;
+            Fix32 distSq = (dx * dx) + (dy * dy);
+            if (distSq > aggroRangeSq || distSq >= closestDistSq)
+            {
+                continue;
+            }
+
+            closestDistSq = distSq;
+            closestPlayer = candidate;
+        }
+
+        return (closestPlayer, threat, closestDistSq);
     }
 
     private static ZoneState TickDownZoneSkillCooldowns(ZoneState zone)

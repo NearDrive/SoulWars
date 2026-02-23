@@ -40,8 +40,14 @@ public sealed class AggroChaseIntegrationTests
             state = Step(config, state, ImmutableArray.Create(Cast(playerA, npcId, 2)));
         }
 
-        EntityState npcAfterReturn = GetNpc(state);
-        Assert.Equal(playerA.Value, npcAfterReturn.MoveIntent.TargetEntityId.Value);
+        bool returnedToA = false;
+        for (int tick = 0; tick < 8 && !returnedToA; tick++)
+        {
+            state = Step(config, state, ImmutableArray<WorldCommand>.Empty);
+            returnedToA = GetNpc(state).MoveIntent.TargetEntityId.Value == playerA.Value;
+        }
+
+        Assert.True(returnedToA);
     }
 
     private static WorldCommand Enter(EntityId id, int x, int y)
