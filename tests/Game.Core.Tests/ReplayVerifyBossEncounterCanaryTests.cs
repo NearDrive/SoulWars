@@ -205,8 +205,8 @@ internal static class MovingBossCanaryScenario
         (sbyte moveX, sbyte moveY) tankMove = GetTankMove(tick);
         commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, TankId, ZoneId, MoveX: tankMove.moveX, MoveY: tankMove.moveY));
 
-        commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, DpsId, ZoneId, MoveX: tick < 160 ? 1 : 0, MoveY: 0));
-        commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, SupportId, ZoneId, MoveX: 0, MoveY: tick < 40 ? 1 : 0));
+        commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, DpsId, ZoneId, MoveX: (sbyte)(tick < 160 ? 1 : 0), MoveY: 0));
+        commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, SupportId, ZoneId, MoveX: 0, MoveY: (sbyte)(tick < 40 ? 1 : 0)));
 
         return commands.ToImmutable();
     }
