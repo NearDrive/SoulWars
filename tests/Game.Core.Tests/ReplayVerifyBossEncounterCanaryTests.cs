@@ -235,14 +235,14 @@ internal static class MovingBossCanaryScenario
 
         ImmutableArray<WorldCommand>.Builder commands = ImmutableArray.CreateBuilder<WorldCommand>();
 
-        bool dpsRetargetPhase = tick >= 50 && tick <= 140;
+        bool dpsRetargetPhase = tick >= 15 && tick <= 45;
 
         if (tick < 220 && tick % 4 == 0 && !dpsRetargetPhase)
         {
             commands.Add(new WorldCommand(WorldCommandKind.CastSkill, TankId, ZoneId, TargetEntityId: bossId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity));
         }
 
-        if (tick is 60 or 70 or 80 or 90 or 100 or 110 or 120 or 130 or 140)
+        if (tick is 15 or 20 or 25 or 30 or 35 or 40 or 45)
         {
             commands.Add(new WorldCommand(WorldCommandKind.CastSkill, DpsId, ZoneId, TargetEntityId: bossId, SkillId: new SkillId(2), TargetKind: CastTargetKind.Entity));
         }
