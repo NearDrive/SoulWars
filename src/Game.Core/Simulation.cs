@@ -681,8 +681,10 @@ public static class Simulation
                     {
                         TileCoord startTile = PositionToTile(npc.Pos);
                         int maxExpandedNodes = budget.GetPathExpansionAllowance(pathBuffer.Length);
+                        int pathLen = 0;
+                        int expandedCount = 0;
                         bool foundPath = maxExpandedNodes > 0
-                            && pathfinder.TryFindPath(navGrid, startTile, goalTile, pathBuffer, out int pathLen, out int expandedCount, maxExpandedNodes: maxExpandedNodes);
+                            && pathfinder.TryFindPath(navGrid, startTile, goalTile, pathBuffer, out pathLen, out expandedCount, maxExpandedNodes: maxExpandedNodes);
 
                         if (maxExpandedNodes > 0)
                         {
