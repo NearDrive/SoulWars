@@ -178,14 +178,17 @@ public sealed class ReplayVerify_AggroChase
     [Trait("Category", "PR72")]
     [Trait("Category", "ReplayVerify")]
     [Trait("Category", "Canary")]
-    public void Replay_Is_Stable()
+    public void Replay_Is_Stable_With_Restart_And_Target_Transitions()
     {
-        ImmutableArray<string> first = Run();
-        ImmutableArray<string> second = Run();
-        Assert.Equal(first, second);
+        ScenarioRunResult baseline = Run(restartTick: null);
+        ScenarioRunResult resumed = Run(restartTick: 25);
+
+        Assert.Equal(baseline.FinalChecksum, resumed.FinalChecksum);
+        Assert.Contains(30, baseline.TargetTrace);
+        Assert.Contains(31, baseline.TargetTrace);
     }
 
-    private static ImmutableArray<string> Run()
+    private static ScenarioRunResult Run(int? restartTick)
     {
         SimulationConfig config = AggroChaseIntegrationTests_CreateConfig(7203);
         WorldState state = Simulation.CreateInitialState(config, AggroChaseIntegrationTests_BuildZone());
@@ -198,21 +201,35 @@ public sealed class ReplayVerify_AggroChase
             new WorldCommand(WorldCommandKind.EnterZone, a, zoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(2), Fix32.FromInt(2))),
             new WorldCommand(WorldCommandKind.EnterZone, b, zoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(11), Fix32.FromInt(11))))));
 
-        ImmutableArray<string>.Builder checksums = ImmutableArray.CreateBuilder<string>();
+        ImmutableArray<int>.Builder targetTrace = ImmutableArray.CreateBuilder<int>();
         for (int tick = 0; tick < 50; tick++)
         {
-            ImmutableArray<WorldCommand> commands = tick % 3 == 0
-                ? ImmutableArray.Create(new WorldCommand(WorldCommandKind.CastSkill, a, zoneId, TargetEntityId: npcId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity))
-                : tick % 5 == 0
-                    ? ImmutableArray.Create(new WorldCommand(WorldCommandKind.CastSkill, b, zoneId, TargetEntityId: npcId, SkillId: new SkillId(2), TargetKind: CastTargetKind.Entity))
-                    : ImmutableArray<WorldCommand>.Empty;
+            ImmutableArray<WorldCommand>.Builder commands = ImmutableArray.CreateBuilder<WorldCommand>();
+            if (tick % 3 == 0)
+            {
+                commands.Add(new WorldCommand(WorldCommandKind.CastSkill, a, zoneId, TargetEntityId: npcId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity));
+            }
 
-            state = Simulation.Step(config, state, new Inputs(commands));
-            checksums.Add(StateChecksum.ComputeGlobalChecksum(state));
+            if (tick % 5 == 0)
+            {
+                commands.Add(new WorldCommand(WorldCommandKind.CastSkill, b, zoneId, TargetEntityId: npcId, SkillId: new SkillId(2), TargetKind: CastTargetKind.Entity));
+            }
+
+            state = Simulation.Step(config, state, new Inputs(commands.ToImmutable()));
+            EntityState npc = Assert.Single(state.Zones[0].Entities.Where(e => e.Id == npcId));
+            targetTrace.Add(npc.MoveIntent.TargetEntityId.Value);
+
+            if (restartTick.HasValue && tick + 1 == restartTick.Value)
+            {
+                byte[] snapshot = Game.Persistence.WorldStateSerializer.SaveToBytes(state);
+                state = Game.Persistence.WorldStateSerializer.LoadFromBytes(snapshot);
+            }
         }
 
-        return checksums.ToImmutable();
+        return new ScenarioRunResult(StateChecksum.ComputeGlobalChecksum(state), targetTrace.ToImmutable());
     }
+
+    private readonly record struct ScenarioRunResult(string FinalChecksum, ImmutableArray<int> TargetTrace);
 
     private static ZoneDefinitions AggroChaseIntegrationTests_BuildZone()
     {

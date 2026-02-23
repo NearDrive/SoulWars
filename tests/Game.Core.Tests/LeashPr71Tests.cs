@@ -230,7 +230,17 @@ public sealed class ReplayVerifyLeashScenarioTests
         bool sawLeashing = false;
         for (int tick = 0; tick < 160; tick++)
         {
-            state = Simulation.Step(config, state, new Inputs(ImmutableArray<WorldCommand>.Empty));
+            ImmutableArray<WorldCommand> commands = tick < 20
+                ? ImmutableArray.Create(new WorldCommand(
+                    WorldCommandKind.CastSkill,
+                    kiterId,
+                    zoneId,
+                    TargetEntityId: npcId,
+                    SkillId: new SkillId(1),
+                    TargetKind: CastTargetKind.Entity))
+                : ImmutableArray<WorldCommand>.Empty;
+
+            state = Simulation.Step(config, state, new Inputs(commands));
             ZoneState tickZone = Assert.Single(state.Zones);
             EntityState tickNpc = tickZone.Entities.Single(e => e.Id == npcId);
             sawLeashing |= tickNpc.Leash.IsLeashing;
@@ -281,5 +291,6 @@ public sealed class ReplayVerifyLeashScenarioTests
         NpcCountPerZone: 0,
         NpcWanderPeriodTicks: 30,
         NpcAggroRange: Fix32.FromInt(64),
+        SkillDefinitions: ImmutableArray.Create(new SkillDefinition(new SkillId(1), Fix32.FromInt(64).Raw, 0, 1, 0, 0, 0, 0, CastTargetKind.Entity, BaseAmount: 2)),
         Invariants: InvariantOptions.Enabled);
 }
