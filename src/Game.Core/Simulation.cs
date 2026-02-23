@@ -631,9 +631,7 @@ public static class Simulation
                     && moveIntent.TargetEntityId.Value != 0
                     && moveIntent.TargetEntityId.Value != target.Id.Value;
 
-                bool forceRetargetForThreatLead = targetChanged
-                    && HasStrictThreatLead(npc.Threat, moveIntent.TargetEntityId, target.Id);
-                bool canRetarget = !targetChanged || tick >= moveIntent.NextAllowedRetargetTick || forceRetargetForThreatLead;
+                bool canRetarget = !targetChanged || tick >= moveIntent.NextAllowedRetargetTick;
                 if (isAlreadyChasingTarget || canRetarget)
                 {
                     moveIntent = moveIntent with
@@ -713,22 +711,14 @@ public static class Simulation
                         }
                         else
                         {
-                            moveIntent = moveIntent.Type == MoveIntentType.ChaseEntity
-                                ? moveIntent with
-                                {
-                                    Path = ImmutableArray<TileCoord>.Empty,
-                                    PathLen = 0,
-                                    PathIndex = 0,
-                                    NextRepathTick = tick + moveIntent.RepathEveryTicks
-                                }
-                                : moveIntent with
-                                {
-                                    Type = MoveIntentType.Hold,
-                                    Path = ImmutableArray<TileCoord>.Empty,
-                                    PathLen = 0,
-                                    PathIndex = 0,
-                                    NextRepathTick = tick + moveIntent.RepathEveryTicks
-                                };
+                            moveIntent = moveIntent with
+                            {
+                                Type = MoveIntentType.Hold,
+                                Path = ImmutableArray<TileCoord>.Empty,
+                                PathLen = 0,
+                                PathIndex = 0,
+                                NextRepathTick = tick + moveIntent.RepathEveryTicks
+                            };
                         }
                     }
                     else
@@ -742,22 +732,14 @@ public static class Simulation
                         }
                         else
                         {
-                            moveIntent = moveIntent.Type == MoveIntentType.ChaseEntity
-                                ? moveIntent with
-                                {
-                                    Path = ImmutableArray<TileCoord>.Empty,
-                                    PathLen = 0,
-                                    PathIndex = 0,
-                                    NextRepathTick = tick + moveIntent.RepathEveryTicks
-                                }
-                                : moveIntent with
-                                {
-                                    Type = MoveIntentType.Hold,
-                                    Path = ImmutableArray<TileCoord>.Empty,
-                                    PathLen = 0,
-                                    PathIndex = 0,
-                                    NextRepathTick = tick + moveIntent.RepathEveryTicks
-                                };
+                            moveIntent = moveIntent with
+                            {
+                                Type = MoveIntentType.Hold,
+                                Path = ImmutableArray<TileCoord>.Empty,
+                                PathLen = 0,
+                                PathIndex = 0,
+                                NextRepathTick = tick + moveIntent.RepathEveryTicks
+                            };
                         }
                     }
                 }
@@ -883,33 +865,6 @@ public static class Simulation
     {
         Fix32 half = new(Fix32.OneRaw / 2);
         return new Vec2Fix(Fix32.FromInt(tile.X) + half, Fix32.FromInt(tile.Y) + half);
-    }
-
-    private static bool HasStrictThreatLead(ThreatComponent threat, EntityId currentTargetId, EntityId proposedTargetId)
-    {
-        if (currentTargetId.Value <= 0 || proposedTargetId.Value <= 0 || currentTargetId.Value == proposedTargetId.Value)
-        {
-            return false;
-        }
-
-        ImmutableArray<ThreatEntry> entries = threat.OrderedEntries();
-        int currentThreat = 0;
-        int proposedThreat = 0;
-
-        for (int i = 0; i < entries.Length; i++)
-        {
-            ThreatEntry entry = entries[i];
-            if (entry.SourceEntityId.Value == currentTargetId.Value)
-            {
-                currentThreat = entry.Threat;
-            }
-            else if (entry.SourceEntityId.Value == proposedTargetId.Value)
-            {
-                proposedThreat = entry.Threat;
-            }
-        }
-
-        return proposedThreat > currentThreat;
     }
 
     private static (EntityState? Target, ThreatComponent Threat, Fix32 DistSq) SelectNpcTarget(ImmutableArray<EntityState> ordered, ImmutableArray<EntityId> orderedIds, EntityState npc, Fix32 aggroRangeSq)

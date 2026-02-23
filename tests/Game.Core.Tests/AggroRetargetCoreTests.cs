@@ -8,7 +8,7 @@ namespace Game.Core.Tests;
 public sealed class AggroRetargetCoreTests
 {
     [Fact]
-    public void Boss_Retargets_WhenNewTargetHasStrictThreatLead_EvenDuringCooldown()
+    public void Boss_DoesNotRetarget_DuringCooldown_EvenWhenAnotherPlayerLeadsThreat()
     {
         SimulationConfig config = CreateConfig(7410);
         WorldState state = Simulation.CreateInitialState(config, BuildZone());
@@ -21,30 +21,21 @@ public sealed class AggroRetargetCoreTests
             new WorldCommand(WorldCommandKind.EnterZone, tankId, zoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(3), Fix32.FromInt(3))),
             new WorldCommand(WorldCommandKind.EnterZone, dpsId, zoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(4), Fix32.FromInt(3))))));
 
-        // Establish initial chase to tank.
-        for (int i = 0; i < 3; i++)
-        {
-            state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
-                new WorldCommand(WorldCommandKind.CastSkill, tankId, zoneId, TargetEntityId: npcId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity))));
-        }
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.CastSkill, tankId, zoneId, TargetEntityId: npcId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity))));
 
-        state = ForceNpcRetargetCooldown(state, npcId, futureTick: state.Tick + 100);
+        state = ForceNpcRetargetCooldown(state, npcId, currentTarget: tankId, futureTick: state.Tick + 100);
 
-        // DPS gains strict threat lead while cooldown is still in the future.
-        for (int i = 0; i < 2; i++)
-        {
-            state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
-                new WorldCommand(WorldCommandKind.CastSkill, dpsId, zoneId, TargetEntityId: npcId, SkillId: new SkillId(2), TargetKind: CastTargetKind.Entity))));
-        }
+        state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(
+            new WorldCommand(WorldCommandKind.CastSkill, dpsId, zoneId, TargetEntityId: npcId, SkillId: new SkillId(2), TargetKind: CastTargetKind.Entity))));
 
         EntityState npc = GetNpc(state, npcId);
         Assert.Equal(MoveIntentType.ChaseEntity, npc.MoveIntent.Type);
-        Assert.Equal(dpsId.Value, npc.MoveIntent.TargetEntityId.Value);
+        Assert.Equal(tankId.Value, npc.MoveIntent.TargetEntityId.Value);
     }
 
-
     [Fact]
-    public void Boss_KeepsChaseIntent_WhenPathBudgetIsZero_AndThreatTargetExists()
+    public void Boss_HoldsIntent_WhenPathBudgetIsZero_AndNoPathExists()
     {
         SimulationConfig config = CreateConfig(7411) with { AiBudgets = new AiBudgetConfig(0, 8, 32) };
         WorldState state = Simulation.CreateInitialState(config, BuildZone());
@@ -59,11 +50,11 @@ public sealed class AggroRetargetCoreTests
             new WorldCommand(WorldCommandKind.CastSkill, tankId, zoneId, TargetEntityId: npcId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity))));
 
         EntityState npc = GetNpc(state, npcId);
-        Assert.Equal(MoveIntentType.ChaseEntity, npc.MoveIntent.Type);
-        Assert.Equal(tankId.Value, npc.MoveIntent.TargetEntityId.Value);
+        Assert.Equal(MoveIntentType.Hold, npc.MoveIntent.Type);
+        Assert.Equal(0, npc.MoveIntent.PathLen);
     }
 
-    private static WorldState ForceNpcRetargetCooldown(WorldState state, EntityId npcId, int futureTick)
+    private static WorldState ForceNpcRetargetCooldown(WorldState state, EntityId npcId, EntityId currentTarget, int futureTick)
     {
         ZoneState zone = Assert.Single(state.Zones);
         EntityState npc = zone.Entities.Single(e => e.Id == npcId);
@@ -72,7 +63,7 @@ public sealed class AggroRetargetCoreTests
             MoveIntent = npc.MoveIntent with
             {
                 Type = MoveIntentType.ChaseEntity,
-                TargetEntityId = new EntityId(10),
+                TargetEntityId = currentTarget,
                 NextAllowedRetargetTick = futureTick
             }
         };
