@@ -70,7 +70,7 @@ public sealed class PathTieBreakerTests
 }
 
 [Trait("Category", "PR69")]
-public sealed class PathBudgetLimitTests
+public sealed class PathBudgetLimitPr69Tests
 {
     [Fact]
     public void InsufficientBudget_ReturnsFalseDeterministically()
