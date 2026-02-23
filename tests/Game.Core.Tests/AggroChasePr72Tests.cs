@@ -210,7 +210,7 @@ public sealed class ReplayVerify_AggroChase
                 commands.Add(new WorldCommand(WorldCommandKind.CastSkill, a, zoneId, TargetEntityId: npcId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity));
             }
 
-            if (tick % 5 == 0)
+            if (tick >= 10 && tick % 5 == 0)
             {
                 commands.Add(new WorldCommand(WorldCommandKind.CastSkill, b, zoneId, TargetEntityId: npcId, SkillId: new SkillId(2), TargetKind: CastTargetKind.Entity));
             }
