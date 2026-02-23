@@ -127,8 +127,8 @@ internal static class MovingBossCanaryScenario
         NpcWanderPeriodTicks: 9999,
         NpcAggroRange: Fix32.FromInt(64),
         SkillDefinitions: ImmutableArray.Create(
-            new SkillDefinition(new SkillId(1), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 4, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 2),
-            new SkillDefinition(new SkillId(2), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 20, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 14),
+            new SkillDefinition(new SkillId(1), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 12, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 1),
+            new SkillDefinition(new SkillId(2), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 30, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 8),
             new SkillDefinition(new SkillId(3), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 15, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 1)),
         AiBudgets: new AiBudgetConfig(MaxPathExpansionsPerTick: 192, MaxRepathsPerTick: 1, MaxAiDecisionsPerTick: 8),
         Invariants: InvariantOptions.Enabled);
@@ -187,12 +187,12 @@ internal static class MovingBossCanaryScenario
 
         ImmutableArray<WorldCommand>.Builder commands = ImmutableArray.CreateBuilder<WorldCommand>();
 
-        if (tick < 210)
+        if (tick < 220 && tick % 4 == 0)
         {
             commands.Add(new WorldCommand(WorldCommandKind.CastSkill, TankId, ZoneId, TargetEntityId: bossId, SkillId: new SkillId(1), TargetKind: CastTargetKind.Entity));
         }
 
-        if (tick is 45 or 70 or 95 or 120)
+        if (tick is 45 or 75 or 105 or 135 or 165)
         {
             commands.Add(new WorldCommand(WorldCommandKind.CastSkill, DpsId, ZoneId, TargetEntityId: bossId, SkillId: new SkillId(2), TargetKind: CastTargetKind.Entity));
         }
