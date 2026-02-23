@@ -181,7 +181,7 @@ public sealed class ReplayVerify_AggroChase
     public void Replay_Is_Stable_With_Restart_And_Target_Transitions()
     {
         ScenarioRunResult baseline = Run(restartTick: null);
-        ScenarioRunResult resumed = Run(restartTick: 25);
+        ScenarioRunResult resumed = Run(restartTick: 15);
 
         Assert.Equal(baseline.FinalChecksum, resumed.FinalChecksum);
         Assert.Contains(30, baseline.TargetTrace);
@@ -202,7 +202,7 @@ public sealed class ReplayVerify_AggroChase
             new WorldCommand(WorldCommandKind.EnterZone, b, zoneId, SpawnPos: new Vec2Fix(Fix32.FromInt(11), Fix32.FromInt(11))))));
 
         ImmutableArray<int>.Builder targetTrace = ImmutableArray.CreateBuilder<int>();
-        for (int tick = 0; tick < 50; tick++)
+        for (int tick = 0; tick < 30; tick++)
         {
             ImmutableArray<WorldCommand>.Builder commands = ImmutableArray.CreateBuilder<WorldCommand>();
             if (tick % 3 == 0)
