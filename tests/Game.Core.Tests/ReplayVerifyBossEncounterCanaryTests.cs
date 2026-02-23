@@ -130,7 +130,7 @@ internal static class MovingBossCanaryScenario
             new SkillDefinition(new SkillId(1), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 4, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 2),
             new SkillDefinition(new SkillId(2), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 20, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 14),
             new SkillDefinition(new SkillId(3), Fix32.FromInt(64).Raw, 0, 1, CooldownTicks: 15, CastTimeTicks: 0, GlobalCooldownTicks: 0, ResourceCost: 0, CastTargetKind.Entity, BaseAmount: 1)),
-        AiBudgets: new AiBudgetConfig(PathExpansionPerTick: 192, RepathDecisionsPerTick: 1, DecisionChecksPerTick: 8),
+        AiBudgets: new AiBudgetConfig(MaxPathExpansionsPerTick: 192, MaxRepathsPerTick: 1, MaxAiDecisionsPerTick: 8),
         Invariants: InvariantOptions.Enabled);
 
     private static ZoneDefinitions CreateZoneDefinitions()
@@ -147,15 +147,16 @@ internal static class MovingBossCanaryScenario
                         AtTickOffset: 1,
                         Actions: ImmutableArray.Create(new EncounterActionDefinition(
                             EncounterActionKind.SpawnNpc,
-                            NpcArchetype: "boss",
+                            NpcArchetypeId: "boss",
                             X: Fix32.FromInt(6),
                             Y: Fix32.FromInt(6),
                             Count: 1)))))));
 
+        Fix32 half = new(Fix32.OneRaw / 2);
         ImmutableArray<ZoneAabb> maze = ImmutableArray.Create(
-            new ZoneAabb(Fix32.FromInt(10), Fix32.FromInt(0), Fix32.FromInt(11), Fix32.FromInt(22)),
-            new ZoneAabb(Fix32.FromInt(20), Fix32.FromInt(10), Fix32.FromInt(21), Fix32.FromInt(32)),
-            new ZoneAabb(Fix32.FromInt(10), Fix32.FromInt(10), Fix32.FromInt(20), Fix32.FromInt(11)));
+            new ZoneAabb(new Vec2Fix(Fix32.FromInt(10) + half, Fix32.FromInt(11) + half), new Vec2Fix(half, Fix32.FromInt(11) + half)),
+            new ZoneAabb(new Vec2Fix(Fix32.FromInt(20) + half, Fix32.FromInt(21) + half), new Vec2Fix(half, Fix32.FromInt(11) + half)),
+            new ZoneAabb(new Vec2Fix(Fix32.FromInt(15), Fix32.FromInt(10) + half), new Vec2Fix(Fix32.FromInt(5), half)));
 
         ZoneDefinition zone = new(
             ZoneId,
@@ -201,7 +202,7 @@ internal static class MovingBossCanaryScenario
             commands.Add(new WorldCommand(WorldCommandKind.CastSkill, SupportId, ZoneId, TargetEntityId: bossId, SkillId: new SkillId(3), TargetKind: CastTargetKind.Entity));
         }
 
-        (int moveX, int moveY) tankMove = GetTankMove(tick);
+        (sbyte moveX, sbyte moveY) tankMove = GetTankMove(tick);
         commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, TankId, ZoneId, MoveX: tankMove.moveX, MoveY: tankMove.moveY));
 
         commands.Add(new WorldCommand(WorldCommandKind.MoveIntent, DpsId, ZoneId, MoveX: tick < 160 ? 1 : 0, MoveY: 0));
@@ -210,7 +211,7 @@ internal static class MovingBossCanaryScenario
         return commands.ToImmutable();
     }
 
-    private static (int moveX, int moveY) GetTankMove(int tick)
+    private static (sbyte moveX, sbyte moveY) GetTankMove(int tick)
     {
         if (tick < 30)
         {
@@ -265,18 +266,17 @@ internal static class MovingBossCanaryScenario
             return false;
         }
 
-        EntityState? candidate = zone.Entities
+        EntityState candidate = zone.Entities
             .Where(e => e.Kind == EntityKind.Npc)
             .OrderBy(e => e.Id.Value)
-            .Cast<EntityState?>()
             .FirstOrDefault();
 
-        if (candidate is null)
+        if (candidate.Id.Value <= 0)
         {
             return false;
         }
 
-        boss = candidate.Value;
+        boss = candidate;
         return true;
     }
 
