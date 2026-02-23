@@ -117,6 +117,21 @@ public static class StateChecksum
                 writer.Write(projectile.RequiresLoSOnSpawn);
             }
         }
+
+        ImmutableArray<FactionId> factions = zone.Visibility.GetFactionIdsOrdered();
+        if (!factions.IsDefaultOrEmpty)
+        {
+            writer.Write(unchecked((int)0x56495342)); // "VISB"
+            writer.Write(factions.Length);
+            for (int i = 0; i < factions.Length; i++)
+            {
+                FactionId factionId = factions[i];
+                byte[] bytes = zone.Visibility.GetPackedBytes(factionId);
+                writer.Write(factionId.Value);
+                writer.Write(bytes.Length);
+                writer.Write(bytes);
+            }
+        }
     }
 
     private static void WriteGlobalWorldData(BinaryWriter writer, WorldState state)
