@@ -548,6 +548,7 @@ public static class Simulation
 
     private static ZoneState RunNpcAiAndApply(SimulationConfig config, int tick, ZoneState zone, SimulationInstrumentation? instrumentation)
     {
+        AiBudgetState budget = new(config.AiBudgets);
         List<WorldCommand> npcCommands = new();
         ImmutableArray<EntityState> ordered = zone.Entities
             .OrderBy(e => e.Id.Value)
@@ -565,6 +566,31 @@ public static class Simulation
             if (entity.Kind != EntityKind.Npc || !entity.IsAlive)
             {
                 postAiEntities.Add(entity);
+                continue;
+            }
+
+            if (!budget.TryConsumeAiDecision())
+            {
+                MoveIntentComponent heldIntent = entity.MoveIntent;
+                if (heldIntent.Type == MoveIntentType.None)
+                {
+                    heldIntent = heldIntent with { Type = MoveIntentType.Hold };
+                }
+
+                EntityState heldNpc = entity with
+                {
+                    WanderX = 0,
+                    WanderY = 0,
+                    MoveIntent = heldIntent
+                };
+
+                postAiEntities.Add(heldNpc);
+                npcCommands.Add(new WorldCommand(
+                    Kind: WorldCommandKind.MoveIntent,
+                    EntityId: heldNpc.Id,
+                    ZoneId: zone.Id,
+                    MoveX: 0,
+                    MoveY: 0));
                 continue;
             }
 
@@ -642,41 +668,77 @@ public static class Simulation
             bool needsPathing = moveIntent.Type is MoveIntentType.ChaseEntity or MoveIntentType.GoToPoint;
             if (needsPathing && tick >= moveIntent.NextRepathTick)
             {
-                if (TryResolveGoalTile(moveIntent, ordered, orderedIds, out TileCoord goalTile))
-                {
-                    TileCoord startTile = PositionToTile(npc.Pos);
-                    if (pathfinder.TryFindPath(navGrid, startTile, goalTile, pathBuffer, out int pathLen, maxExpandedNodes: pathBuffer.Length))
-                    {
-                        moveIntent = moveIntent with
-                        {
-                            Path = pathBuffer[..pathLen].ToImmutableArray(),
-                            PathLen = pathLen,
-                            PathIndex = pathLen > 1 ? 1 : 0,
-                            NextRepathTick = tick + moveIntent.RepathEveryTicks
-                        };
-                    }
-                    else
-                    {
-                        moveIntent = moveIntent with
-                        {
-                            Type = MoveIntentType.Hold,
-                            Path = ImmutableArray<TileCoord>.Empty,
-                            PathLen = 0,
-                            PathIndex = 0,
-                            NextRepathTick = tick + moveIntent.RepathEveryTicks
-                        };
-                    }
-                }
-                else
+                if (!budget.TryConsumeRepathSlot())
                 {
                     moveIntent = moveIntent with
                     {
-                        Type = MoveIntentType.Hold,
-                        Path = ImmutableArray<TileCoord>.Empty,
-                        PathLen = 0,
-                        PathIndex = 0,
-                        NextRepathTick = tick + moveIntent.RepathEveryTicks
+                        NextRepathTick = tick + 1
                     };
+                }
+                else
+                {
+                    if (TryResolveGoalTile(moveIntent, ordered, orderedIds, out TileCoord goalTile))
+                    {
+                        TileCoord startTile = PositionToTile(npc.Pos);
+                        int maxExpandedNodes = budget.GetPathExpansionAllowance(pathBuffer.Length);
+                        bool foundPath = maxExpandedNodes > 0
+                            && pathfinder.TryFindPath(navGrid, startTile, goalTile, pathBuffer, out int pathLen, out int expandedCount, maxExpandedNodes: maxExpandedNodes);
+
+                        if (maxExpandedNodes > 0)
+                        {
+                            budget.ConsumePathExpansions(expandedCount);
+                        }
+
+                        if (foundPath)
+                        {
+                            moveIntent = moveIntent with
+                            {
+                                Path = pathBuffer[..pathLen].ToImmutableArray(),
+                                PathLen = pathLen,
+                                PathIndex = pathLen > 1 ? 1 : 0,
+                                NextRepathTick = tick + moveIntent.RepathEveryTicks
+                            };
+                        }
+                        else if (moveIntent.PathLen > 0 && moveIntent.PathIndex < moveIntent.PathLen)
+                        {
+                            moveIntent = moveIntent with
+                            {
+                                NextRepathTick = tick + moveIntent.RepathEveryTicks
+                            };
+                        }
+                        else
+                        {
+                            moveIntent = moveIntent with
+                            {
+                                Type = MoveIntentType.Hold,
+                                Path = ImmutableArray<TileCoord>.Empty,
+                                PathLen = 0,
+                                PathIndex = 0,
+                                NextRepathTick = tick + moveIntent.RepathEveryTicks
+                            };
+                        }
+                    }
+                    else
+                    {
+                        if (moveIntent.PathLen > 0 && moveIntent.PathIndex < moveIntent.PathLen)
+                        {
+                            moveIntent = moveIntent with
+                            {
+                                NextRepathTick = tick + moveIntent.RepathEveryTicks
+                            };
+                        }
+                        else
+                        {
+                            moveIntent = moveIntent with
+                            {
+                                Type = MoveIntentType.Hold,
+                                Path = ImmutableArray<TileCoord>.Empty,
+                                PathLen = 0,
+                                PathIndex = 0,
+                                NextRepathTick = tick + moveIntent.RepathEveryTicks
+                            };
+                        }
+                    }
                 }
             }
 
