@@ -2655,6 +2655,11 @@ public static class Simulation
             {
                 return true;
             }
+
+            if (!IsTargetVisibleToCasterFaction(zone, caster, entities[targetIndex]))
+            {
+                return true;
+            }
         }
 
         Vec2Fix targetPos = command.TargetKind == CastTargetKind.Point
@@ -2680,6 +2685,12 @@ public static class Simulation
         }
 
         return false;
+    }
+
+    private static bool IsTargetVisibleToCasterFaction(ZoneState zone, EntityState caster, EntityState target)
+    {
+        TileCoord targetTile = PositionToTile(target.Pos);
+        return zone.Visibility.IsVisible(caster.FactionId, targetTile.X, targetTile.Y);
     }
 
     private static (ZoneState Zone, ImmutableArray<CombatEvent> Events, ImmutableArray<StatusEvent> StatusEvents) ExecuteCastNow(SimulationConfig config, int tick, ZoneState zone, EntityId casterId, WorldCommand command, SkillDefinition skill)
@@ -2891,6 +2902,15 @@ public static class Simulation
             if (resolvedIndices.IsDefaultOrEmpty)
             {
                 return CastResult.Rejected_InvalidTarget;
+            }
+
+            if (command.TargetKind == CastTargetKind.Entity)
+            {
+                EntityState target = entities[resolvedIndices[0]];
+                if (!IsTargetVisibleToCasterFaction(zone, caster, target))
+                {
+                    return CastResult.Rejected_InvalidTarget;
+                }
             }
 
             targetPos = entities[resolvedIndices[0]].Pos;
