@@ -169,8 +169,8 @@ internal static class VisibilityTargetingPr78TestHelpers
             IsAlive: true,
             AttackRange: Fix32.FromInt(1),
             AttackDamage: 10,
-            AttackCooldownTicks: 10,
-            LastAttackTick: 0,
+            AttackCooldownTicks: 1,
+            LastAttackTick: -1,
             FactionId: factionId,
             VisionRadiusTiles: visionRadius);
 

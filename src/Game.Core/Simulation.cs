@@ -2689,6 +2689,11 @@ public static class Simulation
 
     private static bool IsTargetVisibleToCasterFaction(ZoneState zone, EntityState caster, EntityState target)
     {
+        if (caster.FactionId == FactionId.None)
+        {
+            return true;
+        }
+
         TileCoord targetTile = PositionToTile(target.Pos);
         return zone.Visibility.IsVisible(caster.FactionId, targetTile.X, targetTile.Y);
     }
