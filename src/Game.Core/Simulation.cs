@@ -331,6 +331,7 @@ public static class Simulation
             }
 
             visibility.ClearAll();
+            LineOfSight.TileMapCollision collision = new(zone.Map);
             ImmutableArray<EntityState> orderedEntities = zone.Entities.OrderBy(e => e.Id.Value).ToImmutableArray();
             for (int i = 0; i < orderedEntities.Length; i++)
             {
@@ -351,16 +352,16 @@ public static class Simulation
                 int centerY = Fix32.FloorToInt(entity.Pos.Y);
                 int radius = entity.VisionRadiusTiles;
 
-                int minY = centerY - radius;
-                int maxY = centerY + radius;
-                int minX = centerX - radius;
-                int maxX = centerX + radius;
-
-                for (int y = minY; y <= maxY; y++)
+                for (int dy = -radius; dy <= radius; dy++)
                 {
-                    for (int x = minX; x <= maxX; x++)
+                    for (int dx = -radius; dx <= radius; dx++)
                     {
-                        visibility.SetVisible(factionId, x, y);
+                        int targetX = centerX + dx;
+                        int targetY = centerY + dy;
+                        if (IsTileVisible(collision, centerX, centerY, targetX, targetY))
+                        {
+                            visibility.SetVisible(factionId, targetX, targetY);
+                        }
                     }
                 }
             }
@@ -369,6 +370,19 @@ public static class Simulation
         }
 
         return current;
+    }
+
+    private static bool IsTileVisible(LineOfSight.TileMapCollision collision, int viewerTileX, int viewerTileY, int targetTileX, int targetTileY)
+    {
+        Vec2Fix viewerCenter = TileCenter(viewerTileX, viewerTileY);
+        Vec2Fix targetCenter = TileCenter(targetTileX, targetTileY);
+        return LineOfSight.HasLineOfSight(collision, viewerCenter.X, viewerCenter.Y, targetCenter.X, targetCenter.Y);
+    }
+
+    private static Vec2Fix TileCenter(int tileX, int tileY)
+    {
+        Fix32 halfTile = new(Fix32.OneRaw / 2);
+        return new Vec2Fix(Fix32.FromInt(tileX) + halfTile, Fix32.FromInt(tileY) + halfTile);
     }
 
 
