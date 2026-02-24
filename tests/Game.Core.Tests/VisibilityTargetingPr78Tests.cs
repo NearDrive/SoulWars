@@ -142,7 +142,7 @@ public sealed class ReplayVerify_VisibilityScenario
         return new ScenarioRunResult(StateChecksum.Compute(state), intentCountByTick.ToImmutable());
     }
 
-    private sealed record ScenarioRunResult(uint FinalChecksum, ImmutableArray<int> IntentCountByTick);
+    private sealed record ScenarioRunResult(string FinalChecksum, ImmutableArray<int> IntentCountByTick);
 }
 
 internal static class VisibilityTargetingPr78TestHelpers
