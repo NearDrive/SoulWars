@@ -351,18 +351,11 @@ public static class Simulation
                 int centerX = Fix32.FloorToInt(entity.Pos.X);
                 int centerY = Fix32.FloorToInt(entity.Pos.Y);
                 int radius = entity.VisionRadiusTiles;
-                int radiusSquared = radius * radius;
 
                 for (int dy = -radius; dy <= radius; dy++)
                 {
                     for (int dx = -radius; dx <= radius; dx++)
                     {
-                        int distanceSquared = (dx * dx) + (dy * dy);
-                        if (distanceSquared > radiusSquared)
-                        {
-                            continue;
-                        }
-
                         int targetX = centerX + dx;
                         int targetY = centerY + dy;
                         if (IsTileVisible(collision, centerX, centerY, targetX, targetY))
