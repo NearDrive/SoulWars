@@ -341,6 +341,11 @@ public static class Simulation
                 }
 
                 FactionId factionId = entity.FactionId;
+                if (factionId == FactionId.None)
+                {
+                    continue;
+                }
+
                 visibility.EnsureFaction(factionId);
                 int centerX = Fix32.FloorToInt(entity.Pos.X);
                 int centerY = Fix32.FloorToInt(entity.Pos.Y);
