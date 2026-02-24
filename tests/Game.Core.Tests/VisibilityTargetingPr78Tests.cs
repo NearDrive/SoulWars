@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using Game.Core;
 using Xunit;
+using static Game.Core.Tests.VisibilityTargetingPr78TestHelpers;
 
 namespace Game.Core.Tests;
 
@@ -144,52 +145,55 @@ public sealed class ReplayVerify_VisibilityScenario
     private sealed record ScenarioRunResult(uint FinalChecksum, ImmutableArray<int> IntentCountByTick);
 }
 
-file static TileMap BuildMap(int width, int height, params (int X, int Y)[] blockedTiles)
+internal static class VisibilityTargetingPr78TestHelpers
 {
-    TileKind[] tiles = Enumerable.Repeat(TileKind.Empty, width * height).ToArray();
-    for (int i = 0; i < blockedTiles.Length; i++)
+    public static TileMap BuildMap(int width, int height, params (int X, int Y)[] blockedTiles)
     {
-        (int x, int y) = blockedTiles[i];
-        tiles[(y * width) + x] = TileKind.Solid;
+        TileKind[] tiles = Enumerable.Repeat(TileKind.Empty, width * height).ToArray();
+        for (int i = 0; i < blockedTiles.Length; i++)
+        {
+            (int x, int y) = blockedTiles[i];
+            tiles[(y * width) + x] = TileKind.Solid;
+        }
+
+        return new TileMap(width, height, tiles.ToImmutableArray());
     }
 
-    return new TileMap(width, height, tiles.ToImmutableArray());
-}
+    public static EntityState CreateEntity(EntityId id, int x, int y, FactionId factionId, int visionRadius)
+        => new(
+            Id: id,
+            Pos: new Vec2Fix(Fix32.FromInt(x), Fix32.FromInt(y)),
+            Vel: Vec2Fix.Zero,
+            MaxHp: 100,
+            Hp: 100,
+            IsAlive: true,
+            AttackRange: Fix32.FromInt(1),
+            AttackDamage: 10,
+            AttackCooldownTicks: 10,
+            LastAttackTick: 0,
+            FactionId: factionId,
+            VisionRadiusTiles: visionRadius);
 
-file static EntityState CreateEntity(EntityId id, int x, int y, FactionId factionId, int visionRadius)
-    => new(
-        Id: id,
-        Pos: new Vec2Fix(Fix32.FromInt(x), Fix32.FromInt(y)),
-        Vel: Vec2Fix.Zero,
-        MaxHp: 100,
-        Hp: 100,
-        IsAlive: true,
-        AttackRange: Fix32.FromInt(1),
-        AttackDamage: 10,
-        AttackCooldownTicks: 10,
-        LastAttackTick: 0,
-        FactionId: factionId,
-        VisionRadiusTiles: visionRadius);
-
-file static WorldState BuildWorld(TileMap map, params EntityState[] entities)
-{
-    ImmutableArray<EntityState> allEntities = entities.ToImmutableArray();
-    ZoneState zone = new(new ZoneId(1), map, allEntities);
-
-    return new WorldState(
-        Tick: 0,
-        Zones: ImmutableArray.Create(zone),
-        EntityLocations: allEntities.Select(e => new EntityLocation(e.Id, new ZoneId(1))).ToImmutableArray(),
-        LootEntities: ImmutableArray<LootEntityState>.Empty);
-}
-
-file static SimulationConfig CreateConfig()
-    => SimulationConfig.Default(seed: 7801) with
+    public static WorldState BuildWorld(TileMap map, params EntityState[] entities)
     {
-        NpcCountPerZone = 0,
-        MapWidth = 7,
-        MapHeight = 7,
-        SkillDefinitions = ImmutableArray.Create(
-            new SkillDefinition(new SkillId(10), Fix32.FromInt(6).Raw, HitRadiusRaw: Fix32.OneRaw, CooldownTicks: 6, ResourceCost: 0, TargetKind: CastTargetKind.Entity, BaseAmount: 5),
-            new SkillDefinition(new SkillId(11), Fix32.FromInt(6).Raw, HitRadiusRaw: Fix32.FromInt(3).Raw, CooldownTicks: 6, ResourceCost: 0, TargetKind: CastTargetKind.Point, BaseAmount: 7))
-    };
+        ImmutableArray<EntityState> allEntities = entities.ToImmutableArray();
+        ZoneState zone = new(new ZoneId(1), map, allEntities);
+
+        return new WorldState(
+            Tick: 0,
+            Zones: ImmutableArray.Create(zone),
+            EntityLocations: allEntities.Select(e => new EntityLocation(e.Id, new ZoneId(1))).ToImmutableArray(),
+            LootEntities: ImmutableArray<LootEntityState>.Empty);
+    }
+
+    public static SimulationConfig CreateConfig()
+        => SimulationConfig.Default(seed: 7801) with
+        {
+            NpcCountPerZone = 0,
+            MapWidth = 7,
+            MapHeight = 7,
+            SkillDefinitions = ImmutableArray.Create(
+                new SkillDefinition(new SkillId(10), Fix32.FromInt(6).Raw, HitRadiusRaw: Fix32.OneRaw, CooldownTicks: 6, ResourceCost: 0, TargetKind: CastTargetKind.Entity, BaseAmount: 5),
+                new SkillDefinition(new SkillId(11), Fix32.FromInt(6).Raw, HitRadiusRaw: Fix32.FromInt(3).Raw, CooldownTicks: 6, ResourceCost: 0, TargetKind: CastTargetKind.Point, BaseAmount: 7))
+        };
+}
