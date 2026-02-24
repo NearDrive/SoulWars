@@ -46,26 +46,27 @@ public sealed class VisibilityRestartDeterminismTests
         if (tick % 20 == 0)
         {
             return ImmutableArray.Create(
-                Move(101, x: 8, y: 1),
-                Move(102, x: 1, y: 8));
+                MoveIntent(101, moveX: 1, moveY: -1),
+                MoveIntent(102, moveX: -1, moveY: 1));
         }
 
         if (tick % 20 == 10)
         {
             return ImmutableArray.Create(
-                Move(101, x: 2, y: 2),
-                Move(102, x: 7, y: 7));
+                MoveIntent(101, moveX: -1, moveY: 1),
+                MoveIntent(102, moveX: 1, moveY: -1));
         }
 
         return ImmutableArray<WorldCommand>.Empty;
     }
 
-    private static WorldCommand Move(int entityId, int x, int y)
+    private static WorldCommand MoveIntent(int entityId, sbyte moveX, sbyte moveY)
         => new(
-            Kind: WorldCommandKind.Move,
+            Kind: WorldCommandKind.MoveIntent,
             EntityId: new EntityId(entityId),
             ZoneId: new ZoneId(1),
-            TargetPos: new Vec2Fix(Fix32.FromInt(x), Fix32.FromInt(y)));
+            MoveX: moveX,
+            MoveY: moveY);
 
     private static WorldState BuildWorld()
     {
