@@ -790,7 +790,12 @@ public static class WorldStateSerializer
 
             previousFactionId = factionIdValue;
             int byteCount = reader.ReadInt32();
-            ValidateCount(byteCount, (width * height + 7) / 8, nameof(byteCount));
+            int expectedByteCount = (width * height + 7) / 8;
+            if (byteCount != expectedByteCount)
+            {
+                throw new InvalidDataException($"Visibility bitset length must be exactly {expectedByteCount} bytes, but was {byteCount}.");
+            }
+
             byte[] bytes = reader.ReadBytes(byteCount);
             if (bytes.Length != byteCount)
             {
