@@ -1022,6 +1022,11 @@ public sealed class ServerHost
                 SnapshotEntity[] enters;
                 SnapshotEntity[] updates;
                 HashSet<int> visibleNowIds;
+                IReadOnlyCollection<EntityState> candidateEntities;
+                SessionSnapshotContext snapshotContext = new(
+                    session.SessionId.Value,
+                    session.EntityId,
+                    self?.FactionId ?? FactionId.None);
 
                 if (self is null)
                 {
@@ -1030,10 +1035,12 @@ public sealed class ServerHost
                     enters = Array.Empty<SnapshotEntity>();
                     updates = Array.Empty<SnapshotEntity>();
                     visibleNowIds = new HashSet<int>();
+                    candidateEntities = Array.Empty<EntityState>();
                 }
                 else
                 {
                     List<EntityState> visibleEntities = ComputeBudgetedVisibleEntities(zone, self);
+                    candidateEntities = visibleEntities;
                     entities = visibleEntities
                         .Select(ToSnapshotEntity)
                         .OrderBy(entity => entity.EntityId)
@@ -1052,6 +1059,12 @@ public sealed class ServerHost
                         .Select(ToSnapshotEntity)
                         .ToArray();
                 }
+
+                entities = SnapshotRedactor.RedactEntities(snapshotContext, zone, zone.Visibility, candidateEntities, entities);
+                enters = SnapshotRedactor.RedactEntities(snapshotContext, zone, zone.Visibility, candidateEntities, enters);
+                updates = SnapshotRedactor.RedactEntities(snapshotContext, zone, zone.Visibility, candidateEntities, updates);
+                visibleNowIds = entities.Select(entity => entity.EntityId).ToHashSet();
+                leaves = SnapshotRedactor.RedactEntityIds(snapshotContext, zone, zone.Visibility, leaves);
 
                 if (session.SupportsSnapshotAckV2 &&
                     session.LastFullSnapshot is { } lastSnapshot &&
