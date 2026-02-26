@@ -12,3 +12,4 @@
 | MVP8 | PR-43..PR-46 | `docs/protocol/SoulWars_MVP8_Drift_Guardrails (1).md` | - | Drift guardrails + replay diagnostics + migrations. |
 | MVP9 | PR-48..PR-52 | `docs/protocol/MVP9_PR_PLAN (1).md` | - | Deterministic multi-zone runtime and AOI progression. |
 | MVP10 | PR-54..PR-61 | `docs/protocol/SoulWars_MVP10_MasterPlan (1).md` | `docs/protocol/SoulWars_MVP10_PR_PLAN.md` | MasterPlan is **CANONICAL**; PR_PLAN is **LEGACY** historical mapping only. |
+| MVP14 | PR-81..PR-85 | `docs/protocol/MVP14_PR_PLAN.md` | - | Visibility-driven AOI, snapshot redaction, deterministic visibility transitions, and multi-zone network visibility safety. |
