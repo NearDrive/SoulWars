@@ -134,13 +134,13 @@ internal static class FogOfWarPr80Scenario
 
             if (tick == 10)
             {
-                hiddenPointAoeAccepted = state.SkillCastIntents.Any(i => i.CasterId == BotA1 && i.TargetKind == CastTargetKind.Point) &&
+                hiddenPointAoeAccepted = state.SkillCastIntents.Any(i => i.CasterId == BotA1 && i.TargetType == SkillTargetType.Point) &&
                                          hpAfter < hpBefore;
             }
 
             if (tick == 140)
             {
-                visibleEntityCastAccepted = state.SkillCastIntents.Any(i => i.CasterId == BotA1 && i.TargetKind == CastTargetKind.Entity && i.TargetEntityId == BotB1) &&
+                visibleEntityCastAccepted = state.SkillCastIntents.Any(i => i.CasterId == BotA1 && i.TargetType == SkillTargetType.Entity && i.TargetEntityId == BotB1) &&
                                             hpAfter < hpBefore;
                 visibilityWasGainedBeforeFinalCast = visibilityTicks.Any(t => t <= tick);
             }
