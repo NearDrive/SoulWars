@@ -60,13 +60,38 @@ public sealed class FogOfWarRestartDeterminismTests
         Assert.Equal(baseline.FinalChecksum, resumed.FinalChecksum);
         Assert.Equal(baseline.FinalGlobalChecksum, resumed.FinalGlobalChecksum);
         Assert.Equal(baseline.FinalTargetHp, resumed.FinalTargetHp);
-        Assert.Equal(baseline.VisibilityTicks, resumed.VisibilityTicks);
+        Assert.NotEmpty(baseline.VisibilityTicks);
+        Assert.NotEmpty(resumed.VisibilityTicks);
+        Assert.Equal(baseline.VisibilityTicks[0], resumed.VisibilityTicks[0]);
+        Assert.Equal(baseline.VisibilityTicks[^1], resumed.VisibilityTicks[^1]);
+
+        Assert.True(IsContiguousVisibility(baseline.VisibilityTicks), "Baseline visibility timeline should not oscillate after reveal.");
+        Assert.True(IsContiguousVisibility(resumed.VisibilityTicks), "Restarted visibility timeline should not oscillate after reveal.");
 
         Assert.True(resumed.VisibilityWasGainedBeforeFinalCast, "Visibility progression should remain stable after restart.");
         Assert.True(resumed.HiddenEntityCastRejected);
         Assert.True(resumed.HiddenPointAoeAccepted);
         Assert.True(resumed.VisibleEntityCastAccepted);
     }
+
+    private static bool IsContiguousVisibility(ImmutableArray<int> ticks)
+    {
+        if (ticks.IsDefaultOrEmpty)
+        {
+            return false;
+        }
+
+        for (int i = 1; i < ticks.Length; i++)
+        {
+            if (ticks[i] != ticks[i - 1] + 1)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
 }
 
 internal readonly record struct FogOfWarScenarioRun(
