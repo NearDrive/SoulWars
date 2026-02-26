@@ -74,7 +74,7 @@ file static class FogNetworkPr84Harness
     private const int EntityA = 11;
     private const int EntityB = 21;
 
-    private static readonly ImmutableArray<(int MoveX, int MoveY)> MovementScript =
+    private static readonly ImmutableArray<(sbyte MoveX, sbyte MoveY)> MovementScript =
     [
         (0, 1),
         (0, 1),
@@ -125,7 +125,7 @@ file static class FogNetworkPr84Harness
 
         for (int step = 0; step < MovementScript.Length; step++)
         {
-            (int mx, int my) = MovementScript[step];
+            (sbyte mx, sbyte my) = MovementScript[step];
             endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, mx, my)));
             host.StepOnce();
 
