@@ -51,6 +51,8 @@ public sealed class SnapshotRedactionTests
 public sealed class EntityPayloadIsolationTests
 {
     [Fact]
+    [Trait("Category", "PR82")]
+    [Trait("Category", "Canary")]
     public void SnapshotV2_RemovesEntityPayload_WhenEntityTransitionsVisibleToInvisible()
     {
         ServerHost host = SnapshotRedactionTestHelpers.CreateHostForVisibilityTransitionWorld();
