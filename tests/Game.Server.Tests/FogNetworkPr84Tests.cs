@@ -126,7 +126,7 @@ file static class FogNetworkPr84Harness
         for (int step = 0; step < MovementScript.Length; step++)
         {
             (sbyte mx, sbyte my) = MovementScript[step];
-            endpointA.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, mx, my)));
+            endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, mx, my)));
             host.StepOnce();
 
             SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA);
@@ -196,7 +196,7 @@ file static class FogNetworkPr84Harness
             for (int i = 0; i < fallbackScript.Length; i++)
             {
                 (sbyte fmx, sbyte fmy) = fallbackScript[i];
-                endpointA.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, fmx, fmy)));
+                endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, fmx, fmy)));
                 host.StepOnce();
 
                 SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA);
@@ -301,8 +301,8 @@ file static class FogNetworkPr84Harness
         TileMap map = CreateObstacleMap();
         ImmutableArray<EntityState> entities =
         [
-            new EntityState(new EntityId(EntityA), At(2, 1), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(1), VisionRadiusTiles: 8),
-            new EntityState(new EntityId(EntityB), At(6, 3), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(2), VisionRadiusTiles: 8)
+            new EntityState(new EntityId(EntityA), At(2, 3), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(1), VisionRadiusTiles: 8),
+            new EntityState(new EntityId(EntityB), At(6, 1), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(2), VisionRadiusTiles: 8)
         ];
 
         ZoneState zone = new(new ZoneId(ZoneIdValue), map, entities);
