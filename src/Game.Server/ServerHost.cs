@@ -68,7 +68,7 @@ public sealed class ServerHost
         bool enableMetrics = config.EnableMetrics;
         Metrics = metrics ?? new ServerMetrics(enableMetrics);
         _auditSink = auditSink ?? NullAuditSink.Instance;
-        _aoiProvider = new VisibilityAoiProvider();
+        _aoiProvider = new VisibilityAoiProvider(_serverConfig.AoiRadiusSq);
         Perf = new PerfCounters();
         _simulationInstrumentation = new SimulationInstrumentation
         {
