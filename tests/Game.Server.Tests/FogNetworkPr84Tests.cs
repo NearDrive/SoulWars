@@ -162,8 +162,10 @@ file static class FogNetworkPr84Harness
 
                     HandshakeAndEnter(endpointA, "pr84-a");
                     HandshakeAndEnter(endpointB, "pr84-b");
+                    endpointA.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
+                    endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
 
-                    host.StepOnce();
+                    host.AdvanceTicks(2);
                     DrainAndAckAllSnapshots(endpointA);
                     DrainAndAckAllSnapshots(endpointB);
                     inputTick = host.CurrentWorld.Tick + 1;
