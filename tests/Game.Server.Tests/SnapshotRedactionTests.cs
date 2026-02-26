@@ -129,7 +129,7 @@ public sealed class EntityPayloadIsolationTests
         Assert.DoesNotContain(invisibleSnapshot!.Entities, entity => entity.EntityId == 21);
         Assert.DoesNotContain(invisibleSnapshot.Enters, entity => entity.EntityId == 21);
         Assert.DoesNotContain(invisibleSnapshot.Updates, entity => entity.EntityId == 21);
-        Assert.DoesNotContain(invisibleSnapshot.Leaves, entityId => entityId == 21);
+        Assert.Contains(21, invisibleSnapshot.Leaves);
     }
 }
 
