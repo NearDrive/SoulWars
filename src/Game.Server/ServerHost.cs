@@ -1021,7 +1021,7 @@ public sealed class ServerHost
                 int[] leaves;
                 SnapshotEntity[] enters;
                 SnapshotEntity[] updates;
-                HashSet<int> visibleNowIds;
+                SortedSet<int> visibleNowIds;
                 IReadOnlyCollection<EntityState> candidateEntities;
                 SessionSnapshotContext snapshotContext = new(
                     session.SessionId.Value,
@@ -1034,7 +1034,7 @@ public sealed class ServerHost
                     leaves = session.LastVisible.OrderBy(id => id).ToArray();
                     enters = Array.Empty<SnapshotEntity>();
                     updates = Array.Empty<SnapshotEntity>();
-                    visibleNowIds = new HashSet<int>();
+                    visibleNowIds = new SortedSet<int>();
                     candidateEntities = Array.Empty<EntityState>();
                 }
                 else
@@ -1046,15 +1046,28 @@ public sealed class ServerHost
                         .OrderBy(entity => entity.EntityId)
                         .ToArray();
 
-                    visibleNowIds = visibleEntities.Select(entity => entity.Id.Value).ToHashSet();
-                    leaves = session.LastVisible.Except(visibleNowIds).OrderBy(id => id).ToArray();
-                    enters = visibleEntities
-                        .Where(entity => !session.LastVisible.Contains(entity.Id.Value))
+                    visibleNowIds = new SortedSet<int>(visibleEntities.Select(entity => entity.Id.Value));
+                    leaves = ComputeSortedDifference(session.LastVisible, visibleNowIds);
+
+                    List<EntityState> enteringEntities = new();
+                    List<EntityState> updatingEntities = new();
+                    foreach (EntityState entity in visibleEntities)
+                    {
+                        if (session.LastVisible.Contains(entity.Id.Value))
+                        {
+                            updatingEntities.Add(entity);
+                        }
+                        else
+                        {
+                            enteringEntities.Add(entity);
+                        }
+                    }
+
+                    enters = enteringEntities
                         .OrderBy(entity => entity.Id.Value)
                         .Select(ToSnapshotEntity)
                         .ToArray();
-                    updates = visibleEntities
-                        .Where(entity => session.LastVisible.Contains(entity.Id.Value))
+                    updates = updatingEntities
                         .OrderBy(entity => entity.Id.Value)
                         .Select(ToSnapshotEntity)
                         .ToArray();
@@ -1063,8 +1076,7 @@ public sealed class ServerHost
                 entities = SnapshotRedactor.RedactEntities(snapshotContext, zone, zone.Visibility, candidateEntities, entities);
                 enters = SnapshotRedactor.RedactEntities(snapshotContext, zone, zone.Visibility, candidateEntities, enters);
                 updates = SnapshotRedactor.RedactEntities(snapshotContext, zone, zone.Visibility, candidateEntities, updates);
-                visibleNowIds = entities.Select(entity => entity.EntityId).ToHashSet();
-                leaves = SnapshotRedactor.RedactEntityIds(snapshotContext, zone, zone.Visibility, leaves);
+                visibleNowIds = new SortedSet<int>(entities.Select(entity => entity.EntityId));
 
                 if (session.SupportsSnapshotAckV2 &&
                     session.LastFullSnapshot is { } lastSnapshot &&
@@ -1317,7 +1329,49 @@ public sealed class ServerHost
 
         public int LastSnapshotRetryCount { get; set; }
 
-        public HashSet<int> LastVisible { get; set; } = new();
+        public SortedSet<int> LastVisible { get; set; } = new();
+    }
+
+    private static int[] ComputeSortedDifference(SortedSet<int> previous, SortedSet<int> current)
+    {
+        List<int> difference = new();
+
+        IEnumerator<int> previousEnumerator = previous.GetEnumerator();
+        IEnumerator<int> currentEnumerator = current.GetEnumerator();
+
+        bool hasPrevious = previousEnumerator.MoveNext();
+        bool hasCurrent = currentEnumerator.MoveNext();
+
+        while (hasPrevious)
+        {
+            if (!hasCurrent)
+            {
+                difference.Add(previousEnumerator.Current);
+                hasPrevious = previousEnumerator.MoveNext();
+                continue;
+            }
+
+            int previousValue = previousEnumerator.Current;
+            int currentValue = currentEnumerator.Current;
+
+            if (previousValue == currentValue)
+            {
+                hasPrevious = previousEnumerator.MoveNext();
+                hasCurrent = currentEnumerator.MoveNext();
+                continue;
+            }
+
+            if (previousValue < currentValue)
+            {
+                difference.Add(previousValue);
+                hasPrevious = previousEnumerator.MoveNext();
+                continue;
+            }
+
+            hasCurrent = currentEnumerator.MoveNext();
+        }
+
+        return difference.ToArray();
     }
 
     private readonly record struct SessionSnapshotCache(int ZoneId, int SnapshotSeq, byte[] EncodedPayload);
