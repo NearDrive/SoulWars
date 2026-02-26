@@ -9,6 +9,7 @@ namespace Game.Server.Tests;
 public sealed class VisibilityAoiProviderTests
 {
     [Fact]
+    [Trait("Category", "PR81")]
     public void VisibilityAoiProvider_ReturnsOnlyVisibleEntities_SortedByEntityId()
     {
         VisibilityAoiProvider provider = new();
@@ -29,6 +30,7 @@ public sealed class VisibilityAoiProviderTests
     }
 
     [Fact]
+    [Trait("Category", "PR81")]
     public void VisibilityAoiProvider_IsDeterministic_ForSameWorldState()
     {
         VisibilityAoiProvider provider = new();
@@ -72,6 +74,7 @@ public sealed class VisibilityAoiProviderTests
 public sealed class CrossFactionIsolationAoiTests
 {
     [Fact]
+    [Trait("Category", "PR81")]
     public void VisibilityAoiProvider_ProducesFactionSpecificAoi_AndExcludesInvisibleEntities()
     {
         VisibilityAoiProvider provider = new();
