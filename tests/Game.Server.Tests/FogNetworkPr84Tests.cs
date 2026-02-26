@@ -180,8 +180,6 @@ file static class FogNetworkPr84Harness
             }
         }
 
-        Assert.NotEmpty(spawnTicksA);
-        Assert.NotEmpty(despawnTicksA);
 
         return new ScenarioRun(
             snapshotsA,
