@@ -56,7 +56,9 @@ internal static class SnapshotRedactor
 
         if (!TryGetEntity(zone, entityId, out EntityState entity))
         {
-            return false;
+            // Entity is no longer present in this zone (leave/despawn path).
+            // Keep the id so clients can deterministically evict prior state.
+            return true;
         }
 
         if (session.FactionId == FactionId.None)

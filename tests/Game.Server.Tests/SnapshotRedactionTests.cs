@@ -53,6 +53,40 @@ public sealed class EntityPayloadIsolationTests
     [Fact]
     [Trait("Category", "PR82")]
     [Trait("Category", "Canary")]
+    public void SnapshotV2_Leaves_KeepId_WhenEntityLeavesZone()
+    {
+        ServerHost host = SnapshotRedactionTestHelpers.CreateHostForVisibilityTransitionWorld();
+        InMemoryEndpoint endpointA = new();
+        InMemoryEndpoint endpointB = new();
+
+        host.Connect(endpointA);
+        host.Connect(endpointB);
+        SnapshotRedactionTestHelpers.HandshakeAndEnter(endpointA, "acc-a");
+        SnapshotRedactionTestHelpers.HandshakeAndEnter(endpointB, "acc-b");
+
+        host.AdvanceTicks(2);
+        _ = SnapshotRedactionTestHelpers.DrainMessages(endpointA);
+        _ = SnapshotRedactionTestHelpers.DrainMessages(endpointB);
+
+        endpointA.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
+        endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
+        host.StepOnce();
+        _ = SnapshotRedactionTestHelpers.DrainMessages(endpointA);
+
+        endpointB.EnqueueToServer(ProtocolCodec.Encode(new LeaveZoneRequestV2(1)));
+
+        SnapshotV2 leaveSnapshot = SnapshotRedactionTestHelpers.WaitForSnapshotCondition(
+            host,
+            endpointA,
+            snapshot => snapshot.Leaves.Contains(21),
+            maxSteps: 64);
+
+        Assert.Contains(21, leaveSnapshot.Leaves);
+    }
+
+    [Fact]
+    [Trait("Category", "PR82")]
+    [Trait("Category", "Canary")]
     public void SnapshotV2_RemovesEntityPayload_WhenEntityTransitionsVisibleToInvisible()
     {
         ServerHost host = SnapshotRedactionTestHelpers.CreateHostForVisibilityTransitionWorld();
@@ -131,6 +165,35 @@ file static class SnapshotRedactionTestHelpers
     {
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, accountId)));
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(1)));
+    }
+
+    public static SnapshotV2 WaitForSnapshotCondition(
+        ServerHost host,
+        InMemoryEndpoint observerEndpoint,
+        Func<SnapshotV2, bool> predicate,
+        int maxSteps)
+    {
+        for (int i = 0; i < maxSteps; i++)
+        {
+            host.StepOnce();
+
+            while (observerEndpoint.TryDequeueFromServer(out byte[] payload))
+            {
+                if (!ProtocolCodec.TryDecodeServer(payload, out IServerMessage? message, out _) || message is not SnapshotV2 snapshot)
+                {
+                    continue;
+                }
+
+                observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(snapshot.ZoneId, snapshot.SnapshotSeq)));
+                if (predicate(snapshot))
+                {
+                    return snapshot;
+                }
+            }
+        }
+
+        Assert.Fail($"Condition not met within {maxSteps} steps.");
+        return null!;
     }
 
     public static List<IServerMessage> DrainMessages(InMemoryEndpoint endpoint)
