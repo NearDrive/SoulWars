@@ -8,6 +8,50 @@ on:
   workflow_dispatch:
 
 jobs:
+  test-count-floor:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
+      - name: Verify discovered test count floor
+        run: ./scripts/ci/verify_test_count_floor.sh --mode verify --baseline docs/ci/test_count_baseline.json
+
+  update-test-count-baseline:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build -c Release --no-restore
+
+      - name: Print discovered test counts for baseline update
+        run: ./scripts/ci/verify_test_count_floor.sh --mode report --baseline docs/ci/test_count_baseline.json
+
   canary:
     runs-on: ubuntu-latest
 
