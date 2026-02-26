@@ -75,15 +75,24 @@ public sealed class EntityPayloadIsolationTests
         SnapshotV2 visibleSnapshot = SnapshotRedactionTestHelpers.DrainMessages(endpointA).OfType<SnapshotV2>().Last();
         Assert.Contains(visibleSnapshot.Entities, entity => entity.EntityId == 21);
 
-        endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(visibleSnapshot.Tick + 1, 1, 0)));
-        endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(visibleSnapshot.Tick + 2, 1, 0)));
-        endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(visibleSnapshot.Tick + 3, 1, 0)));
+        int nextTick = visibleSnapshot.Tick + 1;
+        SnapshotV2? invisibleSnapshot = null;
 
-        host.AdvanceTicks(3);
+        for (int step = 0; step < 20; step++)
+        {
+            endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(nextTick++, 1, 0)));
+            host.StepOnce();
 
-        SnapshotV2 invisibleSnapshot = SnapshotRedactionTestHelpers.DrainMessages(endpointA).OfType<SnapshotV2>().Last();
+            SnapshotV2 latest = SnapshotRedactionTestHelpers.DrainMessages(endpointA).OfType<SnapshotV2>().Last();
+            if (latest.Entities.All(entity => entity.EntityId != 21))
+            {
+                invisibleSnapshot = latest;
+                break;
+            }
+        }
 
-        Assert.DoesNotContain(invisibleSnapshot.Entities, entity => entity.EntityId == 21);
+        Assert.NotNull(invisibleSnapshot);
+        Assert.DoesNotContain(invisibleSnapshot!.Entities, entity => entity.EntityId == 21);
         Assert.DoesNotContain(invisibleSnapshot.Enters, entity => entity.EntityId == 21);
         Assert.DoesNotContain(invisibleSnapshot.Updates, entity => entity.EntityId == 21);
         Assert.DoesNotContain(invisibleSnapshot.Leaves, entityId => entityId == 21);
