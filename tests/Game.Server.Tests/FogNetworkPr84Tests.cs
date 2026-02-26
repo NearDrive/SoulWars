@@ -302,7 +302,7 @@ file static class FogNetworkPr84Harness
         ImmutableArray<EntityState> entities =
         [
             new EntityState(new EntityId(EntityA), At(2, 1), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(1), VisionRadiusTiles: 8),
-            new EntityState(new EntityId(EntityB), At(6, 1), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(2), VisionRadiusTiles: 8)
+            new EntityState(new EntityId(EntityB), At(6, 3), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(2), VisionRadiusTiles: 8)
         ];
 
         ZoneState zone = new(new ZoneId(ZoneIdValue), map, entities);
