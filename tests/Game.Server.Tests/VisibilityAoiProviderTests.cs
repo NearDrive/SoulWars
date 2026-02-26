@@ -33,6 +33,27 @@ public sealed class VisibilityAoiProviderTests
         Assert.Equal(new[] { 10, 20 }, result.EntityIds.Select(id => id.Value).ToArray());
     }
 
+
+    [Fact]
+    [Trait("Category", "PR81")]
+    [Trait("Category", "Canary")]
+    public void VisibilityAoiProvider_FallbacksToFullZone_WhenViewerFactionIsNone()
+    {
+        VisibilityAoiProvider provider = new();
+        WorldState world = BuildWorld(
+            new[]
+            {
+                new EntityState(new EntityId(1), At(1, 1), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: FactionId.None),
+                new EntityState(new EntityId(2), At(6, 6), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(2)),
+                new EntityState(new EntityId(3), At(3, 2), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(3))
+            },
+            _ => { });
+
+        int[] ids = provider.ComputeVisible(world, new ZoneId(1), new EntityId(1)).EntityIds.Select(id => id.Value).ToArray();
+
+        Assert.Equal(new[] { 1, 2, 3 }, ids);
+    }
+
     [Fact]
     [Trait("Category", "PR81")]
     [Trait("Category", "Canary")]

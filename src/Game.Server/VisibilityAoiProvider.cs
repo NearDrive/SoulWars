@@ -19,11 +19,20 @@ public sealed class VisibilityAoiProvider : IAoiProvider
         }
 
         FactionId viewerFactionId = viewer.FactionId;
+        ImmutableArray<FactionId> knownFactions = zone.Visibility.GetFactionIdsOrdered();
+        bool hasVisibilityForViewerFaction = knownFactions.Any(faction => faction.Value == viewerFactionId.Value);
+        bool fullZoneFallback = viewerFactionId == FactionId.None || !hasVisibilityForViewerFaction;
+
         ImmutableArray<EntityId> visible = zone.Entities
             .Where(entity =>
             {
                 perfCounters?.CountAoiChecks(1);
                 if (entity.Id.Value == viewerEntityId.Value)
+                {
+                    return true;
+                }
+
+                if (fullZoneFallback)
                 {
                     return true;
                 }
