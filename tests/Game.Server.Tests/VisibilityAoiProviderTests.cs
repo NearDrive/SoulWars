@@ -10,6 +10,7 @@ public sealed class VisibilityAoiProviderTests
 {
     [Fact]
     [Trait("Category", "PR81")]
+    [Trait("Category", "Canary")]
     public void VisibilityAoiProvider_ReturnsOnlyVisibleEntities_SortedByEntityId()
     {
         VisibilityAoiProvider provider = new();
@@ -31,6 +32,7 @@ public sealed class VisibilityAoiProviderTests
 
     [Fact]
     [Trait("Category", "PR81")]
+    [Trait("Category", "Canary")]
     public void VisibilityAoiProvider_IsDeterministic_ForSameWorldState()
     {
         VisibilityAoiProvider provider = new();
@@ -75,6 +77,7 @@ public sealed class CrossFactionIsolationAoiTests
 {
     [Fact]
     [Trait("Category", "PR81")]
+    [Trait("Category", "Canary")]
     public void VisibilityAoiProvider_ProducesFactionSpecificAoi_AndExcludesInvisibleEntities()
     {
         VisibilityAoiProvider provider = new();
