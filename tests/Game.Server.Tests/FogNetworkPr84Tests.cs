@@ -288,8 +288,8 @@ file static class FogNetworkPr84Harness
 
         if (!withRestartAtStep.HasValue)
         {
-            Assert.NotEmpty(spawnTicksA, $"spawnTicksA empty. {diagnosticsSummary}");
-            Assert.NotEmpty(despawnTicksA, $"despawnTicksA empty. {diagnosticsSummary}");
+            Assert.True(spawnTicksA.Count > 0, $"spawnTicksA empty. {diagnosticsSummary}");
+            Assert.True(despawnTicksA.Count > 0, $"despawnTicksA empty. {diagnosticsSummary}");
         }
 
         return new ScenarioRun(
