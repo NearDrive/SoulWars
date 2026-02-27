@@ -28,8 +28,8 @@ public sealed class VisibilityCostBudgetTests
             endpointA.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, i + 1)));
             endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, i + 1)));
 
-            int axis = (i % 2 == 0) ? 1 : -1;
-            endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(tick++, axis, 0)));
+            sbyte axis = (sbyte)((i % 2 == 0) ? 1 : -1);
+            endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(tick++, axis, (sbyte)0)));
 
             host.StepOnce();
             _ = Pr85PerfHelpers.DrainMessages(endpointA);
@@ -69,8 +69,8 @@ public sealed class RedactionAndAoiBudgetTests
             endpointA.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, i + 1)));
             endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, i + 1)));
 
-            int moveX = (i % 3) - 1;
-            endpointA.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(tick++, moveX, 0)));
+            sbyte moveX = (sbyte)((i % 3) - 1);
+            endpointA.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(tick++, moveX, (sbyte)0)));
             host.StepOnce();
 
             foreach (SnapshotV2 snapshot in Pr85PerfHelpers.DrainMessages(endpointA).OfType<SnapshotV2>())
