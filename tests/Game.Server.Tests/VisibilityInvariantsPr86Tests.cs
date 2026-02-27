@@ -148,6 +148,49 @@ public sealed class CanonicalOrderingInvariantTests
 [Trait("Category", "PR86")]
 public sealed class VisibilityRetransmitInvariantTests
 {
+
+    [Fact]
+    [Trait("Category", "PR86")]
+    [Trait("Category", "Canary")]
+    public void FullSnapshot_AllowsImplicitInitialVisibilityWithoutEnters()
+    {
+        List<SnapshotV2> stream =
+        [
+            new SnapshotV2(
+                Tick: 10,
+                ZoneId: 1,
+                SnapshotSeq: 1,
+                IsFull: true,
+                Entities: [new SnapshotEntity(100, 0, 0, Kind: SnapshotEntityKind.Player)],
+                Leaves: [],
+                Enters: [],
+                Updates: []),
+            new SnapshotV2(
+                Tick: 11,
+                ZoneId: 1,
+                SnapshotSeq: 2,
+                IsFull: false,
+                Entities: [new SnapshotEntity(100, 1, 0, Kind: SnapshotEntityKind.Player)],
+                Leaves: [],
+                Enters: [],
+                Updates: [new SnapshotEntity(100, 1, 0, Kind: SnapshotEntityKind.Player)])
+        ];
+
+        Dictionary<int, IReadOnlySet<int>> visibleByTick = new()
+        {
+            [10] = new HashSet<int> { 100 },
+            [11] = new HashSet<int> { 100 }
+        };
+
+        Exception? ex = Record.Exception(() =>
+            ServerInvariants.ValidateVisibilityStreamInvariants(
+                stream,
+                tick => visibleByTick[tick],
+                sessionId: 8602));
+
+        Assert.Null(ex);
+    }
+
     [Fact]
     [Trait("Category", "PR86")]
     [Trait("Category", "Canary")]

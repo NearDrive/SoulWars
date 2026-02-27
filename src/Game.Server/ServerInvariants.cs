@@ -222,12 +222,12 @@ public static class ServerInvariants
 
             foreach (SnapshotEntity entity in snapshot.Entities)
             {
-                AssertSpawnBeforeState(entity.EntityId, lifecycleByEntityId, sessionId, snapshot.Tick, "entities");
+                AssertSpawnBeforeState(entity.EntityId, lifecycleByEntityId, sessionId, snapshot.Tick, "entities", snapshot.IsFull);
             }
 
             foreach (SnapshotEntity entity in snapshot.Updates)
             {
-                AssertSpawnBeforeState(entity.EntityId, lifecycleByEntityId, sessionId, snapshot.Tick, "updates");
+                AssertSpawnBeforeState(entity.EntityId, lifecycleByEntityId, sessionId, snapshot.Tick, "updates", allowImplicitSpawnFromFullSnapshot: false);
             }
         }
     }
@@ -292,12 +292,21 @@ public static class ServerInvariants
         IDictionary<int, VisibilityLifecycleState> lifecycleByEntityId,
         int sessionId,
         int tick,
-        string source)
+        string source,
+        bool allowImplicitSpawnFromFullSnapshot)
     {
-        if (!lifecycleByEntityId.TryGetValue(entityId, out VisibilityLifecycleState state) || state != VisibilityLifecycleState.Visible)
+        if (lifecycleByEntityId.TryGetValue(entityId, out VisibilityLifecycleState state) && state == VisibilityLifecycleState.Visible)
         {
-            throw new InvariantViolationException($"invariant=SpawnBeforeStateInvariant sessionId={sessionId} tick={tick} source={source} entityId={entityId}");
+            return;
         }
+
+        if (allowImplicitSpawnFromFullSnapshot && source == "entities")
+        {
+            lifecycleByEntityId[entityId] = VisibilityLifecycleState.Visible;
+            return;
+        }
+
+        throw new InvariantViolationException($"invariant=SpawnBeforeStateInvariant sessionId={sessionId} tick={tick} source={source} entityId={entityId}");
     }
 
     private enum VisibilityLifecycleState : byte
