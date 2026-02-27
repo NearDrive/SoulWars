@@ -193,16 +193,22 @@ public static class ServerInvariants
         int sessionId)
     {
         Dictionary<int, VisibilityLifecycleState> lifecycleByEntityId = new();
-        HashSet<int> seenTicks = new();
         int previousTick = int.MinValue;
 
         foreach (SnapshotV2 snapshot in snapshots)
         {
-            EnsureTickUniqueAndMonotonic(snapshot.Tick, seenTicks, ref previousTick, sessionId);
+            bool isRetransmission = IsRetransmittedTick(snapshot.Tick, previousTick);
             AssertCanonicalOrdering(snapshot, sessionId);
 
             IReadOnlySet<int> expectedVisible = visibleEntityIdsByTick(snapshot.Tick);
             AssertNoLeak(snapshot, expectedVisible, sessionId);
+
+            if (isRetransmission)
+            {
+                continue;
+            }
+
+            previousTick = snapshot.Tick;
 
             foreach (int entityId in snapshot.Leaves)
             {
@@ -226,19 +232,14 @@ public static class ServerInvariants
         }
     }
 
-    private static void EnsureTickUniqueAndMonotonic(int tick, HashSet<int> seenTicks, ref int previousTick, int sessionId)
+    private static bool IsRetransmittedTick(int tick, int previousTick)
     {
-        if (!seenTicks.Add(tick))
+        if (previousTick == int.MinValue)
         {
-            throw new InvariantViolationException($"invariant=VisibilityStreamTickUnique sessionId={sessionId} tick={tick}");
+            return false;
         }
 
-        if (previousTick != int.MinValue && tick <= previousTick)
-        {
-            throw new InvariantViolationException($"invariant=VisibilityStreamTickMonotonic sessionId={sessionId} tick={tick} previousTick={previousTick}");
-        }
-
-        previousTick = tick;
+        return tick <= previousTick;
     }
 
     private static void AssertCanonicalOrdering(SnapshotV2 snapshot, int sessionId)

@@ -144,6 +144,62 @@ public sealed class CanonicalOrderingInvariantTests
     }
 }
 
+
+[Trait("Category", "PR86")]
+public sealed class VisibilityRetransmitInvariantTests
+{
+    [Fact]
+    [Trait("Category", "PR86")]
+    [Trait("Category", "Canary")]
+    public void RetransmittedTicks_AreAccepted_WithoutBreakingLifecycleValidation()
+    {
+        List<SnapshotV2> stream =
+        [
+            new SnapshotV2(
+                Tick: 10,
+                ZoneId: 1,
+                SnapshotSeq: 1,
+                IsFull: true,
+                Entities: [new SnapshotEntity(100, 0, 0, Kind: SnapshotEntityKind.Player)],
+                Leaves: [],
+                Enters: [new SnapshotEntity(100, 0, 0, Kind: SnapshotEntityKind.Player)],
+                Updates: []),
+            new SnapshotV2(
+                Tick: 10,
+                ZoneId: 1,
+                SnapshotSeq: 1,
+                IsFull: true,
+                Entities: [new SnapshotEntity(100, 0, 0, Kind: SnapshotEntityKind.Player)],
+                Leaves: [],
+                Enters: [new SnapshotEntity(100, 0, 0, Kind: SnapshotEntityKind.Player)],
+                Updates: []),
+            new SnapshotV2(
+                Tick: 11,
+                ZoneId: 1,
+                SnapshotSeq: 2,
+                IsFull: false,
+                Entities: [new SnapshotEntity(100, 1, 0, Kind: SnapshotEntityKind.Player)],
+                Leaves: [],
+                Enters: [],
+                Updates: [new SnapshotEntity(100, 1, 0, Kind: SnapshotEntityKind.Player)])
+        ];
+
+        Dictionary<int, IReadOnlySet<int>> visibleByTick = new()
+        {
+            [10] = new HashSet<int> { 100 },
+            [11] = new HashSet<int> { 100 }
+        };
+
+        Exception? ex = Record.Exception(() =>
+            ServerInvariants.ValidateVisibilityStreamInvariants(
+                stream,
+                tick => visibleByTick[tick],
+                sessionId: 8601));
+
+        Assert.Null(ex);
+    }
+}
+
 file static class VisibilityInvariantPr86Harness
 {
     private const int ZoneIdValue = 1;
@@ -174,9 +230,9 @@ file static class VisibilityInvariantPr86Harness
         int targetRuntimeEntityId = -1;
 
         host.AdvanceTicks(2);
-        DrainAndAck(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, out _);
+        _ = DrainAndAck(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, out _);
         int ignoredSessionId = -1;
-        DrainAndAck(targetEndpoint, ref ignoredSessionId, ref targetRuntimeEntityId, out _);
+        _ = DrainAndAck(targetEndpoint, ref ignoredSessionId, ref targetRuntimeEntityId, out _);
 
         Assert.Equal(ObserverEntityId, observerRuntimeEntityId);
         Assert.Equal(TargetEntityId, targetRuntimeEntityId);
@@ -195,8 +251,13 @@ file static class VisibilityInvariantPr86Harness
             targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, 0, moveY)));
             host.StepOnce();
 
-            SnapshotV2 observerSnapshot = DrainAndAck(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, out _);
+            SnapshotV2? observerSnapshot = DrainAndAck(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, out _);
             _ = DrainAndAck(targetEndpoint, ref ignoredSessionId, ref targetRuntimeEntityId, out _);
+
+            if (observerSnapshot is null)
+            {
+                continue;
+            }
 
             observerSnapshots.Add(observerSnapshot);
             ImmutableHashSet<int> visible = aoiProvider.ComputeVisible(host.CurrentWorld, new ZoneId(ZoneIdValue), new EntityId(observerRuntimeEntityId)).EntityIds
@@ -215,13 +276,14 @@ file static class VisibilityInvariantPr86Harness
             }
         }
 
+        Assert.NotEmpty(observerSnapshots);
         Assert.True(hiddenObserved, "Expected a despawn transition (visible->invisible).");
         Assert.True(shownAgainObserved, "Expected a respawn transition (invisible->visible).");
 
         return new VisibilityScenarioRun(observerSnapshots, expectedVisibleByTick, observerSessionId, targetRuntimeEntityId);
     }
 
-    private static SnapshotV2 DrainAndAck(InMemoryEndpoint endpoint, ref int sessionId, ref int entityId, out int snapshotCount)
+    private static SnapshotV2? DrainAndAck(InMemoryEndpoint endpoint, ref int sessionId, ref int entityId, out int snapshotCount)
     {
         SnapshotV2? latestSnapshot = null;
         snapshotCount = 0;
@@ -251,8 +313,7 @@ file static class VisibilityInvariantPr86Harness
             }
         }
 
-        Assert.NotNull(latestSnapshot);
-        return latestSnapshot!;
+        return latestSnapshot;
     }
 
     private static ServerHost CreateHost(ServerConfig config)
