@@ -224,6 +224,8 @@ file static class VisibilityInvariantPr86Harness
 
         HandshakeAndEnter(observerEndpoint, "pr86-observer");
         HandshakeAndEnter(targetEndpoint, "pr86-target");
+        observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
+        targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
 
         int observerSessionId = -1;
         int observerRuntimeEntityId = -1;
