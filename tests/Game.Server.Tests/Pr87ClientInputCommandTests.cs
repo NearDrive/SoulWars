@@ -1,4 +1,5 @@
 using System.Collections;
+using Game.Core;
 using Game.Protocol;
 using Game.Server;
 using Xunit;

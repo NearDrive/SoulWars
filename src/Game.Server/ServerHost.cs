@@ -552,13 +552,16 @@ public sealed class ServerHost
             return null;
         }
 
-        if (session.CastCooldownUntilTickBySkillId.TryGetValue(castSkillCommand.SkillId, out int cooldownUntilTick) &&
-            cooldownUntilTick > targetTick)
+        if (TryGetKnownSkillCooldownTicks(castSkillCommand.SkillId, out int cooldownTicks) && cooldownTicks > 0)
         {
-            return null;
-        }
+            if (session.CastCooldownUntilTickBySkillId.TryGetValue(castSkillCommand.SkillId, out int cooldownUntilTick) &&
+                cooldownUntilTick > targetTick)
+            {
+                return null;
+            }
 
-        session.CastCooldownUntilTickBySkillId[castSkillCommand.SkillId] = targetTick + 1;
+            session.CastCooldownUntilTickBySkillId[castSkillCommand.SkillId] = targetTick + cooldownTicks;
+        }
 
         int sequence = session.NextInputSequence++;
 
@@ -573,6 +576,23 @@ public sealed class ServerHost
             TargetEntityId: castSkillCommand.TargetEntityId,
             TargetPosXRaw: castSkillCommand.TargetPosXRaw,
             TargetPosYRaw: castSkillCommand.TargetPosYRaw);
+    }
+
+    private bool TryGetKnownSkillCooldownTicks(int skillId, out int cooldownTicks)
+    {
+        foreach (SkillDefinition definition in _simulationConfig.SkillDefinitions)
+        {
+            if (definition.Id.Value != skillId)
+            {
+                continue;
+            }
+
+            cooldownTicks = Math.Max(1, definition.CooldownTicks);
+            return true;
+        }
+
+        cooldownTicks = 0;
+        return false;
     }
 
     private PendingInput ClampMoveInput(int tick, int sessionId, int sequence, int entityId, int zoneId, sbyte moveX, sbyte moveY)
@@ -594,7 +614,7 @@ public sealed class ServerHost
         int entityIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, new EntityId(entityId));
         if (entityIndex < 0)
         {
-            return true;
+            return false;
         }
 
         EntityState entity = zone.Entities[entityIndex];
