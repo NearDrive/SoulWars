@@ -8,6 +8,7 @@ public sealed class SnapshotSchemaStabilityTests
 {
     [Fact]
     [Trait("Category", "PR86")]
+    [Trait("Category", "Canary")]
     public void SnapshotV2_SerializeParseSerialize_IsStable_AndCanonicalized()
     {
         SnapshotV2 original = new(

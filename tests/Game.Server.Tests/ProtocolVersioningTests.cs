@@ -9,6 +9,7 @@ public sealed class ProtocolVersioningTests
 {
     [Fact]
     [Trait("Category", "PR86")]
+    [Trait("Category", "Canary")]
     public void Handshake_WithUnknownProtocolVersion_IsRejected_AndSessionClosed()
     {
         ServerHost host = new(ServerConfig.Default(seed: 8601));
@@ -26,6 +27,7 @@ public sealed class ProtocolVersioningTests
 
     [Fact]
     [Trait("Category", "PR86")]
+    [Trait("Category", "Canary")]
     public void Handshake_WithProtocolV1_IsAccepted_AndWelcomeEchoesAcceptedVersion()
     {
         ServerHost host = new(ServerConfig.Default(seed: 8602));
