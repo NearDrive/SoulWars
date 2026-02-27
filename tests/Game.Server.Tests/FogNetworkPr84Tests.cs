@@ -19,8 +19,8 @@ public sealed class FogNetworkReplayVerifyTests
         ScenarioRun restartProbe = FogNetworkPr84Harness.RunScenario(withRestartAtStep: 3);
         Assert.NotNull(restartProbe.DiagnosticsSummary);
 
-        Assert.Contains(run.TransitionsA, transition => transition.StartsWith("spawn:21@", StringComparison.Ordinal));
-        Assert.Contains(run.TransitionsA, transition => transition.StartsWith("despawn:21@", StringComparison.Ordinal));
+        Assert.Contains(run.TransitionsA, transition => transition.StartsWith($"spawn:{run.TargetEntityId}@", StringComparison.Ordinal));
+        Assert.Contains(run.TransitionsA, transition => transition.StartsWith($"despawn:{run.TargetEntityId}@", StringComparison.Ordinal));
 
         foreach ((int tick, SnapshotV2 snapshot, bool bVisible) in run.SnapshotsA)
         {
@@ -28,19 +28,19 @@ public sealed class FogNetworkReplayVerifyTests
 
             if (!bVisible)
             {
-                Assert.DoesNotContain(snapshot.Entities, entity => entity.EntityId == 21);
-                Assert.DoesNotContain(snapshot.Enters, entity => entity.EntityId == 21);
-                Assert.DoesNotContain(snapshot.Updates, entity => entity.EntityId == 21);
+                Assert.DoesNotContain(snapshot.Entities, entity => entity.EntityId == run.TargetEntityId);
+                Assert.DoesNotContain(snapshot.Enters, entity => entity.EntityId == run.TargetEntityId);
+                Assert.DoesNotContain(snapshot.Updates, entity => entity.EntityId == run.TargetEntityId);
             }
 
             if (bVisible)
             {
-                Assert.Contains(snapshot.Entities, entity => entity.EntityId == 21);
+                Assert.Contains(snapshot.Entities, entity => entity.EntityId == run.TargetEntityId);
             }
 
             if (!bVisible && tick > run.HideTick)
             {
-                Assert.DoesNotContain(snapshot.Leaves, entityId => entityId == 21);
+                Assert.DoesNotContain(snapshot.Leaves, entityId => entityId == run.TargetEntityId);
             }
         }
 
@@ -122,15 +122,21 @@ file static class FogNetworkPr84Harness
         int snapshotCountB = 0;
         int enterAckCountA = 0;
         int enterAckCountB = 0;
+        int enteredEntityIdA = -1;
+        int enteredEntityIdB = -1;
         SortedDictionary<string, int> typeCountsA = new(StringComparer.Ordinal);
         SortedDictionary<string, int> typeCountsB = new(StringComparer.Ordinal);
 
         host.AdvanceTicks(2);
-        DrainAndAckAllSnapshots(endpointA, ref outboundCountA, ref snapshotCountA, ref enterAckCountA, typeCountsA);
-        DrainAndAckAllSnapshots(endpointB, ref outboundCountB, ref snapshotCountB, ref enterAckCountB, typeCountsB);
+        DrainAndAckAllSnapshots(endpointA, ref outboundCountA, ref snapshotCountA, ref enterAckCountA, ref enteredEntityIdA, typeCountsA);
+        DrainAndAckAllSnapshots(endpointB, ref outboundCountB, ref snapshotCountB, ref enterAckCountB, ref enteredEntityIdB, typeCountsB);
 
         Assert.True(enterAckCountA > 0 && enterAckCountB > 0, $"CP1 enter ack missing. enterAckA={enterAckCountA} enterAckB={enterAckCountB} ticks={host.CurrentWorld.Tick}");
         Assert.True(host.CurrentWorld.Tick >= 2, $"CP1 tick progress missing. tick={host.CurrentWorld.Tick}");
+        Assert.True(enteredEntityIdA > 0 && enteredEntityIdB > 0, $"CP1 missing entity ids. entityA={enteredEntityIdA} entityB={enteredEntityIdB}");
+
+        int observerEntityId = enteredEntityIdA;
+        int targetEntityId = enteredEntityIdB;
 
         endpointA.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
         endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
@@ -157,10 +163,10 @@ file static class FogNetworkPr84Harness
                 host.StepOnce();
                 ticksExecuted++;
 
-                SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA, ref outboundCountA, ref snapshotCountA, ref enterAckCountA, typeCountsA);
-                _ = DrainAndAckLatestSnapshot(endpointB, payloadHashesB, transitionsB, ref outboundCountB, ref snapshotCountB, ref enterAckCountB, typeCountsB);
+                SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA, ref outboundCountA, ref snapshotCountA, ref enterAckCountA, ref enteredEntityIdA, typeCountsA);
+                _ = DrainAndAckLatestSnapshot(endpointB, payloadHashesB, transitionsB, ref outboundCountB, ref snapshotCountB, ref enterAckCountB, ref enteredEntityIdB, typeCountsB);
 
-                bool bVisibleToA = snapA.Entities.Any(entity => entity.EntityId == EntityB);
+                bool bVisibleToA = snapA.Entities.Any(entity => entity.EntityId == targetEntityId);
                 snapshotsA.Add((snapA.Tick, snapA, bVisibleToA));
                 visibilityTimelineA.Add($"{snapA.Tick}:{(bVisibleToA ? "visible" : "hidden")}");
                 RecordVisibilityDrivenTransitions(
@@ -171,14 +177,15 @@ file static class FogNetworkPr84Harness
                     despawnTicksA,
                     ref hasPreviousVisibility,
                     ref previousVisibleToA,
-                    ref hideTick);
+                    ref hideTick,
+                    targetEntityId);
 
-                if (snapA.Enters.Any(entity => entity.EntityId == EntityB))
+                if (snapA.Enters.Any(entity => entity.EntityId == targetEntityId))
                 {
                     spawnTicksA.Add(snapA.Tick);
                 }
 
-                if (snapA.Leaves.Contains(EntityB))
+                if (snapA.Leaves.Contains(targetEntityId))
                 {
                     despawnTicksA.Add(snapA.Tick);
                     hideTick = snapA.Tick;
@@ -205,8 +212,8 @@ file static class FogNetworkPr84Harness
 
             
         host.AdvanceTicks(2);
-                    DrainAndAckAllSnapshots(endpointA, ref outboundCountA, ref snapshotCountA, ref enterAckCountA, typeCountsA);
-                    DrainAndAckAllSnapshots(endpointB, ref outboundCountB, ref snapshotCountB, ref enterAckCountB, typeCountsB);
+                    DrainAndAckAllSnapshots(endpointA, ref outboundCountA, ref snapshotCountA, ref enterAckCountA, ref enteredEntityIdA, typeCountsA);
+                    DrainAndAckAllSnapshots(endpointB, ref outboundCountB, ref snapshotCountB, ref enterAckCountB, ref enteredEntityIdB, typeCountsB);
                     inputTick = host.CurrentWorld.Tick + 1;
                 }
                 finally
@@ -222,30 +229,34 @@ file static class FogNetworkPr84Harness
 
         if (spawnTicksA.Count == 0 || despawnTicksA.Count == 0)
         {
-            RunFallbackPhase(maxTicks: 400, targetTileY: 3, requireVisible: true);
-            RunFallbackPhase(maxTicks: 400, targetTileY: 1, requireVisible: false);
+            RunFallbackPhase(maxTicks: 400, targetTileX: 3, requireVisible: true);
+            RunFallbackPhase(maxTicks: 400, targetTileX: 6, requireVisible: false);
         }
 
-        void RunFallbackPhase(int maxTicks, int targetTileY, bool requireVisible)
+        void RunFallbackPhase(int maxTicks, int targetTileX, bool requireVisible)
         {
             for (int i = 0; i < maxTicks; i++)
             {
                 EntityState bState = host.CurrentWorld.Zones
                     .SelectMany(zone => zone.Entities)
                     .OrderBy(entity => entity.Id.Value)
-                    .First(entity => entity.Id.Value == EntityB);
+                    .First(entity => entity.Id.Value == targetEntityId);
 
-                int bTileY = Fix32.FloorToInt(bState.Pos.Y);
-                sbyte moveY = bTileY < targetTileY ? (sbyte)1 : bTileY > targetTileY ? (sbyte)-1 : (sbyte)0;
+                int bTileX = Fix32.FloorToInt(bState.Pos.X);
+                sbyte moveX = bTileX < targetTileX
+                    ? (sbyte)1
+                    : bTileX > targetTileX
+                        ? (sbyte)-1
+                        : requireVisible ? (sbyte)-1 : (sbyte)1;
 
-                endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, 0, moveY)));
+                endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, moveX, 0)));
                 host.StepOnce();
                 ticksExecuted++;
 
-                SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA, ref outboundCountA, ref snapshotCountA, ref enterAckCountA, typeCountsA);
-                _ = DrainAndAckLatestSnapshot(endpointB, payloadHashesB, transitionsB, ref outboundCountB, ref snapshotCountB, ref enterAckCountB, typeCountsB);
+                SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA, ref outboundCountA, ref snapshotCountA, ref enterAckCountA, ref enteredEntityIdA, typeCountsA);
+                _ = DrainAndAckLatestSnapshot(endpointB, payloadHashesB, transitionsB, ref outboundCountB, ref snapshotCountB, ref enterAckCountB, ref enteredEntityIdB, typeCountsB);
 
-                bool bVisibleToA = snapA.Entities.Any(entity => entity.EntityId == EntityB);
+                bool bVisibleToA = snapA.Entities.Any(entity => entity.EntityId == targetEntityId);
                 snapshotsA.Add((snapA.Tick, snapA, bVisibleToA));
                 visibilityTimelineA.Add($"{snapA.Tick}:{(bVisibleToA ? "visible" : "hidden")}");
                 RecordVisibilityDrivenTransitions(
@@ -256,14 +267,15 @@ file static class FogNetworkPr84Harness
                     despawnTicksA,
                     ref hasPreviousVisibility,
                     ref previousVisibleToA,
-                    ref hideTick);
+                    ref hideTick,
+                    targetEntityId);
 
-                if (snapA.Enters.Any(entity => entity.EntityId == EntityB))
+                if (snapA.Enters.Any(entity => entity.EntityId == targetEntityId))
                 {
                     spawnTicksA.Add(snapA.Tick);
                 }
 
-                if (snapA.Leaves.Contains(EntityB))
+                if (snapA.Leaves.Contains(targetEntityId))
                 {
                     despawnTicksA.Add(snapA.Tick);
                     hideTick = snapA.Tick;
@@ -281,7 +293,7 @@ file static class FogNetworkPr84Harness
             }
         }
 
-        string diagnosticsSummary = $"CP3 ticks={ticksExecuted} outboundA={outboundCountA} outboundB={outboundCountB} snapshotsA={snapshotCountA} snapshotsB={snapshotCountB} enterAckA={enterAckCountA} enterAckB={enterAckCountB} transitionsA={transitionsA.Count} transitionsB={transitionsB.Count} spawnTicksA={spawnTicksA.Count} despawnTicksA={despawnTicksA.Count} msgTypesA={FormatTypeCounts(typeCountsA)} msgTypesB={FormatTypeCounts(typeCountsB)}";
+        string diagnosticsSummary = $"CP3 ticks={ticksExecuted} outboundA={outboundCountA} outboundB={outboundCountB} snapshotsA={snapshotCountA} snapshotsB={snapshotCountB} enterAckA={enterAckCountA} enterAckB={enterAckCountB} transitionsA={transitionsA.Count} transitionsB={transitionsB.Count} spawnTicksA={spawnTicksA.Count} despawnTicksA={despawnTicksA.Count} msgTypesA={FormatTypeCounts(typeCountsA)} msgTypesB={FormatTypeCounts(typeCountsB)} observerEntityId={observerEntityId} targetEntityId={targetEntityId}";
 
         Assert.True(outboundCountA > 0 || outboundCountB > 0, $"CP2 no outbound messages. {diagnosticsSummary}");
         Assert.True(snapshotCountA > 0 || snapshotCountB > 0, $"CP2 no snapshots decoded. {diagnosticsSummary}");
@@ -304,7 +316,8 @@ file static class FogNetworkPr84Harness
             spawnTicksA,
             despawnTicksA,
             hideTick,
-            diagnosticsSummary);
+            diagnosticsSummary,
+            targetEntityId);
     }
 
     private static void RecordVisibilityDrivenTransitions(
@@ -315,7 +328,8 @@ file static class FogNetworkPr84Harness
         List<int> despawnTicksA,
         ref bool hasPreviousVisibility,
         ref bool previousVisibleToA,
-        ref int hideTick)
+        ref int hideTick,
+        int targetEntityId)
     {
         if (!hasPreviousVisibility)
         {
@@ -323,7 +337,7 @@ file static class FogNetworkPr84Harness
             previousVisibleToA = visibleToA;
             if (visibleToA)
             {
-                transitionsA.Add($"spawn:{EntityB}@{tick}");
+                transitionsA.Add($"spawn:{targetEntityId}@{tick}");
                 spawnTicksA.Add(tick);
             }
 
@@ -332,13 +346,13 @@ file static class FogNetworkPr84Harness
 
         if (!previousVisibleToA && visibleToA)
         {
-            transitionsA.Add($"spawn:{EntityB}@{tick}");
+            transitionsA.Add($"spawn:{targetEntityId}@{tick}");
             spawnTicksA.Add(tick);
         }
 
         if (previousVisibleToA && !visibleToA)
         {
-            transitionsA.Add($"despawn:{EntityB}@{tick}");
+            transitionsA.Add($"despawn:{targetEntityId}@{tick}");
             despawnTicksA.Add(tick);
             hideTick = tick;
         }
@@ -372,6 +386,7 @@ file static class FogNetworkPr84Harness
         ref int outboundCount,
         ref int snapshotCount,
         ref int enterAckCount,
+        ref int enteredEntityId,
         SortedDictionary<string, int> messageTypeCounts)
     {
         SnapshotV2? latest = null;
@@ -388,9 +403,10 @@ file static class FogNetworkPr84Harness
                 IncrementCount(messageTypeCounts, message.GetType().Name);
             }
 
-            if (message is EnterZoneAck)
+            if (message is EnterZoneAck enterAck)
             {
                 enterAckCount++;
+                enteredEntityId = enterAck.EntityId;
             }
 
             if (message is SnapshotV2 snapshot)
@@ -414,6 +430,7 @@ file static class FogNetworkPr84Harness
         ref int outboundCount,
         ref int snapshotCount,
         ref int enterAckCount,
+        ref int enteredEntityId,
         SortedDictionary<string, int> messageTypeCounts)
     {
         while (endpoint.TryDequeueFromServer(out byte[] payload))
@@ -425,9 +442,10 @@ file static class FogNetworkPr84Harness
 
             outboundCount++;
             IncrementCount(messageTypeCounts, message.GetType().Name);
-            if (message is EnterZoneAck)
+            if (message is EnterZoneAck enterAck)
             {
                 enterAckCount++;
+                enteredEntityId = enterAck.EntityId;
             }
 
             if (message is SnapshotV2 snapshot)
@@ -547,4 +565,5 @@ public sealed record ScenarioRun(
     List<int> SpawnTicksA,
     List<int> DespawnTicksA,
     int HideTick,
-    string DiagnosticsSummary);
+    string DiagnosticsSummary,
+    int TargetEntityId);
