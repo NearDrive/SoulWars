@@ -562,6 +562,18 @@ public sealed class ServerHost
 
             session.CastCooldownUntilTickBySkillId[castSkillCommand.SkillId] = targetTick + cooldownTicks;
         }
+        else
+        {
+            const int unknownSkillCooldownTicks = 1;
+            if (session.UnknownSkillCooldownSkillId == castSkillCommand.SkillId &&
+                session.UnknownSkillCooldownUntilTick > targetTick)
+            {
+                return null;
+            }
+
+            session.UnknownSkillCooldownSkillId = castSkillCommand.SkillId;
+            session.UnknownSkillCooldownUntilTick = targetTick + unknownSkillCooldownTicks;
+        }
 
         int sequence = session.NextInputSequence++;
 
@@ -1411,6 +1423,10 @@ public sealed class ServerHost
         public int NextInputSequence { get; set; } = 1;
 
         public Dictionary<int, int> CastCooldownUntilTickBySkillId { get; } = new();
+
+        public int UnknownSkillCooldownSkillId { get; set; } = -1;
+
+        public int UnknownSkillCooldownUntilTick { get; set; }
 
         public int LastTick { get; set; } = -1;
 

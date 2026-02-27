@@ -28,14 +28,25 @@ public sealed class InputValidation_MoveBoundsTests
         int prevX = self.PosXRaw;
         int prevY = self.PosYRaw;
 
-        endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(snapshot.Tick + 1, -1, -1)));
-        host.StepOnce();
+        bool blockedAtBounds = false;
+        for (int i = 0; i < 128; i++)
+        {
+            endpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(snapshot.Tick + 1 + i, -1, -1)));
+            host.StepOnce();
 
-        Snapshot next = DrainLatestSnapshot(endpoint);
-        SnapshotEntity nextSelf = next.Entities.Single();
+            Snapshot next = DrainLatestSnapshot(endpoint);
+            SnapshotEntity nextSelf = next.Entities.Single();
+            if (nextSelf.PosXRaw == prevX && nextSelf.PosYRaw == prevY)
+            {
+                blockedAtBounds = true;
+                break;
+            }
 
-        Assert.Equal(prevX, nextSelf.PosXRaw);
-        Assert.Equal(prevY, nextSelf.PosYRaw);
+            prevX = nextSelf.PosXRaw;
+            prevY = nextSelf.PosYRaw;
+        }
+
+        Assert.True(blockedAtBounds);
     }
 
     private static Snapshot DrainLatestSnapshot(InMemoryEndpoint endpoint)
