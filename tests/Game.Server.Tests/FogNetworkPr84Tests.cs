@@ -74,6 +74,8 @@ file static class FogNetworkPr84Harness
     private const int EntityA = 11;
     private const int EntityB = 21;
 
+    private const int TicksPerCommand = 20;
+
     private static readonly ImmutableArray<(sbyte MoveX, sbyte MoveY)> MovementScript =
     [
         (0, 1),
@@ -126,25 +128,28 @@ file static class FogNetworkPr84Harness
         for (int step = 0; step < MovementScript.Length; step++)
         {
             (sbyte mx, sbyte my) = MovementScript[step];
-            endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, mx, my)));
-            host.StepOnce();
-
-            SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA);
-            SnapshotV2 snapB = DrainAndAckLatestSnapshot(endpointB, payloadHashesB, transitionsB);
-
-            bool bVisibleToA = snapA.Entities.Any(entity => entity.EntityId == EntityB);
-            snapshotsA.Add((snapA.Tick, snapA, bVisibleToA));
-            visibilityTimelineA.Add($"{snapA.Tick}:{(bVisibleToA ? "visible" : "hidden")}");
-
-            if (snapA.Enters.Any(entity => entity.EntityId == EntityB))
+            for (int tickStep = 0; tickStep < TicksPerCommand; tickStep++)
             {
-                spawnTicksA.Add(snapA.Tick);
-            }
+                endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, mx, my)));
+                host.StepOnce();
 
-            if (snapA.Leaves.Contains(EntityB))
-            {
-                despawnTicksA.Add(snapA.Tick);
-                hideTick = snapA.Tick;
+                SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA);
+                _ = DrainAndAckLatestSnapshot(endpointB, payloadHashesB, transitionsB);
+
+                bool bVisibleToA = snapA.Entities.Any(entity => entity.EntityId == EntityB);
+                snapshotsA.Add((snapA.Tick, snapA, bVisibleToA));
+                visibilityTimelineA.Add($"{snapA.Tick}:{(bVisibleToA ? "visible" : "hidden")}");
+
+                if (snapA.Enters.Any(entity => entity.EntityId == EntityB))
+                {
+                    spawnTicksA.Add(snapA.Tick);
+                }
+
+                if (snapA.Leaves.Contains(EntityB))
+                {
+                    despawnTicksA.Add(snapA.Tick);
+                    hideTick = snapA.Tick;
+                }
             }
 
             if (withRestartAtStep.HasValue && step == withRestartAtStep.Value)
@@ -196,25 +201,28 @@ file static class FogNetworkPr84Harness
             for (int i = 0; i < fallbackScript.Length; i++)
             {
                 (sbyte fmx, sbyte fmy) = fallbackScript[i];
-                endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, fmx, fmy)));
-                host.StepOnce();
-
-                SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA);
-                _ = DrainAndAckLatestSnapshot(endpointB, payloadHashesB, transitionsB);
-
-                bool bVisibleToA = snapA.Entities.Any(entity => entity.EntityId == EntityB);
-                snapshotsA.Add((snapA.Tick, snapA, bVisibleToA));
-                visibilityTimelineA.Add($"{snapA.Tick}:{(bVisibleToA ? "visible" : "hidden")}");
-
-                if (snapA.Enters.Any(entity => entity.EntityId == EntityB))
+                for (int tickStep = 0; tickStep < TicksPerCommand; tickStep++)
                 {
-                    spawnTicksA.Add(snapA.Tick);
-                }
+                    endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, fmx, fmy)));
+                    host.StepOnce();
 
-                if (snapA.Leaves.Contains(EntityB))
-                {
-                    despawnTicksA.Add(snapA.Tick);
-                    hideTick = snapA.Tick;
+                    SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA);
+                    _ = DrainAndAckLatestSnapshot(endpointB, payloadHashesB, transitionsB);
+
+                    bool bVisibleToA = snapA.Entities.Any(entity => entity.EntityId == EntityB);
+                    snapshotsA.Add((snapA.Tick, snapA, bVisibleToA));
+                    visibilityTimelineA.Add($"{snapA.Tick}:{(bVisibleToA ? "visible" : "hidden")}");
+
+                    if (snapA.Enters.Any(entity => entity.EntityId == EntityB))
+                    {
+                        spawnTicksA.Add(snapA.Tick);
+                    }
+
+                    if (snapA.Leaves.Contains(EntityB))
+                    {
+                        despawnTicksA.Add(snapA.Tick);
+                        hideTick = snapA.Tick;
+                    }
                 }
 
                 if (spawnTicksA.Count > 0 && despawnTicksA.Count > 0)
@@ -223,6 +231,9 @@ file static class FogNetworkPr84Harness
                 }
             }
         }
+
+        Assert.NotEmpty(spawnTicksA);
+        Assert.NotEmpty(despawnTicksA);
 
         return new ScenarioRun(
             snapshotsA,
