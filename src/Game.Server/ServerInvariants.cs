@@ -186,6 +186,124 @@ public static class ServerInvariants
             }
         }
     }
+
+    public static void ValidateVisibilityStreamInvariants(
+        IReadOnlyList<SnapshotV2> snapshots,
+        Func<int, IReadOnlySet<int>> visibleEntityIdsByTick,
+        int sessionId)
+    {
+        Dictionary<int, VisibilityLifecycleState> lifecycleByEntityId = new();
+        HashSet<int> seenTicks = new();
+        int previousTick = int.MinValue;
+
+        foreach (SnapshotV2 snapshot in snapshots)
+        {
+            EnsureTickUniqueAndMonotonic(snapshot.Tick, seenTicks, ref previousTick, sessionId);
+            AssertCanonicalOrdering(snapshot, sessionId);
+
+            IReadOnlySet<int> expectedVisible = visibleEntityIdsByTick(snapshot.Tick);
+            AssertNoLeak(snapshot, expectedVisible, sessionId);
+
+            foreach (int entityId in snapshot.Leaves)
+            {
+                lifecycleByEntityId[entityId] = VisibilityLifecycleState.RequiresSpawn;
+            }
+
+            foreach (SnapshotEntity entering in snapshot.Enters)
+            {
+                lifecycleByEntityId[entering.EntityId] = VisibilityLifecycleState.Visible;
+            }
+
+            foreach (SnapshotEntity entity in snapshot.Entities)
+            {
+                AssertSpawnBeforeState(entity.EntityId, lifecycleByEntityId, sessionId, snapshot.Tick, "entities");
+            }
+
+            foreach (SnapshotEntity entity in snapshot.Updates)
+            {
+                AssertSpawnBeforeState(entity.EntityId, lifecycleByEntityId, sessionId, snapshot.Tick, "updates");
+            }
+        }
+    }
+
+    private static void EnsureTickUniqueAndMonotonic(int tick, HashSet<int> seenTicks, ref int previousTick, int sessionId)
+    {
+        if (!seenTicks.Add(tick))
+        {
+            throw new InvariantViolationException($"invariant=VisibilityStreamTickUnique sessionId={sessionId} tick={tick}");
+        }
+
+        if (previousTick != int.MinValue && tick <= previousTick)
+        {
+            throw new InvariantViolationException($"invariant=VisibilityStreamTickMonotonic sessionId={sessionId} tick={tick} previousTick={previousTick}");
+        }
+
+        previousTick = tick;
+    }
+
+    private static void AssertCanonicalOrdering(SnapshotV2 snapshot, int sessionId)
+    {
+        WorldInvariants.AssertSortedAscending(snapshot.Entities, entity => entity.EntityId, "snapshot.entities", snapshot.Tick, snapshot.ZoneId);
+        WorldInvariants.AssertSortedAscending(snapshot.Enters, entity => entity.EntityId, "snapshot.enters", snapshot.Tick, snapshot.ZoneId);
+        WorldInvariants.AssertSortedAscending(snapshot.Updates, entity => entity.EntityId, "snapshot.updates", snapshot.Tick, snapshot.ZoneId);
+        WorldInvariants.AssertSortedAscending(snapshot.Leaves, entityId => entityId, "snapshot.leaves", snapshot.Tick, snapshot.ZoneId);
+
+        HashSet<int> entityIds = snapshot.Entities.Select(entity => entity.EntityId).ToHashSet();
+        HashSet<int> enterIds = snapshot.Enters.Select(entity => entity.EntityId).ToHashSet();
+        foreach (int enterId in enterIds)
+        {
+            if (!entityIds.Contains(enterId))
+            {
+                throw new InvariantViolationException($"invariant=SpawnMustAppearInEntities sessionId={sessionId} tick={snapshot.Tick} zoneId={snapshot.ZoneId} entityId={enterId}");
+            }
+        }
+    }
+
+    private static void AssertNoLeak(SnapshotV2 snapshot, IReadOnlySet<int> expectedVisible, int sessionId)
+    {
+        foreach (SnapshotEntity entity in snapshot.Entities)
+        {
+            if (!expectedVisible.Contains(entity.EntityId))
+            {
+                throw new InvariantViolationException($"invariant=NoLeakInvariant sessionId={sessionId} tick={snapshot.Tick} zoneId={snapshot.ZoneId} source=entities entityId={entity.EntityId}");
+            }
+        }
+
+        foreach (SnapshotEntity entity in snapshot.Enters)
+        {
+            if (!expectedVisible.Contains(entity.EntityId))
+            {
+                throw new InvariantViolationException($"invariant=NoLeakInvariant sessionId={sessionId} tick={snapshot.Tick} zoneId={snapshot.ZoneId} source=enters entityId={entity.EntityId}");
+            }
+        }
+
+        foreach (SnapshotEntity entity in snapshot.Updates)
+        {
+            if (!expectedVisible.Contains(entity.EntityId))
+            {
+                throw new InvariantViolationException($"invariant=NoLeakInvariant sessionId={sessionId} tick={snapshot.Tick} zoneId={snapshot.ZoneId} source=updates entityId={entity.EntityId}");
+            }
+        }
+    }
+
+    private static void AssertSpawnBeforeState(
+        int entityId,
+        IDictionary<int, VisibilityLifecycleState> lifecycleByEntityId,
+        int sessionId,
+        int tick,
+        string source)
+    {
+        if (!lifecycleByEntityId.TryGetValue(entityId, out VisibilityLifecycleState state) || state != VisibilityLifecycleState.Visible)
+        {
+            throw new InvariantViolationException($"invariant=SpawnBeforeStateInvariant sessionId={sessionId} tick={tick} source={source} entityId={entityId}");
+        }
+    }
+
+    private enum VisibilityLifecycleState : byte
+    {
+        RequiresSpawn = 0,
+        Visible = 1
+    }
 }
 
 public sealed record ServerHostDebugView(
