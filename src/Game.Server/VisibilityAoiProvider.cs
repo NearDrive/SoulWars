@@ -38,6 +38,7 @@ public sealed class VisibilityAoiProvider : IAoiProvider
             .Where(entity =>
             {
                 perfCounters?.CountAoiChecks(1);
+                perfCounters?.CountAoiEntitiesConsidered(1);
                 if (entity.Id.Value == viewerEntityId.Value)
                 {
                     return true;

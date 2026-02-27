@@ -307,7 +307,7 @@ public static class Simulation
         updated = ProcessVendorIntents(updated, orderedCommands.Select(x => x.Command).ToImmutableArray());
         updated = EnsureWalletsForPlayers(updated);
         updated = updated.WithStatusEvents(tickStatusEvents.ToImmutable());
-        updated = RecalculateVisibility(updated);
+        updated = RecalculateVisibility(updated, instrumentation);
 
         if (config.Invariants.EnableCoreInvariants)
         {
@@ -319,7 +319,7 @@ public static class Simulation
     }
 
 
-    private static WorldState RecalculateVisibility(WorldState state)
+    private static WorldState RecalculateVisibility(WorldState state, SimulationInstrumentation? instrumentation)
     {
         WorldState current = state;
         foreach (ZoneState zone in state.Zones.OrderBy(z => z.Id.Value))
@@ -358,6 +358,8 @@ public static class Simulation
                     {
                         int targetX = centerX + dx;
                         int targetY = centerY + dy;
+                        instrumentation?.CountVisibilityCellsVisited?.Invoke(1);
+                        instrumentation?.CountVisibilityRaysCast?.Invoke(1);
                         if (IsTileVisible(collision, centerX, centerY, targetX, targetY))
                         {
                             visibility.SetVisible(factionId, targetX, targetY);
