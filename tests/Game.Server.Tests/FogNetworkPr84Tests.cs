@@ -229,11 +229,11 @@ file static class FogNetworkPr84Harness
 
         if (spawnTicksA.Count == 0 || despawnTicksA.Count == 0)
         {
-            RunFallbackPhase(maxTicks: 400, targetTileX: 3, requireVisible: true);
-            RunFallbackPhase(maxTicks: 400, targetTileX: 6, requireVisible: false);
+            RunFallbackPhase(maxTicks: 400, targetTileY: 3, requireVisible: true);
+            RunFallbackPhase(maxTicks: 400, targetTileY: 1, requireVisible: false);
         }
 
-        void RunFallbackPhase(int maxTicks, int targetTileX, bool requireVisible)
+        void RunFallbackPhase(int maxTicks, int targetTileY, bool requireVisible)
         {
             for (int i = 0; i < maxTicks; i++)
             {
@@ -242,14 +242,14 @@ file static class FogNetworkPr84Harness
                     .OrderBy(entity => entity.Id.Value)
                     .First(entity => entity.Id.Value == targetEntityId);
 
-                int bTileX = Fix32.FloorToInt(bState.Pos.X);
-                sbyte moveX = bTileX < targetTileX
+                int bTileY = Fix32.FloorToInt(bState.Pos.Y);
+                sbyte moveY = bTileY < targetTileY
                     ? (sbyte)1
-                    : bTileX > targetTileX
+                    : bTileY > targetTileY
                         ? (sbyte)-1
-                        : requireVisible ? (sbyte)-1 : (sbyte)1;
+                        : (i % 2 == 0 ? (sbyte)1 : (sbyte)-1);
 
-                endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, moveX, 0)));
+                endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, 0, moveY)));
                 host.StepOnce();
                 ticksExecuted++;
 
