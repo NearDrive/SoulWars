@@ -291,6 +291,12 @@ file static class FogNetworkPr84Harness
         {
             hasPreviousVisibility = true;
             previousVisibleToA = visibleToA;
+            if (visibleToA)
+            {
+                transitionsA.Add($"spawn:{EntityB}@{tick}");
+                spawnTicksA.Add(tick);
+            }
+
             return;
         }
 
