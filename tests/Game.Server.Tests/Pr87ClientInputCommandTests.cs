@@ -1,6 +1,7 @@
 using System.Collections;
 using Game.Core;
 using Game.Protocol;
+using ProtocolCastSkillCommand = Game.Protocol.CastSkillCommand;
 using Game.Server;
 using Xunit;
 
@@ -69,7 +70,7 @@ public sealed class InputValidation_CastPointBoundsAndCooldownTests
         host.StepOnce();
         DrainAll(endpoint);
 
-        CastSkillCommand cast = new(
+        ProtocolCastSkillCommand cast = new(
             Tick: host.CurrentWorld.Tick + 1,
             CasterId: 0,
             SkillId: 101,
@@ -101,7 +102,7 @@ public sealed class InputValidation_CastPointBoundsAndCooldownTests
         Snapshot snapshot = DrainLatestSnapshot(endpoint);
         SnapshotEntity self = snapshot.Entities.Single();
 
-        CastSkillCommand first = new(
+        ProtocolCastSkillCommand first = new(
             Tick: snapshot.Tick + 1,
             CasterId: 0,
             SkillId: 202,
@@ -115,14 +116,14 @@ public sealed class InputValidation_CastPointBoundsAndCooldownTests
         host.ProcessInboundOnce();
         Assert.Equal(1, host.PendingCastSkillCommandCount);
 
-        CastSkillCommand secondSameTick = first with { Tick = snapshot.Tick + 1 };
+        ProtocolCastSkillCommand secondSameTick = first with { Tick = snapshot.Tick + 1 };
         endpoint.EnqueueToServer(ProtocolCodec.Encode(secondSameTick));
         host.ProcessInboundOnce();
         Assert.Equal(1, host.PendingCastSkillCommandCount);
 
         host.AdvanceSimulationOnce();
 
-        CastSkillCommand thirdNextTick = first with { Tick = host.CurrentWorld.Tick + 1 };
+        ProtocolCastSkillCommand thirdNextTick = first with { Tick = host.CurrentWorld.Tick + 1 };
         endpoint.EnqueueToServer(ProtocolCodec.Encode(thirdNextTick));
         host.ProcessInboundOnce();
         Assert.Equal(1, host.PendingCastSkillCommandCount);
