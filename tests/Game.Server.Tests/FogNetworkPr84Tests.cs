@@ -188,10 +188,11 @@ file static class FogNetworkPr84Harness
 
         if (spawnTicksA.Count == 0 || despawnTicksA.Count == 0)
         {
-            const int fallbackMaxTicks = 400;
+            const int fallbackMaxTicks = 800;
+            const int segmentTicks = 100;
             for (int i = 0; i < fallbackMaxTicks; i++)
             {
-                sbyte moveY = spawnTicksA.Count == 0 ? (sbyte)1 : (sbyte)-1;
+                sbyte moveY = ((i / segmentTicks) % 2 == 0) ? (sbyte)1 : (sbyte)-1;
                 endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, 0, moveY)));
                 host.StepOnce();
 
