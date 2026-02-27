@@ -11,6 +11,12 @@ Aquest document fixa la superfície client-facing de protocol per `ProtocolVersi
 
 ## DTOs v1 client-facing
 
+- `InputCommand`
+  - `Tick`, `MoveX`, `MoveY` (moviment direccional; valors enters/sbyte)
+- `CastSkillCommand` per `CastPoint`
+  - `Tick`, `SkillId`, `ZoneId`, `TargetKind=Point`, `TargetPosXRaw`, `TargetPosYRaw`
+  - No porta `TargetId` quan és `CastPoint`.
+
 - `SnapshotEnvelopeV1`
   - `Metadata: TickMetadataV1(TickId, ZoneId)`
   - `Entities: SnapshotEntity[]`

@@ -367,6 +367,8 @@ public sealed class ServerHost
 
     public int PendingAttackIntentCount => _pendingAttackIntents.Count;
 
+    public int PendingCastSkillCommandCount => _pendingCastSkillCommands.Count;
+
     public int WorldEntityCountTotal => _world.Zones.Sum(zone => zone.Entities.Length);
 
     private void DrainSessionMessages(SessionState session, int targetTick, List<WorldCommand> worldCommands)
@@ -505,7 +507,13 @@ public sealed class ServerHost
             return false;
         }
 
-        PendingInput pending = ClampMoveInput(targetTick, session.EntityId.Value, session.CurrentZoneId.Value, inputCommand.MoveX, inputCommand.MoveY);
+        if (WouldMoveLeaveZoneBounds(session.CurrentZoneId.Value, session.EntityId.Value, inputCommand.MoveX, inputCommand.MoveY))
+        {
+            return false;
+        }
+
+        int sequence = session.NextInputSequence++;
+        PendingInput pending = ClampMoveInput(targetTick, session.SessionId.Value, sequence, session.EntityId.Value, session.CurrentZoneId.Value, inputCommand.MoveX, inputCommand.MoveY);
         session.PendingInputs.Add(pending);
         session.InputsAcceptedThisTick++;
         return true;
@@ -538,8 +546,26 @@ public sealed class ServerHost
             return null;
         }
 
+        if ((CastTargetKind)castSkillCommand.TargetKind == CastTargetKind.Point &&
+            !IsPointInZoneBounds(castSkillCommand.ZoneId, castSkillCommand.TargetPosXRaw, castSkillCommand.TargetPosYRaw))
+        {
+            return null;
+        }
+
+        if (session.CastCooldownUntilTickBySkillId.TryGetValue(castSkillCommand.SkillId, out int cooldownUntilTick) &&
+            cooldownUntilTick > targetTick)
+        {
+            return null;
+        }
+
+        session.CastCooldownUntilTickBySkillId[castSkillCommand.SkillId] = targetTick + 1;
+
+        int sequence = session.NextInputSequence++;
+
         return new PendingCastSkillCommand(
             Tick: targetTick,
+            SessionId: session.SessionId.Value,
+            Sequence: sequence,
             CasterId: session.EntityId.Value,
             ZoneId: session.CurrentZoneId.Value,
             SkillId: castSkillCommand.SkillId,
@@ -549,13 +575,60 @@ public sealed class ServerHost
             TargetPosYRaw: castSkillCommand.TargetPosYRaw);
     }
 
-    private PendingInput ClampMoveInput(int tick, int entityId, int zoneId, sbyte moveX, sbyte moveY)
+    private PendingInput ClampMoveInput(int tick, int sessionId, int sequence, int entityId, int zoneId, sbyte moveX, sbyte moveY)
     {
         int maxAxis = Math.Clamp(Fix32.FloorToInt(_serverConfig.MaxMoveVectorLen), 0, 1);
         int clampedX = Math.Clamp(moveX, -maxAxis, maxAxis);
         int clampedY = Math.Clamp(moveY, -maxAxis, maxAxis);
 
-        return new PendingInput(tick, entityId, zoneId, (sbyte)clampedX, (sbyte)clampedY);
+        return new PendingInput(tick, sessionId, sequence, entityId, zoneId, (sbyte)clampedX, (sbyte)clampedY);
+    }
+
+    private bool WouldMoveLeaveZoneBounds(int zoneId, int entityId, sbyte moveX, sbyte moveY)
+    {
+        if (!_world.TryGetZone(new ZoneId(zoneId), out ZoneState zone))
+        {
+            return true;
+        }
+
+        int entityIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, new EntityId(entityId));
+        if (entityIndex < 0)
+        {
+            return true;
+        }
+
+        EntityState entity = zone.Entities[entityIndex];
+        Fix32 step = _simulationConfig.MoveSpeed * _simulationConfig.DtFix;
+        Vec2Fix nextPos = new(
+            entity.Pos.X + (step * Fix32.FromInt(moveX)),
+            entity.Pos.Y + (step * Fix32.FromInt(moveY)));
+
+        return !IsPositionInsidePlayableBounds(zone, nextPos, _simulationConfig.Radius);
+    }
+
+    private static bool IsPositionInsidePlayableBounds(ZoneState zone, Vec2Fix pos, Fix32 radius)
+    {
+        int minRaw = radius.Raw;
+        int maxXRaw = (zone.Map.Width * Fix32.OneRaw) - radius.Raw;
+        int maxYRaw = (zone.Map.Height * Fix32.OneRaw) - radius.Raw;
+
+        return pos.X.Raw >= minRaw
+               && pos.Y.Raw >= minRaw
+               && pos.X.Raw <= maxXRaw
+               && pos.Y.Raw <= maxYRaw;
+    }
+
+    private bool IsPointInZoneBounds(int zoneId, int xRaw, int yRaw)
+    {
+        if (!_world.TryGetZone(new ZoneId(zoneId), out ZoneState zone))
+        {
+            return false;
+        }
+
+        return xRaw >= 0
+               && yRaw >= 0
+               && xRaw < zone.Map.Width * Fix32.OneRaw
+               && yRaw < zone.Map.Height * Fix32.OneRaw;
     }
 
     private void HandleHandshake(SessionState session, HandshakeRequest request)
@@ -814,8 +887,8 @@ public sealed class ServerHost
 
         return due
             .OrderBy(input => input.Tick)
-            .ThenBy(input => input.ZoneId)
-            .ThenBy(input => input.EntityId)
+            .ThenBy(input => input.SessionId)
+            .ThenBy(input => input.Sequence)
             .ToArray();
     }
 
@@ -839,9 +912,8 @@ public sealed class ServerHost
         PendingCastSkillCommand[] due = _pendingCastSkillCommands
             .Where(p => p.Tick <= targetTick)
             .OrderBy(p => p.Tick)
-            .ThenBy(p => p.ZoneId)
-            .ThenBy(p => p.CasterId)
-            .ThenBy(p => p.SkillId)
+            .ThenBy(p => p.SessionId)
+            .ThenBy(p => p.Sequence)
             .ToArray();
 
         _pendingCastSkillCommands.RemoveAll(p => p.Tick <= targetTick);
@@ -1316,6 +1388,10 @@ public sealed class ServerHost
 
         public int InputsAcceptedThisTick { get; set; }
 
+        public int NextInputSequence { get; set; } = 1;
+
+        public Dictionary<int, int> CastCooldownUntilTickBySkillId { get; } = new();
+
         public int LastTick { get; set; } = -1;
 
         public int MsgsThisTick { get; set; }
@@ -1381,11 +1457,13 @@ public sealed class ServerHost
 
     private readonly record struct SessionSnapshotCache(int ZoneId, int SnapshotSeq, byte[] EncodedPayload);
 
-    private readonly record struct PendingInput(int Tick, int EntityId, int ZoneId, sbyte MoveX, sbyte MoveY);
+    private readonly record struct PendingInput(int Tick, int SessionId, int Sequence, int EntityId, int ZoneId, sbyte MoveX, sbyte MoveY);
 
     private readonly record struct PendingAttackIntent(int Tick, int EntityId, int ZoneId, int TargetEntityId);
     private readonly record struct PendingCastSkillCommand(
         int Tick,
+        int SessionId,
+        int Sequence,
         int CasterId,
         int ZoneId,
         int SkillId,
