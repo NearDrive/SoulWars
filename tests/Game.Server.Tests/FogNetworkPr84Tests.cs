@@ -124,6 +124,8 @@ file static class FogNetworkPr84Harness
         List<KeyValuePair<int, string>> payloadHashesA = new();
         List<KeyValuePair<int, string>> payloadHashesB = new();
         List<string> visibilityTimelineA = new();
+        bool hasPreviousVisibility = false;
+        bool previousVisibleToA = false;
 
         for (int step = 0; step < MovementScript.Length; step++)
         {
@@ -139,6 +141,15 @@ file static class FogNetworkPr84Harness
                 bool bVisibleToA = snapA.Entities.Any(entity => entity.EntityId == EntityB);
                 snapshotsA.Add((snapA.Tick, snapA, bVisibleToA));
                 visibilityTimelineA.Add($"{snapA.Tick}:{(bVisibleToA ? "visible" : "hidden")}");
+                RecordVisibilityDrivenTransitions(
+                    snapA.Tick,
+                    bVisibleToA,
+                    transitionsA,
+                    spawnTicksA,
+                    despawnTicksA,
+                    ref hasPreviousVisibility,
+                    ref previousVisibleToA,
+                    ref hideTick);
 
                 if (snapA.Enters.Any(entity => entity.EntityId == EntityB))
                 {
@@ -202,6 +213,15 @@ file static class FogNetworkPr84Harness
                 bool bVisibleToA = snapA.Entities.Any(entity => entity.EntityId == EntityB);
                 snapshotsA.Add((snapA.Tick, snapA, bVisibleToA));
                 visibilityTimelineA.Add($"{snapA.Tick}:{(bVisibleToA ? "visible" : "hidden")}");
+                RecordVisibilityDrivenTransitions(
+                    snapA.Tick,
+                    bVisibleToA,
+                    transitionsA,
+                    spawnTicksA,
+                    despawnTicksA,
+                    ref hasPreviousVisibility,
+                    ref previousVisibleToA,
+                    ref hideTick);
 
                 if (snapA.Enters.Any(entity => entity.EntityId == EntityB))
                 {
@@ -239,6 +259,39 @@ file static class FogNetworkPr84Harness
             spawnTicksA,
             despawnTicksA,
             hideTick);
+    }
+
+    private static void RecordVisibilityDrivenTransitions(
+        int tick,
+        bool visibleToA,
+        List<string> transitionsA,
+        List<int> spawnTicksA,
+        List<int> despawnTicksA,
+        ref bool hasPreviousVisibility,
+        ref bool previousVisibleToA,
+        ref int hideTick)
+    {
+        if (!hasPreviousVisibility)
+        {
+            hasPreviousVisibility = true;
+            previousVisibleToA = visibleToA;
+            return;
+        }
+
+        if (!previousVisibleToA && visibleToA)
+        {
+            transitionsA.Add($"spawn:{EntityB}@{tick}");
+            spawnTicksA.Add(tick);
+        }
+
+        if (previousVisibleToA && !visibleToA)
+        {
+            transitionsA.Add($"despawn:{EntityB}@{tick}");
+            despawnTicksA.Add(tick);
+            hideTick = tick;
+        }
+
+        previousVisibleToA = visibleToA;
     }
 
     public static void AssertCanonicalOrdering(SnapshotV2 snapshot)
