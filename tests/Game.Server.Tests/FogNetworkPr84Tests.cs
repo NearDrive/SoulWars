@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
+using System.Text;
 using Game.Core;
 using Game.Protocol;
 using Game.Server;
@@ -15,6 +16,8 @@ public sealed class FogNetworkReplayVerifyTests
     public void ReplayVerify_FogNetwork_NoInvisibleEntityLeak_AndDeterministicTransitions()
     {
         ScenarioRun run = FogNetworkPr84Harness.RunScenario(withRestartAtStep: null);
+        ScenarioRun restartProbe = FogNetworkPr84Harness.RunScenario(withRestartAtStep: 3);
+        Assert.NotNull(restartProbe.DiagnosticsSummary);
 
         Assert.Contains(run.TransitionsA, transition => transition.StartsWith("spawn:21@", StringComparison.Ordinal));
         Assert.Contains(run.TransitionsA, transition => transition.StartsWith("despawn:21@", StringComparison.Ordinal));
@@ -107,9 +110,27 @@ file static class FogNetworkPr84Harness
         HandshakeAndEnter(endpointA, "pr84-a");
         HandshakeAndEnter(endpointB, "pr84-b");
 
+        Assert.Equal(8401, config.Seed);
+        ZoneState cp0Zone = host.CurrentWorld.Zones.Single(zone => zone.Id.Value == ZoneIdValue);
+        Assert.Contains(cp0Zone.Entities, entity => entity.Id.Value == EntityA);
+        Assert.Contains(cp0Zone.Entities, entity => entity.Id.Value == EntityB);
+
+        int ticksExecuted = 0;
+        int outboundCountA = 0;
+        int outboundCountB = 0;
+        int snapshotCountA = 0;
+        int snapshotCountB = 0;
+        int enterAckCountA = 0;
+        int enterAckCountB = 0;
+        SortedDictionary<string, int> typeCountsA = new(StringComparer.Ordinal);
+        SortedDictionary<string, int> typeCountsB = new(StringComparer.Ordinal);
+
         host.AdvanceTicks(2);
-        DrainAndAckAllSnapshots(endpointA);
-        DrainAndAckAllSnapshots(endpointB);
+        DrainAndAckAllSnapshots(endpointA, ref outboundCountA, ref snapshotCountA, ref enterAckCountA, typeCountsA);
+        DrainAndAckAllSnapshots(endpointB, ref outboundCountB, ref snapshotCountB, ref enterAckCountB, typeCountsB);
+
+        Assert.True(enterAckCountA > 0 && enterAckCountB > 0, $"CP1 enter ack missing. enterAckA={enterAckCountA} enterAckB={enterAckCountB} ticks={host.CurrentWorld.Tick}");
+        Assert.True(host.CurrentWorld.Tick >= 2, $"CP1 tick progress missing. tick={host.CurrentWorld.Tick}");
 
         endpointA.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
         endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
@@ -134,9 +155,10 @@ file static class FogNetworkPr84Harness
             {
                 endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, mx, my)));
                 host.StepOnce();
+                ticksExecuted++;
 
-                SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA);
-                _ = DrainAndAckLatestSnapshot(endpointB, payloadHashesB, transitionsB);
+                SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA, ref outboundCountA, ref snapshotCountA, ref enterAckCountA, typeCountsA);
+                _ = DrainAndAckLatestSnapshot(endpointB, payloadHashesB, transitionsB, ref outboundCountB, ref snapshotCountB, ref enterAckCountB, typeCountsB);
 
                 bool bVisibleToA = snapA.Entities.Any(entity => entity.EntityId == EntityB);
                 snapshotsA.Add((snapA.Tick, snapA, bVisibleToA));
@@ -181,9 +203,10 @@ file static class FogNetworkPr84Harness
                     endpointA.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
                     endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
 
-                    host.AdvanceTicks(2);
-                    DrainAndAckAllSnapshots(endpointA);
-                    DrainAndAckAllSnapshots(endpointB);
+            
+        host.AdvanceTicks(2);
+                    DrainAndAckAllSnapshots(endpointA, ref outboundCountA, ref snapshotCountA, ref enterAckCountA, typeCountsA);
+                    DrainAndAckAllSnapshots(endpointB, ref outboundCountB, ref snapshotCountB, ref enterAckCountB, typeCountsB);
                     inputTick = host.CurrentWorld.Tick + 1;
                 }
                 finally
@@ -217,9 +240,10 @@ file static class FogNetworkPr84Harness
 
                 endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, 0, moveY)));
                 host.StepOnce();
+                ticksExecuted++;
 
-                SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA);
-                _ = DrainAndAckLatestSnapshot(endpointB, payloadHashesB, transitionsB);
+                SnapshotV2 snapA = DrainAndAckLatestSnapshot(endpointA, payloadHashesA, transitionsA, ref outboundCountA, ref snapshotCountA, ref enterAckCountA, typeCountsA);
+                _ = DrainAndAckLatestSnapshot(endpointB, payloadHashesB, transitionsB, ref outboundCountB, ref snapshotCountB, ref enterAckCountB, typeCountsB);
 
                 bool bVisibleToA = snapA.Entities.Any(entity => entity.EntityId == EntityB);
                 snapshotsA.Add((snapA.Tick, snapA, bVisibleToA));
@@ -257,10 +281,15 @@ file static class FogNetworkPr84Harness
             }
         }
 
+        string diagnosticsSummary = $"CP3 ticks={ticksExecuted} outboundA={outboundCountA} outboundB={outboundCountB} snapshotsA={snapshotCountA} snapshotsB={snapshotCountB} enterAckA={enterAckCountA} enterAckB={enterAckCountB} transitionsA={transitionsA.Count} transitionsB={transitionsB.Count} spawnTicksA={spawnTicksA.Count} despawnTicksA={despawnTicksA.Count} msgTypesA={FormatTypeCounts(typeCountsA)} msgTypesB={FormatTypeCounts(typeCountsB)}";
+
+        Assert.True(outboundCountA > 0 || outboundCountB > 0, $"CP2 no outbound messages. {diagnosticsSummary}");
+        Assert.True(snapshotCountA > 0 || snapshotCountB > 0, $"CP2 no snapshots decoded. {diagnosticsSummary}");
+
         if (!withRestartAtStep.HasValue)
         {
-            Assert.NotEmpty(spawnTicksA);
-            Assert.NotEmpty(despawnTicksA);
+            Assert.NotEmpty(spawnTicksA, $"spawnTicksA empty. {diagnosticsSummary}");
+            Assert.NotEmpty(despawnTicksA, $"despawnTicksA empty. {diagnosticsSummary}");
         }
 
         return new ScenarioRun(
@@ -274,7 +303,8 @@ file static class FogNetworkPr84Harness
             visibilityTimelineA,
             spawnTicksA,
             despawnTicksA,
-            hideTick);
+            hideTick,
+            diagnosticsSummary);
     }
 
     private static void RecordVisibilityDrivenTransitions(
@@ -338,7 +368,11 @@ file static class FogNetworkPr84Harness
     private static SnapshotV2 DrainAndAckLatestSnapshot(
         InMemoryEndpoint endpoint,
         List<KeyValuePair<int, string>> payloadHashes,
-        List<string> transitions)
+        List<string> transitions,
+        ref int outboundCount,
+        ref int snapshotCount,
+        ref int enterAckCount,
+        SortedDictionary<string, int> messageTypeCounts)
     {
         SnapshotV2? latest = null;
         while (endpoint.TryDequeueFromServer(out byte[] payload))
@@ -348,8 +382,20 @@ file static class FogNetworkPr84Harness
                 continue;
             }
 
+            outboundCount++;
+            if (message is not null)
+            {
+                IncrementCount(messageTypeCounts, message.GetType().Name);
+            }
+
+            if (message is EnterZoneAck)
+            {
+                enterAckCount++;
+            }
+
             if (message is SnapshotV2 snapshot)
             {
+                snapshotCount++;
                 string payloadHash = Convert.ToHexString(SHA256.HashData(payload));
                 payloadHashes.Add(new KeyValuePair<int, string>(snapshot.Tick, payloadHash));
                 transitions.AddRange(snapshot.Enters.Select(entity => $"spawn:{entity.EntityId}@{snapshot.Tick}"));
@@ -363,15 +409,64 @@ file static class FogNetworkPr84Harness
         return latest!;
     }
 
-    private static void DrainAndAckAllSnapshots(InMemoryEndpoint endpoint)
+    private static void DrainAndAckAllSnapshots(
+        InMemoryEndpoint endpoint,
+        ref int outboundCount,
+        ref int snapshotCount,
+        ref int enterAckCount,
+        SortedDictionary<string, int> messageTypeCounts)
     {
         while (endpoint.TryDequeueFromServer(out byte[] payload))
         {
-            if (ProtocolCodec.TryDecodeServer(payload, out IServerMessage? message, out _) && message is SnapshotV2 snapshot)
+            if (!ProtocolCodec.TryDecodeServer(payload, out IServerMessage? message, out _) || message is null)
             {
+                continue;
+            }
+
+            outboundCount++;
+            IncrementCount(messageTypeCounts, message.GetType().Name);
+            if (message is EnterZoneAck)
+            {
+                enterAckCount++;
+            }
+
+            if (message is SnapshotV2 snapshot)
+            {
+                snapshotCount++;
                 endpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(snapshot.ZoneId, snapshot.SnapshotSeq)));
             }
         }
+    }
+
+    private static void IncrementCount(SortedDictionary<string, int> counts, string key)
+    {
+        counts.TryGetValue(key, out int current);
+        counts[key] = current + 1;
+    }
+
+    private static string FormatTypeCounts(SortedDictionary<string, int> counts)
+    {
+        if (counts.Count == 0)
+        {
+            return "none";
+        }
+
+        StringBuilder builder = new();
+        bool first = true;
+        foreach (KeyValuePair<string, int> pair in counts)
+        {
+            if (!first)
+            {
+                builder.Append(',');
+            }
+
+            builder.Append(pair.Key);
+            builder.Append('=');
+            builder.Append(pair.Value);
+            first = false;
+        }
+
+        return builder.ToString();
     }
 
     private static ServerHost CreateHost(ServerConfig config)
@@ -451,4 +546,5 @@ public sealed record ScenarioRun(
     List<string> VisibilityTimelineA,
     List<int> SpawnTicksA,
     List<int> DespawnTicksA,
-    int HideTick);
+    int HideTick,
+    string DiagnosticsSummary);
