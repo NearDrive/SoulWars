@@ -1215,6 +1215,55 @@ public sealed class ServerHost
 
                 if (session.SupportsSnapshotAckV2)
                 {
+                    ProjectileSnapshotV1[] projectiles = zone.Projectiles
+                        .OrderBy(projectile => projectile.ProjectileId)
+                        .Select(projectile => new ProjectileSnapshotV1(
+                            ProjectileId: projectile.ProjectileId,
+                            SourceEntityId: projectile.OwnerId.Value,
+                            AbilityId: projectile.SkillId.Value,
+                            PosXRaw: projectile.PosX.Raw,
+                            PosYRaw: projectile.PosY.Raw,
+                            VelXRaw: projectile.VelX.Raw,
+                            VelYRaw: projectile.VelY.Raw,
+                            RadiusRaw: projectile.Radius.Raw,
+                            SpawnTick: projectile.SpawnTick,
+                            ExpireTick: projectile.SpawnTick + projectile.MaxLifetimeTicks))
+                        .ToArray();
+
+                    ProjectileEventV1[] projectileEvents = (_world.ProjectileEvents.IsDefault ? System.Collections.Immutable.ImmutableArray<ProjectileEvent>.Empty : _world.ProjectileEvents)
+                        .OrderBy(evt => evt.Tick)
+                        .ThenBy(evt => evt.ProjectileId)
+                        .ThenBy(evt => (int)evt.Kind)
+                        .Select(evt => new ProjectileEventV1(
+                            TickId: evt.Tick,
+                            ZoneId: zone.Id.Value,
+                            ProjectileId: evt.ProjectileId,
+                            Kind: (byte)evt.Kind,
+                            SourceEntityId: evt.OwnerId.Value,
+                            TargetEntityId: evt.TargetId.Value,
+                            AbilityId: evt.AbilityId.Value,
+                            PosXRaw: evt.PosX.Raw,
+                            PosYRaw: evt.PosY.Raw))
+                        .ToArray();
+
+                    HitEventV1[] hitEvents = projectileEvents
+                        .Where(evt => evt.Kind == (byte)ProjectileEventKind.Hit)
+                        .Select((evt, idx) => new HitEventV1(
+                            TickId: evt.TickId,
+                            ZoneId: evt.ZoneId,
+                            SourceEntityId: evt.SourceEntityId,
+                            TargetEntityId: evt.TargetEntityId,
+                            AbilityId: evt.AbilityId,
+                            HitPosXRaw: evt.PosXRaw,
+                            HitPosYRaw: evt.PosYRaw,
+                            EventSeq: idx))
+                        .OrderBy(evt => evt.TickId)
+                        .ThenBy(evt => evt.SourceEntityId)
+                        .ThenBy(evt => evt.TargetEntityId)
+                        .ThenBy(evt => evt.AbilityId)
+                        .ThenBy(evt => evt.EventSeq)
+                        .ToArray();
+
                     int snapshotSeq = session.NextSnapshotSeq++;
                     SnapshotV2 snapshot = new(
                         Tick: _world.Tick,
@@ -1224,7 +1273,10 @@ public sealed class ServerHost
                         Entities: entities,
                         Leaves: leaves,
                         Enters: enters,
-                        Updates: updates);
+                        Updates: updates,
+                        Projectiles: projectiles,
+                        ProjectileEvents: projectileEvents,
+                        HitEvents: hitEvents);
 
                     if (self is not null && !snapshot.Entities.Any(e => e.EntityId == self.Id.Value))
                     {

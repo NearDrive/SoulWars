@@ -13,5 +13,6 @@ public readonly record struct ProjectileEvent(
     ProjectileEventKind Kind,
     EntityId OwnerId,
     EntityId TargetId,
+    SkillId AbilityId,
     Fix32 PosX,
     Fix32 PosY);

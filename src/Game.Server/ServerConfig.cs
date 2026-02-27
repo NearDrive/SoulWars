@@ -49,7 +49,22 @@ public readonly record struct ServerConfig(
             MapWidth = MapWidth,
             MapHeight = MapHeight,
             NpcCountPerZone = NpcCountPerZone,
-            Invariants = Invariants
+            Invariants = Invariants,
+            SkillDefinitions = System.Collections.Immutable.ImmutableArray.Create(
+                new SkillDefinition(
+                    Id: new SkillId(1),
+                    RangeQRaw: Fix32.FromInt(64).Raw,
+                    HitRadiusRaw: Fix32.OneRaw,
+                    MaxTargets: 1,
+                    CooldownTicks: 6,
+                    CastTimeTicks: 0,
+                    GlobalCooldownTicks: 0,
+                    ResourceCost: 0,
+                    TargetKind: CastTargetKind.Point,
+                    BaseAmount: 0,
+                    ProjectileSpeedRaw: Fix32.FromInt(1).Raw,
+                    UsesProjectile: true,
+                    CollidesWithWorld: true))
         };
     }
 

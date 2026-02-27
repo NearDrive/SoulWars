@@ -87,7 +87,10 @@ public sealed record SnapshotV2(
     SnapshotEntity[] Entities,
     int[]? Leaves = null,
     SnapshotEntity[]? Enters = null,
-    SnapshotEntity[]? Updates = null)
+    SnapshotEntity[]? Updates = null,
+    ProjectileSnapshotV1[]? Projectiles = null,
+    ProjectileEventV1[]? ProjectileEvents = null,
+    HitEventV1[]? HitEvents = null)
     : Snapshot(Tick, ZoneId, Entities)
 {
     public int[] Leaves { get; init; } = Leaves ?? Array.Empty<int>();
@@ -95,7 +98,46 @@ public sealed record SnapshotV2(
     public SnapshotEntity[] Enters { get; init; } = Enters ?? Array.Empty<SnapshotEntity>();
 
     public SnapshotEntity[] Updates { get; init; } = Updates ?? Array.Empty<SnapshotEntity>();
+
+    public ProjectileSnapshotV1[] Projectiles { get; init; } = Projectiles ?? Array.Empty<ProjectileSnapshotV1>();
+
+    public ProjectileEventV1[] ProjectileEvents { get; init; } = ProjectileEvents ?? Array.Empty<ProjectileEventV1>();
+
+    public HitEventV1[] HitEvents { get; init; } = HitEvents ?? Array.Empty<HitEventV1>();
 }
+
+public sealed record ProjectileSnapshotV1(
+    int ProjectileId,
+    int SourceEntityId,
+    int AbilityId,
+    int PosXRaw,
+    int PosYRaw,
+    int VelXRaw,
+    int VelYRaw,
+    int RadiusRaw,
+    int SpawnTick,
+    int ExpireTick);
+
+public sealed record ProjectileEventV1(
+    int TickId,
+    int ZoneId,
+    int ProjectileId,
+    byte Kind,
+    int SourceEntityId,
+    int TargetEntityId,
+    int AbilityId,
+    int PosXRaw,
+    int PosYRaw);
+
+public sealed record HitEventV1(
+    int TickId,
+    int ZoneId,
+    int SourceEntityId,
+    int TargetEntityId,
+    int AbilityId,
+    int HitPosXRaw,
+    int HitPosYRaw,
+    int EventSeq);
 
 public sealed record Error(string Code, string Message) : IServerMessage;
 

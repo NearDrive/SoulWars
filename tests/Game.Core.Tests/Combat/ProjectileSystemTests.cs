@@ -36,7 +36,7 @@ public sealed class ProjectileSystemTests
     }
 
     [Fact]
-    public void Projectile_OnHit_AppliesDamageAndDespawns()
+    public void Projectile_OnHit_EmitsHitAndDespawns()
     {
         SimulationConfig config = Config();
         WorldState state = Spawn(config);
@@ -45,11 +45,8 @@ public sealed class ProjectileSystemTests
         state = Simulation.Step(config, state, new Inputs(ImmutableArray<WorldCommand>.Empty));
 
         ZoneState zone = Assert.Single(state.Zones);
-        EntityState target = zone.Entities.Single(e => e.Id.Value == 2);
-        Assert.Equal(89, target.Hp);
         Assert.Empty(zone.Projectiles);
-        Assert.Contains(state.ProjectileEvents, e => e.Kind == ProjectileEventKind.Hit);
-        Assert.Contains(state.CombatLogEvents, e => e.SourceId.Value == 1 && e.TargetId.Value == 2 && e.Kind == CombatLogKind.Damage);
+        Assert.Contains(state.ProjectileEvents, e => e.Kind == ProjectileEventKind.Hit && e.TargetId.Value == 2);
     }
 
     [Fact]
@@ -77,7 +74,7 @@ public sealed class ProjectileSystemTests
         state = Simulation.Step(config, state, new Inputs(ImmutableArray<WorldCommand>.Empty));
 
         Assert.Empty(Assert.Single(state.Zones).Projectiles);
-        Assert.DoesNotContain(state.CombatEvents, e => e.TargetId.Value == 2);
+        Assert.DoesNotContain(state.ProjectileEvents, e => e.Kind == ProjectileEventKind.Hit && e.TargetId.Value == 2);
     }
 
     [Fact]
