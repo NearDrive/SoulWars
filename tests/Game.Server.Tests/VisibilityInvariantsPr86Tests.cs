@@ -11,6 +11,7 @@ public sealed class VisibilityNoLeakInvariantTests
 {
     [Fact]
     [Trait("Category", "PR86")]
+    [Trait("Category", "Canary")]
     public void NoLeakInvariant_PassesOnScenario_AndFailsOnInjectedInvisibleId()
     {
         VisibilityScenarioRun run = VisibilityInvariantPr86Harness.RunVisibilityScenario();
@@ -48,6 +49,7 @@ public sealed class SpawnDespawnSequenceInvariantTests
 {
     [Fact]
     [Trait("Category", "PR86")]
+    [Trait("Category", "Canary")]
     public void SpawnBeforeState_DespawnRemovesAll_RespawnRequired_AreEnforced()
     {
         VisibilityScenarioRun run = VisibilityInvariantPr86Harness.RunVisibilityScenario();
@@ -112,6 +114,7 @@ public sealed class CanonicalOrderingInvariantTests
 {
     [Fact]
     [Trait("Category", "PR86")]
+    [Trait("Category", "Canary")]
     public void CanonicalOrdering_IsEnforced()
     {
         VisibilityScenarioRun run = VisibilityInvariantPr86Harness.RunVisibilityScenario();
