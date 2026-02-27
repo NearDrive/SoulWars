@@ -59,19 +59,18 @@ public sealed class SpawnDespawnSequenceInvariantTests
             tick => run.ExpectedVisibleByTick[tick],
             run.ObserverSessionId);
 
-        int firstVisibleTick = run.ObserverSnapshots
-            .Where(snapshot => run.ExpectedVisibleByTick[snapshot.Tick].Contains(run.TargetEntityId))
-            .Select(snapshot => snapshot.Tick)
-            .Min();
+        SnapshotV2 explicitSpawnSnapshot = run.ObserverSnapshots
+            .First(snapshot =>
+                !snapshot.IsFull &&
+                snapshot.Enters.Any(entity => entity.EntityId == run.TargetEntityId));
 
-        SnapshotV2 firstVisible = run.ObserverSnapshots.Single(snapshot => snapshot.Tick == firstVisibleTick);
-        SnapshotV2 withoutSpawn = firstVisible with
+        SnapshotV2 withoutSpawn = explicitSpawnSnapshot with
         {
-            Enters = firstVisible.Enters.Where(entity => entity.EntityId != run.TargetEntityId).ToArray()
+            Enters = explicitSpawnSnapshot.Enters.Where(entity => entity.EntityId != run.TargetEntityId).ToArray()
         };
 
         List<SnapshotV2> missingSpawnStream = run.ObserverSnapshots
-            .Select(snapshot => snapshot.Tick == firstVisibleTick ? withoutSpawn : snapshot)
+            .Select(snapshot => snapshot.Tick == explicitSpawnSnapshot.Tick ? withoutSpawn : snapshot)
             .ToList();
 
         InvariantViolationException spawnViolation = Assert.Throws<InvariantViolationException>(() =>
@@ -140,7 +139,7 @@ public sealed class CanonicalOrderingInvariantTests
                 tick => run.ExpectedVisibleByTick[tick],
                 run.ObserverSessionId));
 
-        Assert.Contains("arrayNotSorted", orderingViolation.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("invariant=CanonicalOrder", orderingViolation.Message, StringComparison.Ordinal);
     }
 }
 
