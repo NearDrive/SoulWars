@@ -32,9 +32,10 @@ public static class PerfBudgetEvaluator
             violations.Add($"AoiEntitiesConsideredPerTick exceeded: max={snap.MaxAoiEntitiesConsideredPerTick} budget={budget.MaxEntitiesConsideredPerTick}");
         }
 
-        if (snap.TotalAoiEntitiesConsidered > budget.MaxEntitiesConsideredPerSession)
+        long maxEntitiesConsideredForWindow = ScaleSessionTotalBudget(budget.MaxEntitiesConsideredPerSession, snap.TickCount, budget.WindowTicks);
+        if (snap.TotalAoiEntitiesConsidered > maxEntitiesConsideredForWindow)
         {
-            violations.Add($"AoiEntitiesConsideredPerSession exceeded: total={snap.TotalAoiEntitiesConsidered} budget={budget.MaxEntitiesConsideredPerSession}");
+            violations.Add($"AoiEntitiesConsideredPerSession exceeded: total={snap.TotalAoiEntitiesConsidered} budget={maxEntitiesConsideredForWindow} baseWindowBudget={budget.MaxEntitiesConsideredPerSession} ticks={snap.TickCount} windowTicks={budget.WindowTicks}");
         }
 
         if (snap.MaxRedactionEntitiesEmittedPerTick > budget.MaxEntitiesEmittedPerTick)
@@ -42,9 +43,10 @@ public static class PerfBudgetEvaluator
             violations.Add($"RedactionEntitiesEmittedPerTick exceeded: max={snap.MaxRedactionEntitiesEmittedPerTick} budget={budget.MaxEntitiesEmittedPerTick}");
         }
 
-        if (snap.TotalRedactionEntitiesEmitted > budget.MaxEntitiesEmittedPerSession)
+        long maxEntitiesEmittedForWindow = ScaleSessionTotalBudget(budget.MaxEntitiesEmittedPerSession, snap.TickCount, budget.WindowTicks);
+        if (snap.TotalRedactionEntitiesEmitted > maxEntitiesEmittedForWindow)
         {
-            violations.Add($"RedactionEntitiesEmittedPerSession exceeded: total={snap.TotalRedactionEntitiesEmitted} budget={budget.MaxEntitiesEmittedPerSession}");
+            violations.Add($"RedactionEntitiesEmittedPerSession exceeded: total={snap.TotalRedactionEntitiesEmitted} budget={maxEntitiesEmittedForWindow} baseWindowBudget={budget.MaxEntitiesEmittedPerSession} ticks={snap.TickCount} windowTicks={budget.WindowTicks}");
         }
 
         if (snap.MaxTransitionSpawnsPerTick > budget.MaxTransitionSpawnsPerTick)
@@ -93,5 +95,22 @@ public static class PerfBudgetEvaluator
         }
 
         return new BudgetResult(violations.Count == 0, violations.ToArray());
+    }
+
+    private static long ScaleSessionTotalBudget(long budgetPerWindow, int observedTicks, int windowTicks)
+    {
+        if (budgetPerWindow <= 0)
+        {
+            return 0;
+        }
+
+        if (windowTicks <= 0 || observedTicks <= 0)
+        {
+            return budgetPerWindow;
+        }
+
+        long numerator = checked(budgetPerWindow * observedTicks);
+        long denominator = windowTicks;
+        return (numerator + denominator - 1) / denominator;
     }
 }
