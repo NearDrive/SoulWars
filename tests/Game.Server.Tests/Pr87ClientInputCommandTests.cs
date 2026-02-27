@@ -10,6 +10,7 @@ public sealed class InputValidation_MoveBoundsTests
 {
     [Fact]
     [Trait("Category", "PR87")]
+    [Trait("Category", "Canary")]
     public void Move_ThatWouldLeaveZoneBounds_IsRejected_ByServerValidation()
     {
         ServerHost host = new(ServerConfig.Default(seed: 8701) with { MapWidth = 4, MapHeight = 4, NpcCountPerZone = 0 });
@@ -55,6 +56,7 @@ public sealed class InputValidation_CastPointBoundsAndCooldownTests
 {
     [Fact]
     [Trait("Category", "PR87")]
+    [Trait("Category", "Canary")]
     public void CastPoint_OutOfBounds_IsRejected()
     {
         ServerHost host = new(ServerConfig.Default(seed: 8702) with { NpcCountPerZone = 0 });
@@ -84,6 +86,7 @@ public sealed class InputValidation_CastPointBoundsAndCooldownTests
 
     [Fact]
     [Trait("Category", "PR87")]
+    [Trait("Category", "Canary")]
     public void CastPoint_InBounds_ButCooldownActive_IsRejected_AndWithoutCooldown_IsAccepted()
     {
         ServerHost host = new(ServerConfig.Default(seed: 8703) with { NpcCountPerZone = 0 });
@@ -151,6 +154,7 @@ public sealed class InputOrdering_DeterministicQueueTests
 {
     [Fact]
     [Trait("Category", "PR87")]
+    [Trait("Category", "Canary")]
     public void PendingInputs_AreProcessedIn_TickSessionSequence_Order()
     {
         ServerHost host = new(ServerConfig.Default(seed: 8704) with { NpcCountPerZone = 0 });
