@@ -7,6 +7,7 @@ namespace Game.Server.Tests;
 public sealed class SnapshotSchemaStabilityTests
 {
     [Fact]
+    [Trait("Category", "PR86")]
     public void SnapshotV2_SerializeParseSerialize_IsStable_AndCanonicalized()
     {
         SnapshotV2 original = new(
