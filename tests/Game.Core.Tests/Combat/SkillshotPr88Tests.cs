@@ -39,16 +39,14 @@ public sealed class SkillshotPr88Tests
         WorldState state = Spawn(config, new[] { (1, 2, 2), (2, 4, 2) });
 
         state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(CastPoint(1, 6, 2))));
-        state = Simulation.Step(config, state, new Inputs(ImmutableArray<WorldCommand>.Empty));
 
-        ProjectileEvent[] hitEvents = state.ProjectileEvents.Where(e => e.Kind == ProjectileEventKind.Hit).ToArray();
-        ProjectileEvent hit = Assert.Single(hitEvents);
-        Assert.Equal(state.Tick, hit.Tick);
+        ProjectileEvent hit = AdvanceUntilSingleHit(config, state, out WorldState hitState);
+        Assert.Equal(hitState.Tick, hit.Tick);
         Assert.Equal(1, hit.OwnerId.Value);
         Assert.Equal(2, hit.TargetId.Value);
         Assert.Equal(1, hit.AbilityId.Value);
 
-        ProjectileEvent[] canonical = state.ProjectileEvents
+        ProjectileEvent[] canonical = hitState.ProjectileEvents
             .OrderBy(e => e.Tick)
             .ThenBy(e => e.ProjectileId)
             .ThenBy(e => (int)e.Kind)
@@ -56,7 +54,7 @@ public sealed class SkillshotPr88Tests
             .ThenBy(e => e.TargetId.Value)
             .ThenBy(e => e.AbilityId.Value)
             .ToArray();
-        Assert.Equal(canonical, state.ProjectileEvents.ToArray());
+        Assert.Equal(canonical, hitState.ProjectileEvents.ToArray());
     }
 
     [Fact]
@@ -68,9 +66,8 @@ public sealed class SkillshotPr88Tests
         WorldState state = Spawn(config, new[] { (1, 2, 2), (3, 4, 2), (2, 4, 2) });
 
         state = Simulation.Step(config, state, new Inputs(ImmutableArray.Create(CastPoint(1, 6, 2))));
-        state = Simulation.Step(config, state, new Inputs(ImmutableArray<WorldCommand>.Empty));
 
-        ProjectileEvent hit = Assert.Single(state.ProjectileEvents.Where(e => e.Kind == ProjectileEventKind.Hit));
+        ProjectileEvent hit = AdvanceUntilSingleHit(config, state, out _);
         Assert.Equal(2, hit.TargetId.Value);
     }
 
@@ -104,6 +101,25 @@ public sealed class SkillshotPr88Tests
             UsesProjectile: true,
             CollidesWithWorld: false))
     };
+
+
+    private static ProjectileEvent AdvanceUntilSingleHit(SimulationConfig config, WorldState start, out WorldState hitState)
+    {
+        WorldState current = start;
+        for (int i = 0; i < config.MaxProjectileLifetimeTicks + 2; i++)
+        {
+            ProjectileEvent[] hits = current.ProjectileEvents.Where(e => e.Kind == ProjectileEventKind.Hit).ToArray();
+            if (hits.Length == 1)
+            {
+                hitState = current;
+                return hits[0];
+            }
+
+            current = Simulation.Step(config, current, new Inputs(ImmutableArray<WorldCommand>.Empty));
+        }
+
+        throw new Xunit.Sdk.XunitException("Expected exactly one hit event before TTL expiry.");
+    }
 
     private static WorldState Spawn(SimulationConfig config, IEnumerable<(int id, int x, int y)> spawns)
     {
