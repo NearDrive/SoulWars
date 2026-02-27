@@ -59,24 +59,23 @@ public sealed class SpawnDespawnSequenceInvariantTests
             tick => run.ExpectedVisibleByTick[tick],
             run.ObserverSessionId);
 
-        SnapshotV2 explicitSpawnSnapshot = run.ObserverSnapshots
-            .First(snapshot =>
-                !snapshot.IsFull &&
-                snapshot.Enters.Any(entity => entity.EntityId == run.TargetEntityId));
-
-        SnapshotV2 withoutSpawn = explicitSpawnSnapshot with
-        {
-            Enters = explicitSpawnSnapshot.Enters.Where(entity => entity.EntityId != run.TargetEntityId).ToArray()
-        };
-
-        List<SnapshotV2> missingSpawnStream = run.ObserverSnapshots
-            .Select(snapshot => snapshot.Tick == explicitSpawnSnapshot.Tick ? withoutSpawn : snapshot)
-            .ToList();
+        List<SnapshotV2> missingSpawnStream =
+        [
+            new SnapshotV2(
+                Tick: 100,
+                ZoneId: 1,
+                SnapshotSeq: 1,
+                IsFull: false,
+                Entities: [new SnapshotEntity(run.TargetEntityId, 0, 0, Kind: SnapshotEntityKind.Player)],
+                Leaves: [],
+                Enters: [],
+                Updates: []),
+        ];
 
         InvariantViolationException spawnViolation = Assert.Throws<InvariantViolationException>(() =>
             ServerInvariants.ValidateVisibilityStreamInvariants(
                 missingSpawnStream,
-                tick => run.ExpectedVisibleByTick[tick],
+                _ => new HashSet<int> { run.TargetEntityId },
                 run.ObserverSessionId));
         Assert.Contains("SpawnBeforeStateInvariant", spawnViolation.Message, StringComparison.Ordinal);
 
