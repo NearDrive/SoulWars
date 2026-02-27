@@ -3,6 +3,7 @@ using Game.Core;
 using Game.Protocol;
 using Game.Server;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Game.Server.Tests;
 
@@ -47,6 +48,13 @@ public sealed class VisibilityNoLeakInvariantTests
 [Trait("Category", "PR86")]
 public sealed class SpawnDespawnSequenceInvariantTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public SpawnDespawnSequenceInvariantTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     [Fact]
     [Trait("Category", "PR86")]
     [Trait("Category", "Canary")]
@@ -72,6 +80,8 @@ public sealed class SpawnDespawnSequenceInvariantTests
                 Updates: []),
         ];
 
+        _output.WriteLine($"spawn-check session={run.ObserverSessionId} target={run.TargetEntityId} ticks=[{string.Join(',', missingSpawnStream.Select(s => s.Tick))}] events=state-without-spawn");
+
         InvariantViolationException spawnViolation = Assert.Throws<InvariantViolationException>(() =>
             ServerInvariants.ValidateVisibilityStreamInvariants(
                 missingSpawnStream,
@@ -79,29 +89,50 @@ public sealed class SpawnDespawnSequenceInvariantTests
                 run.ObserverSessionId));
         Assert.Contains("SpawnBeforeStateInvariant", spawnViolation.Message, StringComparison.Ordinal);
 
-        int despawnTick = run.ObserverSnapshots.Single(snapshot => snapshot.Leaves.Contains(run.TargetEntityId)).Tick;
-        int reappearTick = run.ObserverSnapshots
-            .Where(snapshot => snapshot.Tick > despawnTick)
-            .Select(snapshot => snapshot.Tick)
-            .First();
+        List<SnapshotV2> postDespawnWithoutRespawn =
+        [
+            new SnapshotV2(
+                Tick: 200,
+                ZoneId: 1,
+                SnapshotSeq: 10,
+                IsFull: false,
+                Entities: [new SnapshotEntity(run.TargetEntityId, 0, 0, Kind: SnapshotEntityKind.Player)],
+                Leaves: [],
+                Enters: [new SnapshotEntity(run.TargetEntityId, 0, 0, Kind: SnapshotEntityKind.Player)],
+                Updates: []),
+            new SnapshotV2(
+                Tick: 201,
+                ZoneId: 1,
+                SnapshotSeq: 11,
+                IsFull: false,
+                Entities: [],
+                Leaves: [run.TargetEntityId],
+                Enters: [],
+                Updates: []),
+            new SnapshotV2(
+                Tick: 202,
+                ZoneId: 1,
+                SnapshotSeq: 12,
+                IsFull: false,
+                Entities: [],
+                Leaves: [],
+                Enters: [],
+                Updates: [new SnapshotEntity(run.TargetEntityId, 1, 1, Kind: SnapshotEntityKind.Player)])
+        ];
 
-        SnapshotV2 reappearSnapshot = run.ObserverSnapshots.Single(snapshot => snapshot.Tick == reappearTick);
-        SnapshotV2 reappearWithoutSpawn = reappearSnapshot with
+        Dictionary<int, IReadOnlySet<int>> visibleByTick = new()
         {
-            Updates = reappearSnapshot.Updates
-                .Concat(new[] { new SnapshotEntity(run.TargetEntityId, 1, 1, Kind: SnapshotEntityKind.Player) })
-                .OrderBy(entity => entity.EntityId)
-                .ToArray()
+            [200] = new HashSet<int> { run.TargetEntityId },
+            [201] = new HashSet<int>(),
+            [202] = new HashSet<int> { run.TargetEntityId }
         };
 
-        List<SnapshotV2> postDespawnLeak = run.ObserverSnapshots
-            .Select(snapshot => snapshot.Tick == reappearTick ? reappearWithoutSpawn : snapshot)
-            .ToList();
+        _output.WriteLine($"despawn-check session={run.ObserverSessionId} target={run.TargetEntityId} ticks=[{string.Join(',', postDespawnWithoutRespawn.Select(s => s.Tick))}] events=spawn,despawn,update-without-respawn validator=ServerInvariants.ValidateVisibilityStreamInvariants");
 
         InvariantViolationException despawnViolation = Assert.Throws<InvariantViolationException>(() =>
             ServerInvariants.ValidateVisibilityStreamInvariants(
-                postDespawnLeak,
-                tick => run.ExpectedVisibleByTick[tick],
+                postDespawnWithoutRespawn,
+                tick => visibleByTick[tick],
                 run.ObserverSessionId));
         Assert.Contains("SpawnBeforeStateInvariant", despawnViolation.Message, StringComparison.Ordinal);
     }
