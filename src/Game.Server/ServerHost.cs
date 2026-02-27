@@ -73,7 +73,9 @@ public sealed class ServerHost
         _simulationInstrumentation = new SimulationInstrumentation
         {
             CountEntitiesVisited = Perf.CountEntitiesVisited,
-            CountCollisionChecks = Perf.CountCollisionChecks
+            CountCollisionChecks = Perf.CountCollisionChecks,
+            CountVisibilityCellsVisited = Perf.CountVisibilityCellsVisited,
+            CountVisibilityRaysCast = Perf.CountVisibilityRaysCast
         };
         _lastTick = _world.Tick;
     }
@@ -1076,6 +1078,9 @@ public sealed class ServerHost
                 entities = SnapshotRedactor.RedactEntities(snapshotContext, zone, zone.Visibility, candidateEntities, entities);
                 enters = SnapshotRedactor.RedactEntities(snapshotContext, zone, zone.Visibility, candidateEntities, enters);
                 updates = SnapshotRedactor.RedactEntities(snapshotContext, zone, zone.Visibility, candidateEntities, updates);
+                Perf.CountRedactionEntitiesEmitted(entities.Length + enters.Length + updates.Length);
+                Perf.CountTransitionSpawns(enters.Length);
+                Perf.CountTransitionDespawns(leaves.Length);
                 visibleNowIds = new SortedSet<int>(entities.Select(entity => entity.EntityId));
 
                 if (session.SupportsSnapshotAckV2 &&

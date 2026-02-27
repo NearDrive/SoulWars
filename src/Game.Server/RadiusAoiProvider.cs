@@ -30,6 +30,7 @@ public sealed class RadiusAoiProvider : IAoiProvider
             .Where(entity =>
             {
                 perfCounters?.CountAoiChecks(1);
+                perfCounters?.CountAoiEntitiesConsidered(1);
                 return entity.Id.Value == viewerEntityId.Value || IsWithinRadius(viewerPos, entity.Pos);
             })
             .Select(entity => entity.Id)

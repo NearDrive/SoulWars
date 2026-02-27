@@ -16,6 +16,47 @@ public static class PerfBudgetEvaluator
             violations.Add($"CollisionChecksPerTick exceeded: max={snap.MaxCollisionChecksPerTick} budget={budget.MaxCollisionChecksPerTick}");
         }
 
+
+        if (snap.MaxVisibilityCellsVisitedPerTick > budget.MaxVisibilityCellsVisitedPerTick)
+        {
+            violations.Add($"VisibilityCellsVisitedPerTick exceeded: max={snap.MaxVisibilityCellsVisitedPerTick} budget={budget.MaxVisibilityCellsVisitedPerTick}");
+        }
+
+        if (snap.MaxVisibilityRaysCastPerTick > budget.MaxVisibilityRaysCastPerTick)
+        {
+            violations.Add($"VisibilityRaysCastPerTick exceeded: max={snap.MaxVisibilityRaysCastPerTick} budget={budget.MaxVisibilityRaysCastPerTick}");
+        }
+
+        if (snap.MaxAoiEntitiesConsideredPerTick > budget.MaxEntitiesConsideredPerTick)
+        {
+            violations.Add($"AoiEntitiesConsideredPerTick exceeded: max={snap.MaxAoiEntitiesConsideredPerTick} budget={budget.MaxEntitiesConsideredPerTick}");
+        }
+
+        if (snap.TotalAoiEntitiesConsidered > budget.MaxEntitiesConsideredPerSession)
+        {
+            violations.Add($"AoiEntitiesConsideredPerSession exceeded: total={snap.TotalAoiEntitiesConsidered} budget={budget.MaxEntitiesConsideredPerSession}");
+        }
+
+        if (snap.MaxRedactionEntitiesEmittedPerTick > budget.MaxEntitiesEmittedPerTick)
+        {
+            violations.Add($"RedactionEntitiesEmittedPerTick exceeded: max={snap.MaxRedactionEntitiesEmittedPerTick} budget={budget.MaxEntitiesEmittedPerTick}");
+        }
+
+        if (snap.TotalRedactionEntitiesEmitted > budget.MaxEntitiesEmittedPerSession)
+        {
+            violations.Add($"RedactionEntitiesEmittedPerSession exceeded: total={snap.TotalRedactionEntitiesEmitted} budget={budget.MaxEntitiesEmittedPerSession}");
+        }
+
+        if (snap.MaxTransitionSpawnsPerTick > budget.MaxTransitionSpawnsPerTick)
+        {
+            violations.Add($"TransitionSpawnsPerTick exceeded: max={snap.MaxTransitionSpawnsPerTick} budget={budget.MaxTransitionSpawnsPerTick}");
+        }
+
+        if (snap.MaxTransitionDespawnsPerTick > budget.MaxTransitionDespawnsPerTick)
+        {
+            violations.Add($"TransitionDespawnsPerTick exceeded: max={snap.MaxTransitionDespawnsPerTick} budget={budget.MaxTransitionDespawnsPerTick}");
+        }
+
         if (snap.MaxSnapshotsEncodedEntitiesPerTick > budget.MaxSnapshotsEncodedEntitiesPerTick)
         {
             violations.Add($"SnapshotsEncodedEntitiesPerTick exceeded: max={snap.MaxSnapshotsEncodedEntitiesPerTick} budget={budget.MaxSnapshotsEncodedEntitiesPerTick}");
