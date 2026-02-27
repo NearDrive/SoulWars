@@ -199,11 +199,22 @@ file static class FogNetworkPr84Harness
 
         if (spawnTicksA.Count == 0 || despawnTicksA.Count == 0)
         {
-            const int fallbackMaxTicks = 800;
-            const int segmentTicks = 100;
-            for (int i = 0; i < fallbackMaxTicks; i++)
+            RunFallbackPhase(maxTicks: 400, targetTileY: 3, requireVisible: true);
+            RunFallbackPhase(maxTicks: 400, targetTileY: 1, requireVisible: false);
+        }
+
+        void RunFallbackPhase(int maxTicks, int targetTileY, bool requireVisible)
+        {
+            for (int i = 0; i < maxTicks; i++)
             {
-                sbyte moveY = ((i / segmentTicks) % 2 == 0) ? (sbyte)1 : (sbyte)-1;
+                EntityState bState = host.CurrentWorld.Zones
+                    .SelectMany(zone => zone.Entities)
+                    .OrderBy(entity => entity.Id.Value)
+                    .First(entity => entity.Id.Value == EntityB);
+
+                int bTileY = Fix32.FloorToInt(bState.Pos.Y);
+                sbyte moveY = bTileY < targetTileY ? (sbyte)1 : bTileY > targetTileY ? (sbyte)-1 : (sbyte)0;
+
                 endpointB.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick++, 0, moveY)));
                 host.StepOnce();
 
@@ -234,9 +245,14 @@ file static class FogNetworkPr84Harness
                     hideTick = snapA.Tick;
                 }
 
-                if (spawnTicksA.Count > 0 && despawnTicksA.Count > 0)
+                if (requireVisible && spawnTicksA.Count > 0)
                 {
-                    break;
+                    return;
+                }
+
+                if (!requireVisible && despawnTicksA.Count > 0)
+                {
+                    return;
                 }
             }
         }
