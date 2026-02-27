@@ -186,6 +186,134 @@ public static class ServerInvariants
             }
         }
     }
+
+    public static void ValidateVisibilityStreamInvariants(
+        IReadOnlyList<SnapshotV2> snapshots,
+        Func<int, IReadOnlySet<int>> visibleEntityIdsByTick,
+        int sessionId)
+    {
+        Dictionary<int, VisibilityLifecycleState> lifecycleByEntityId = new();
+        int previousTick = int.MinValue;
+
+        foreach (SnapshotV2 snapshot in snapshots)
+        {
+            bool isRetransmission = IsRetransmittedTick(snapshot.Tick, previousTick);
+            AssertCanonicalOrdering(snapshot, sessionId);
+
+            IReadOnlySet<int> expectedVisible = visibleEntityIdsByTick(snapshot.Tick);
+            AssertNoLeak(snapshot, expectedVisible, sessionId);
+
+            if (isRetransmission)
+            {
+                continue;
+            }
+
+            previousTick = snapshot.Tick;
+
+            foreach (int entityId in snapshot.Leaves)
+            {
+                lifecycleByEntityId[entityId] = VisibilityLifecycleState.RequiresSpawn;
+            }
+
+            foreach (SnapshotEntity entering in snapshot.Enters)
+            {
+                lifecycleByEntityId[entering.EntityId] = VisibilityLifecycleState.Visible;
+            }
+
+            foreach (SnapshotEntity entity in snapshot.Entities)
+            {
+                AssertSpawnBeforeState(entity.EntityId, lifecycleByEntityId, sessionId, snapshot.Tick, "entities", snapshot.IsFull);
+            }
+
+            foreach (SnapshotEntity entity in snapshot.Updates)
+            {
+                AssertSpawnBeforeState(entity.EntityId, lifecycleByEntityId, sessionId, snapshot.Tick, "updates", allowImplicitSpawnFromFullSnapshot: false);
+            }
+        }
+    }
+
+    private static bool IsRetransmittedTick(int tick, int previousTick)
+    {
+        if (previousTick == int.MinValue)
+        {
+            return false;
+        }
+
+        return tick <= previousTick;
+    }
+
+    private static void AssertCanonicalOrdering(SnapshotV2 snapshot, int sessionId)
+    {
+        WorldInvariants.AssertSortedAscending(snapshot.Entities, entity => entity.EntityId, "snapshot.entities", snapshot.Tick, snapshot.ZoneId);
+        WorldInvariants.AssertSortedAscending(snapshot.Enters, entity => entity.EntityId, "snapshot.enters", snapshot.Tick, snapshot.ZoneId);
+        WorldInvariants.AssertSortedAscending(snapshot.Updates, entity => entity.EntityId, "snapshot.updates", snapshot.Tick, snapshot.ZoneId);
+        WorldInvariants.AssertSortedAscending(snapshot.Leaves, entityId => entityId, "snapshot.leaves", snapshot.Tick, snapshot.ZoneId);
+
+        HashSet<int> entityIds = snapshot.Entities.Select(entity => entity.EntityId).ToHashSet();
+        HashSet<int> enterIds = snapshot.Enters.Select(entity => entity.EntityId).ToHashSet();
+        foreach (int enterId in enterIds)
+        {
+            if (!entityIds.Contains(enterId))
+            {
+                throw new InvariantViolationException($"invariant=SpawnMustAppearInEntities sessionId={sessionId} tick={snapshot.Tick} zoneId={snapshot.ZoneId} entityId={enterId}");
+            }
+        }
+    }
+
+    private static void AssertNoLeak(SnapshotV2 snapshot, IReadOnlySet<int> expectedVisible, int sessionId)
+    {
+        foreach (SnapshotEntity entity in snapshot.Entities)
+        {
+            if (!expectedVisible.Contains(entity.EntityId))
+            {
+                throw new InvariantViolationException($"invariant=NoLeakInvariant sessionId={sessionId} tick={snapshot.Tick} zoneId={snapshot.ZoneId} source=entities entityId={entity.EntityId}");
+            }
+        }
+
+        foreach (SnapshotEntity entity in snapshot.Enters)
+        {
+            if (!expectedVisible.Contains(entity.EntityId))
+            {
+                throw new InvariantViolationException($"invariant=NoLeakInvariant sessionId={sessionId} tick={snapshot.Tick} zoneId={snapshot.ZoneId} source=enters entityId={entity.EntityId}");
+            }
+        }
+
+        foreach (SnapshotEntity entity in snapshot.Updates)
+        {
+            if (!expectedVisible.Contains(entity.EntityId))
+            {
+                throw new InvariantViolationException($"invariant=NoLeakInvariant sessionId={sessionId} tick={snapshot.Tick} zoneId={snapshot.ZoneId} source=updates entityId={entity.EntityId}");
+            }
+        }
+    }
+
+    private static void AssertSpawnBeforeState(
+        int entityId,
+        IDictionary<int, VisibilityLifecycleState> lifecycleByEntityId,
+        int sessionId,
+        int tick,
+        string source,
+        bool allowImplicitSpawnFromFullSnapshot)
+    {
+        if (lifecycleByEntityId.TryGetValue(entityId, out VisibilityLifecycleState state) && state == VisibilityLifecycleState.Visible)
+        {
+            return;
+        }
+
+        if (allowImplicitSpawnFromFullSnapshot && source == "entities")
+        {
+            lifecycleByEntityId[entityId] = VisibilityLifecycleState.Visible;
+            return;
+        }
+
+        throw new InvariantViolationException($"invariant=SpawnBeforeStateInvariant sessionId={sessionId} tick={tick} source={source} entityId={entityId}");
+    }
+
+    private enum VisibilityLifecycleState : byte
+    {
+        RequiresSpawn = 0,
+        Visible = 1
+    }
 }
 
 public sealed record ServerHostDebugView(
