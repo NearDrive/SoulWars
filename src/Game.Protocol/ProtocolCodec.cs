@@ -669,7 +669,7 @@ public static class ProtocolCodec
 
     private static byte[] EncodeSnapshot(Snapshot snapshot, byte type)
     {
-        SnapshotEntity[] entities = snapshot.Entities ?? Array.Empty<SnapshotEntity>();
+        SnapshotEntity[] entities = CanonicalizeEntities(snapshot.Entities);
         byte[] data = new byte[1 + 4 + 4 + 4 + (entities.Length * ((6 * 4) + 1))];
         data[0] = type;
         WriteInt32(data, 1, snapshot.Tick);
@@ -696,10 +696,10 @@ public static class ProtocolCodec
 
     private static byte[] EncodeSnapshotV2(SnapshotV2 snapshot)
     {
-        SnapshotEntity[] entities = snapshot.Entities ?? Array.Empty<SnapshotEntity>();
-        int[] leaves = snapshot.Leaves ?? Array.Empty<int>();
-        SnapshotEntity[] enters = snapshot.Enters ?? Array.Empty<SnapshotEntity>();
-        SnapshotEntity[] updates = snapshot.Updates ?? Array.Empty<SnapshotEntity>();
+        SnapshotEntity[] entities = CanonicalizeEntities(snapshot.Entities);
+        int[] leaves = CanonicalizeEntityIds(snapshot.Leaves);
+        SnapshotEntity[] enters = CanonicalizeEntities(snapshot.Enters);
+        SnapshotEntity[] updates = CanonicalizeEntities(snapshot.Updates);
 
         byte[] data = new byte[
             1 + 4 + 4 + 4 + 1 + 4 + (entities.Length * ((6 * 4) + 1)) +
@@ -766,6 +766,34 @@ public static class ProtocolCodec
         }
 
         return data;
+    }
+
+    private static SnapshotEntity[] CanonicalizeEntities(SnapshotEntity[]? entities)
+    {
+        if (entities is null || entities.Length == 0)
+        {
+            return Array.Empty<SnapshotEntity>();
+        }
+
+        return entities
+            .OrderBy(entity => entity.EntityId)
+            .ThenBy(entity => (int)entity.Kind)
+            .ThenBy(entity => entity.PosXRaw)
+            .ThenBy(entity => entity.PosYRaw)
+            .ThenBy(entity => entity.VelXRaw)
+            .ThenBy(entity => entity.VelYRaw)
+            .ThenBy(entity => entity.Hp)
+            .ToArray();
+    }
+
+    private static int[] CanonicalizeEntityIds(int[]? entityIds)
+    {
+        if (entityIds is null || entityIds.Length == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        return entityIds.OrderBy(entityId => entityId).ToArray();
     }
 
     private static bool TryDecodeSnapshot(ReadOnlySpan<byte> data, out IServerMessage? msg, out ProtocolErrorCode error, bool isV2)
