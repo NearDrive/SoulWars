@@ -10,6 +10,7 @@ namespace Game.Server.Tests;
 public sealed class VisibilityNoLeakInvariantTests
 {
     [Fact]
+    [Trait("Category", "PR86")]
     public void NoLeakInvariant_PassesOnScenario_AndFailsOnInjectedInvisibleId()
     {
         VisibilityScenarioRun run = VisibilityInvariantPr86Harness.RunVisibilityScenario();
@@ -46,6 +47,7 @@ public sealed class VisibilityNoLeakInvariantTests
 public sealed class SpawnDespawnSequenceInvariantTests
 {
     [Fact]
+    [Trait("Category", "PR86")]
     public void SpawnBeforeState_DespawnRemovesAll_RespawnRequired_AreEnforced()
     {
         VisibilityScenarioRun run = VisibilityInvariantPr86Harness.RunVisibilityScenario();
@@ -109,6 +111,7 @@ public sealed class SpawnDespawnSequenceInvariantTests
 public sealed class CanonicalOrderingInvariantTests
 {
     [Fact]
+    [Trait("Category", "PR86")]
     public void CanonicalOrdering_IsEnforced()
     {
         VisibilityScenarioRun run = VisibilityInvariantPr86Harness.RunVisibilityScenario();
