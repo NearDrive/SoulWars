@@ -79,11 +79,12 @@ public sealed class InputValidation_CastPointBoundsAndCooldownTests
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, "cast-bounds")));
         endpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequest(1)));
         host.StepOnce();
-        DrainAll(endpoint);
+        Snapshot snapshot = DrainLatestSnapshot(endpoint);
+        SnapshotEntity self = snapshot.Entities.Single();
 
         ProtocolCastSkillCommand cast = new(
             Tick: host.CurrentWorld.Tick + 1,
-            CasterId: 0,
+            CasterId: self.EntityId,
             SkillId: 101,
             ZoneId: 1,
             TargetKind: (byte)CastTargetKind.Point,
@@ -115,7 +116,7 @@ public sealed class InputValidation_CastPointBoundsAndCooldownTests
 
         ProtocolCastSkillCommand first = new(
             Tick: snapshot.Tick + 1,
-            CasterId: 0,
+            CasterId: self.EntityId,
             SkillId: 202,
             ZoneId: 1,
             TargetKind: (byte)CastTargetKind.Point,
@@ -154,12 +155,6 @@ public sealed class InputValidation_CastPointBoundsAndCooldownTests
         return latest ?? throw new Xunit.Sdk.XunitException("Expected at least one snapshot.");
     }
 
-    private static void DrainAll(InMemoryEndpoint endpoint)
-    {
-        while (endpoint.TryDequeueFromServer(out _))
-        {
-        }
-    }
 }
 
 [Trait("Category", "PR87")]
