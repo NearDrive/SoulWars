@@ -700,12 +700,18 @@ public static class ProtocolCodec
         int[] leaves = CanonicalizeEntityIds(snapshot.Leaves);
         SnapshotEntity[] enters = CanonicalizeEntities(snapshot.Enters);
         SnapshotEntity[] updates = CanonicalizeEntities(snapshot.Updates);
+        ProjectileSnapshotV1[] projectiles = CanonicalizeProjectiles(snapshot.Projectiles);
+        ProjectileEventV1[] projectileEvents = CanonicalizeProjectileEvents(snapshot.ProjectileEvents);
+        HitEventV1[] hitEvents = CanonicalizeHitEvents(snapshot.HitEvents);
 
         byte[] data = new byte[
             1 + 4 + 4 + 4 + 1 + 4 + (entities.Length * ((6 * 4) + 1)) +
             4 + (leaves.Length * 4) +
             4 + (enters.Length * ((6 * 4) + 1)) +
-            4 + (updates.Length * ((6 * 4) + 1))];
+            4 + (updates.Length * ((6 * 4) + 1)) +
+            4 + (projectiles.Length * (10 * 4)) +
+            4 + (projectileEvents.Length * ((8 * 4) + 1)) +
+            4 + (hitEvents.Length * (8 * 4))];
         data[0] = ServerSnapshotV2;
         WriteInt32(data, 1, snapshot.Tick);
         WriteInt32(data, 5, snapshot.ZoneId);
@@ -765,6 +771,57 @@ public static class ProtocolCodec
             offset += 25;
         }
 
+        WriteInt32(data, offset, projectiles.Length);
+        offset += 4;
+        for (int i = 0; i < projectiles.Length; i++)
+        {
+            ProjectileSnapshotV1 projectile = projectiles[i];
+            WriteInt32(data, offset, projectile.ProjectileId);
+            WriteInt32(data, offset + 4, projectile.SourceEntityId);
+            WriteInt32(data, offset + 8, projectile.AbilityId);
+            WriteInt32(data, offset + 12, projectile.PosXRaw);
+            WriteInt32(data, offset + 16, projectile.PosYRaw);
+            WriteInt32(data, offset + 20, projectile.VelXRaw);
+            WriteInt32(data, offset + 24, projectile.VelYRaw);
+            WriteInt32(data, offset + 28, projectile.RadiusRaw);
+            WriteInt32(data, offset + 32, projectile.SpawnTick);
+            WriteInt32(data, offset + 36, projectile.ExpireTick);
+            offset += 40;
+        }
+
+        WriteInt32(data, offset, projectileEvents.Length);
+        offset += 4;
+        for (int i = 0; i < projectileEvents.Length; i++)
+        {
+            ProjectileEventV1 projectileEvent = projectileEvents[i];
+            WriteInt32(data, offset, projectileEvent.TickId);
+            WriteInt32(data, offset + 4, projectileEvent.ZoneId);
+            WriteInt32(data, offset + 8, projectileEvent.ProjectileId);
+            data[offset + 12] = projectileEvent.Kind;
+            WriteInt32(data, offset + 13, projectileEvent.SourceEntityId);
+            WriteInt32(data, offset + 17, projectileEvent.TargetEntityId);
+            WriteInt32(data, offset + 21, projectileEvent.AbilityId);
+            WriteInt32(data, offset + 25, projectileEvent.PosXRaw);
+            WriteInt32(data, offset + 29, projectileEvent.PosYRaw);
+            offset += 33;
+        }
+
+        WriteInt32(data, offset, hitEvents.Length);
+        offset += 4;
+        for (int i = 0; i < hitEvents.Length; i++)
+        {
+            HitEventV1 hitEvent = hitEvents[i];
+            WriteInt32(data, offset, hitEvent.TickId);
+            WriteInt32(data, offset + 4, hitEvent.ZoneId);
+            WriteInt32(data, offset + 8, hitEvent.SourceEntityId);
+            WriteInt32(data, offset + 12, hitEvent.TargetEntityId);
+            WriteInt32(data, offset + 16, hitEvent.AbilityId);
+            WriteInt32(data, offset + 20, hitEvent.HitPosXRaw);
+            WriteInt32(data, offset + 24, hitEvent.HitPosYRaw);
+            WriteInt32(data, offset + 28, hitEvent.EventSeq);
+            offset += 32;
+        }
+
         return data;
     }
 
@@ -783,6 +840,52 @@ public static class ProtocolCodec
             .ThenBy(entity => entity.VelXRaw)
             .ThenBy(entity => entity.VelYRaw)
             .ThenBy(entity => entity.Hp)
+            .ToArray();
+    }
+
+    private static ProjectileSnapshotV1[] CanonicalizeProjectiles(ProjectileSnapshotV1[]? projectiles)
+    {
+        if (projectiles is null || projectiles.Length == 0)
+        {
+            return Array.Empty<ProjectileSnapshotV1>();
+        }
+
+        return projectiles
+            .OrderBy(projectile => projectile.ProjectileId)
+            .ToArray();
+    }
+
+    private static ProjectileEventV1[] CanonicalizeProjectileEvents(ProjectileEventV1[]? events)
+    {
+        if (events is null || events.Length == 0)
+        {
+            return Array.Empty<ProjectileEventV1>();
+        }
+
+        return events
+            .OrderBy(evt => evt.TickId)
+            .ThenBy(evt => evt.ZoneId)
+            .ThenBy(evt => evt.ProjectileId)
+            .ThenBy(evt => evt.Kind)
+            .ThenBy(evt => evt.SourceEntityId)
+            .ThenBy(evt => evt.TargetEntityId)
+            .ThenBy(evt => evt.AbilityId)
+            .ToArray();
+    }
+
+    private static HitEventV1[] CanonicalizeHitEvents(HitEventV1[]? events)
+    {
+        if (events is null || events.Length == 0)
+        {
+            return Array.Empty<HitEventV1>();
+        }
+
+        return events
+            .OrderBy(evt => evt.TickId)
+            .ThenBy(evt => evt.SourceEntityId)
+            .ThenBy(evt => evt.TargetEntityId)
+            .ThenBy(evt => evt.AbilityId)
+            .ThenBy(evt => evt.EventSeq)
             .ToArray();
     }
 
@@ -1005,7 +1108,110 @@ public static class ProtocolCodec
             }
         }
 
-        msg = new SnapshotV2(tick, zoneId, snapshotSeq, isFull, entities, leaves, enters, updates);
+        ProjectileSnapshotV1[] projectiles = Array.Empty<ProjectileSnapshotV1>();
+        ProjectileEventV1[] projectileEvents = Array.Empty<ProjectileEventV1>();
+        HitEventV1[] hitEvents = Array.Empty<HitEventV1>();
+
+        if (offset < data.Length)
+        {
+            if (!TryReadInt32(data, offset, out int projectileCount, out error) || projectileCount < 0)
+            {
+                error = projectileCount < 0 ? ProtocolErrorCode.ValueOutOfRange : error;
+                return false;
+            }
+
+            offset += 4;
+            int projectileBytes = projectileCount * 40;
+            if (offset + projectileBytes > data.Length)
+            {
+                error = ProtocolErrorCode.Truncated;
+                return false;
+            }
+
+            projectiles = new ProjectileSnapshotV1[projectileCount];
+            for (int i = 0; i < projectileCount; i++)
+            {
+                projectiles[i] = new ProjectileSnapshotV1(
+                    ProjectileId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset, 4)),
+                    SourceEntityId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 4, 4)),
+                    AbilityId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 8, 4)),
+                    PosXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 12, 4)),
+                    PosYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 16, 4)),
+                    VelXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 20, 4)),
+                    VelYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 24, 4)),
+                    RadiusRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 28, 4)),
+                    SpawnTick: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 32, 4)),
+                    ExpireTick: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 36, 4)));
+                offset += 40;
+            }
+        }
+
+        if (offset < data.Length)
+        {
+            if (!TryReadInt32(data, offset, out int projectileEventCount, out error) || projectileEventCount < 0)
+            {
+                error = projectileEventCount < 0 ? ProtocolErrorCode.ValueOutOfRange : error;
+                return false;
+            }
+
+            offset += 4;
+            int projectileEventBytes = projectileEventCount * 33;
+            if (offset + projectileEventBytes > data.Length)
+            {
+                error = ProtocolErrorCode.Truncated;
+                return false;
+            }
+
+            projectileEvents = new ProjectileEventV1[projectileEventCount];
+            for (int i = 0; i < projectileEventCount; i++)
+            {
+                projectileEvents[i] = new ProjectileEventV1(
+                    TickId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset, 4)),
+                    ZoneId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 4, 4)),
+                    ProjectileId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 8, 4)),
+                    Kind: data[offset + 12],
+                    SourceEntityId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 13, 4)),
+                    TargetEntityId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 17, 4)),
+                    AbilityId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 21, 4)),
+                    PosXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 25, 4)),
+                    PosYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 29, 4)));
+                offset += 33;
+            }
+        }
+
+        if (offset < data.Length)
+        {
+            if (!TryReadInt32(data, offset, out int hitEventCount, out error) || hitEventCount < 0)
+            {
+                error = hitEventCount < 0 ? ProtocolErrorCode.ValueOutOfRange : error;
+                return false;
+            }
+
+            offset += 4;
+            int hitBytes = hitEventCount * 32;
+            if (offset + hitBytes > data.Length)
+            {
+                error = ProtocolErrorCode.Truncated;
+                return false;
+            }
+
+            hitEvents = new HitEventV1[hitEventCount];
+            for (int i = 0; i < hitEventCount; i++)
+            {
+                hitEvents[i] = new HitEventV1(
+                    TickId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset, 4)),
+                    ZoneId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 4, 4)),
+                    SourceEntityId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 8, 4)),
+                    TargetEntityId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 12, 4)),
+                    AbilityId: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 16, 4)),
+                    HitPosXRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 20, 4)),
+                    HitPosYRaw: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 24, 4)),
+                    EventSeq: BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset + 28, 4)));
+                offset += 32;
+            }
+        }
+
+        msg = new SnapshotV2(tick, zoneId, snapshotSeq, isFull, entities, leaves, enters, updates, projectiles, projectileEvents, hitEvents);
         error = ProtocolErrorCode.None;
         return true;
     }

@@ -45,10 +45,21 @@ public static class ProjectileSystem
 
             EntityState owner = zone.Entities[ownerIndex];
             Vec2Fix targetPos = ResolveTargetPosition(zone, intent);
+            Fix32 speed = new Fix32(skill.Value.ProjectileSpeedRaw);
+            Fix32 velX = Fix32.Clamp(targetPos.X - owner.Pos.X, -speed, speed);
+            Fix32 velY = Fix32.Clamp(targetPos.Y - owner.Pos.Y, -speed, speed);
+            if (velX.Raw == 0 && velY.Raw == 0)
+            {
+                velX = speed;
+            }
+
             ProjectileComponent projectile = new(
                 ProjectileId: nextProjectileId++,
                 OwnerId: intent.CasterId,
                 TargetId: intent.TargetEntityId,
+                VelX: velX,
+                VelY: velY,
+                Radius: new Fix32(skill.Value.HitRadiusRaw),
                 TargetX: targetPos.X,
                 TargetY: targetPos.Y,
                 PosX: owner.Pos.X,
@@ -60,7 +71,7 @@ public static class ProjectileSystem
                 RequiresLoSOnSpawn: (skill.Value.Flags & SkillFlags.RequiresLineOfSight) != 0);
 
             mutable.Add(projectile);
-            events.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Spawn, projectile.OwnerId, projectile.TargetId, projectile.PosX, projectile.PosY));
+            events.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Spawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, projectile.PosX, projectile.PosY));
         }
 
         ImmutableArray<ProjectileComponent> orderedProjectiles = mutable.OrderBy(p => p.ProjectileId).ToImmutableArray();
@@ -77,35 +88,19 @@ public static class ProjectileSystem
             return (zone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<CombatLogEvent>.Empty, ImmutableArray<ProjectileEvent>.Empty);
         }
 
-        ImmutableArray<EntityState> entities = zone.Entities;
-        Dictionary<int, EntityState> updates = new();
         ImmutableArray<ProjectileComponent>.Builder kept = ImmutableArray.CreateBuilder<ProjectileComponent>();
-        ImmutableArray<CombatEvent>.Builder combatEvents = ImmutableArray.CreateBuilder<CombatEvent>();
-        ImmutableArray<CombatLogEvent>.Builder combatLogEvents = ImmutableArray.CreateBuilder<CombatLogEvent>();
         ImmutableArray<ProjectileEvent>.Builder projectileEvents = ImmutableArray.CreateBuilder<ProjectileEvent>();
 
         foreach (ProjectileComponent projectile in zone.Projectiles.OrderBy(p => p.ProjectileId))
         {
-            SkillDefinition? skill = FindSkill(config, projectile.SkillId);
-            if (skill is null)
-            {
-                projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, projectile.PosX, projectile.PosY));
-                continue;
-            }
-
             if (tick - projectile.SpawnTick >= projectile.MaxLifetimeTicks)
             {
-                projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, projectile.PosX, projectile.PosY));
+                projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, projectile.PosX, projectile.PosY));
                 continue;
             }
 
-            Fix32 step = new Fix32(skill.Value.ProjectileSpeedRaw);
-            Fix32 dx = projectile.TargetX - projectile.PosX;
-            Fix32 dy = projectile.TargetY - projectile.PosY;
-            bool reaches = Fix32.Abs(dx) <= step && Fix32.Abs(dy) <= step;
-
-            Fix32 nextX = reaches ? projectile.TargetX : projectile.PosX + Fix32.Clamp(dx, -step, step);
-            Fix32 nextY = reaches ? projectile.TargetY : projectile.PosY + Fix32.Clamp(dy, -step, step);
+            Fix32 nextX = projectile.PosX + projectile.VelX;
+            Fix32 nextY = projectile.PosY + projectile.VelY;
 
             if (projectile.CollidesWithWorld)
             {
@@ -113,67 +108,54 @@ public static class ProjectileSystem
                 int tileY = Fix32.FloorToInt(nextY);
                 if (zone.Map.Get(tileX, tileY) == TileKind.Solid)
                 {
-                    projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, nextX, nextY));
+                    projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, nextX, nextY));
                     continue;
                 }
             }
 
-            if (!reaches)
+            EntityId? firstHit = ResolveFirstHitTarget(zone, projectile, nextX, nextY);
+            if (firstHit is EntityId targetId)
             {
-                kept.Add(projectile with { PosX = nextX, PosY = nextY });
+                projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Hit, projectile.OwnerId, targetId, projectile.SkillId, nextX, nextY));
                 continue;
             }
 
-            if (projectile.TargetId.Value != 0)
-            {
-                int targetIndex = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, projectile.TargetId);
-                if (targetIndex >= 0)
-                {
-                    EntityState target = (updates.TryGetValue(targetIndex, out EntityState? updated) && updated is not null)
-                        ? updated
-                        : entities[targetIndex];
-                    if (target.IsAlive)
-                    {
-                        int rawAmount = Math.Max(0, skill.Value.BaseDamage);
-                        int defense = skill.Value.DamageType == DamageType.Magical
-                            ? Math.Max(0, target.DefenseStats.MagicResist)
-                            : Math.Max(0, target.DefenseStats.Armor);
-                        int finalAmount = Math.Max(0, rawAmount - defense);
-                        int nextHp = Math.Max(0, target.Hp - finalAmount);
-                        int appliedDamage = target.Hp - nextHp;
-                        EntityState updatedTarget = target with { Hp = nextHp, IsAlive = nextHp > 0 };
-                        updates[targetIndex] = updatedTarget;
-
-                        combatEvents.Add(new CombatEvent(tick, projectile.OwnerId, projectile.TargetId, projectile.SkillId, CombatEventType.Damage, appliedDamage));
-                        combatLogEvents.Add(new CombatLogEvent(tick, projectile.OwnerId, projectile.TargetId, projectile.SkillId, rawAmount, appliedDamage, CombatLogKind.Damage));
-                        if (nextHp == 0)
-                        {
-                            combatLogEvents.Add(new CombatLogEvent(tick, projectile.OwnerId, projectile.TargetId, projectile.SkillId, rawAmount, appliedDamage, CombatLogKind.Kill));
-                        }
-                        projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Hit, projectile.OwnerId, projectile.TargetId, nextX, nextY));
-                        continue;
-                    }
-                }
-            }
-
-            projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, nextX, nextY));
+            kept.Add(projectile with { PosX = nextX, PosY = nextY });
         }
 
-        ImmutableArray<EntityState>.Builder rebuiltEntities = ImmutableArray.CreateBuilder<EntityState>(entities.Length);
-        for (int i = 0; i < entities.Length; i++)
+        ZoneState updatedZone = zone.WithProjectiles(kept.ToImmutable().OrderBy(p => p.ProjectileId).ToImmutableArray());
+        return (updatedZone, ImmutableArray<CombatEvent>.Empty, ImmutableArray<CombatLogEvent>.Empty, projectileEvents.ToImmutable());
+    }
+
+    private static EntityId? ResolveFirstHitTarget(ZoneState zone, ProjectileComponent projectile, Fix32 nextX, Fix32 nextY)
+    {
+        Fix32 radiusSq = projectile.Radius * projectile.Radius;
+        if (radiusSq.Raw <= 0)
         {
-            EntityState candidate = (updates.TryGetValue(i, out EntityState? next) && next is not null) ? next : entities[i];
-            if (candidate.IsAlive)
-            {
-                rebuiltEntities.Add(candidate);
-            }
+            return null;
         }
 
-        ZoneState updatedZone = zone
-            .WithEntities(rebuiltEntities.ToImmutable().OrderBy(e => e.Id.Value).ToImmutableArray())
-            .WithProjectiles(kept.ToImmutable().OrderBy(p => p.ProjectileId).ToImmutableArray());
+        EntityId? best = null;
+        foreach (EntityState entity in zone.Entities.OrderBy(e => e.Id.Value))
+        {
+            if (!entity.IsAlive || entity.Id.Value == projectile.OwnerId.Value)
+            {
+                continue;
+            }
 
-        return (updatedZone, combatEvents.ToImmutable(), combatLogEvents.ToImmutable(), projectileEvents.ToImmutable());
+            Fix32 dx = entity.Pos.X - nextX;
+            Fix32 dy = entity.Pos.Y - nextY;
+            Fix32 distSq = (dx * dx) + (dy * dy);
+            if (distSq > radiusSq)
+            {
+                continue;
+            }
+
+            best = entity.Id;
+            break;
+        }
+
+        return best;
     }
 
     private static Vec2Fix ResolveTargetPosition(ZoneState zone, SkillCastIntent intent)

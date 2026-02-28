@@ -2677,15 +2677,6 @@ public static class Simulation
             return true;
         }
 
-        if (command.TargetKind == CastTargetKind.Point)
-        {
-            ImmutableArray<int> pointTargetIndices = ResolveCastTargetIndices(zone, casterIndex, command, skill);
-            if (pointTargetIndices.IsDefaultOrEmpty)
-            {
-                return true;
-            }
-        }
-
         return false;
     }
 
@@ -2938,15 +2929,6 @@ public static class Simulation
         {
             LineOfSight.TileMapCollision collision = new(zone.Map);
             if (!LineOfSight.HasLineOfSight(collision, caster.Pos.X, caster.Pos.Y, targetPos.X, targetPos.Y))
-            {
-                return CastResult.Rejected_InvalidTarget;
-            }
-        }
-
-        if (command.TargetKind == CastTargetKind.Point)
-        {
-            ImmutableArray<int> pointTargetIndices = ResolveCastTargetIndices(zone, casterIndex, command, skill.Value);
-            if (pointTargetIndices.IsDefaultOrEmpty)
             {
                 return CastResult.Rejected_InvalidTarget;
             }

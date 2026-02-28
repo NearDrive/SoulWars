@@ -987,6 +987,9 @@ public sealed record WorldState(
                 .OrderBy(e => e.Tick)
                 .ThenBy(e => e.ProjectileId)
                 .ThenBy(e => (int)e.Kind)
+                .ThenBy(e => e.OwnerId.Value)
+                .ThenBy(e => e.TargetId.Value)
+                .ThenBy(e => e.AbilityId.Value)
                 .ToImmutableArray()
         };
     }

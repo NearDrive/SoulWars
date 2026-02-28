@@ -233,6 +233,9 @@ public static class StateChecksum
             .OrderBy(e => e.Tick)
             .ThenBy(e => e.ProjectileId)
             .ThenBy(e => (int)e.Kind)
+            .ThenBy(e => e.OwnerId.Value)
+            .ThenBy(e => e.TargetId.Value)
+            .ThenBy(e => e.AbilityId.Value)
             .ToImmutableArray();
         bool hasProjectileMetadata = !orderedProjectileEvents.IsDefaultOrEmpty
             || state.ProjectileSpawnsDropped_Total > 0
@@ -249,6 +252,7 @@ public static class StateChecksum
                 writer.Write((byte)evt.Kind);
                 writer.Write(evt.OwnerId.Value);
                 writer.Write(evt.TargetId.Value);
+                writer.Write(evt.AbilityId.Value);
                 writer.Write(evt.PosX.Raw);
                 writer.Write(evt.PosY.Raw);
             }
