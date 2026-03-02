@@ -67,11 +67,14 @@ public sealed class ArenaBootstrapPr90Tests
         SnapshotV2 snapshot = ReadLastSnapshot(endpoint);
 
         ZoneState zone = host.CurrentWorld.Zones.Single(z => z.Id.Value == ArenaZoneFactory.ArenaZoneId);
-        EntityState self = zone.Entities.Single(e => e.Id.Value == ack.EntityId);
         VisibilityAoiProvider aoi = new(config.AoiRadiusSq);
 
-        HashSet<int> expectedVisibleIds = aoi.ComputeVisible(zone, self)
-            .Select(entity => entity.Id.Value)
+        HashSet<int> expectedVisibleIds = aoi.ComputeVisible(
+                host.CurrentWorld,
+                new ZoneId(ArenaZoneFactory.ArenaZoneId),
+                new EntityId(ack.EntityId))
+            .EntityIds
+            .Select(entityId => entityId.Value)
             .ToHashSet();
         HashSet<int> actualSnapshotIds = snapshot.Entities
             .Select(entity => entity.EntityId)
