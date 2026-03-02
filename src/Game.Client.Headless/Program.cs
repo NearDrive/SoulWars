@@ -1,11 +1,12 @@
 using Game.Client.Headless;
+using Game.Client.Headless.Runtime;
 
 ClientOptions options = ClientOptions.Parse(args);
 await using TcpClientTransport transport = new();
 HeadlessClientRunner runner = new(transport, options);
 
 using CancellationTokenSource cts = new(TimeSpan.FromSeconds(10));
-HeadlessRunResult result = await runner.RunAsync(maxTicks: 200, cts.Token);
+ClientRunResult result = await runner.RunAsync(maxTicks: 200, cts.Token);
 
 foreach (string line in result.Logs)
 {

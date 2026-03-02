@@ -1,3 +1,4 @@
+using Game.Client.Headless.Runtime;
 using System.Globalization;
 using System.Linq;
 using Game.Client.Headless;
@@ -145,7 +146,7 @@ public sealed class ClientMvpC1Tests
         HeadlessClientRunner runner = new(transport, options);
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
-        Task<HeadlessRunResult> runTask = runner.RunAsync(maxTicks: 120, cts.Token);
+        Task<ClientRunResult> runTask = runner.RunAsync(maxTicks: 120, cts.Token);
 
         while (!runTask.IsCompleted && !cts.IsCancellationRequested)
         {
@@ -153,7 +154,7 @@ public sealed class ClientMvpC1Tests
             await Task.Delay(1, cts.Token);
         }
 
-        HeadlessRunResult result = await runTask;
+        ClientRunResult result = await runTask;
         Assert.True(result.HandshakeAccepted);
         Assert.NotEmpty(result.SentInputs);
         Assert.True(result.SentInputs.Select(input => input.Tick).SequenceEqual(result.SentInputs.Select(input => input.Tick).OrderBy(tick => tick)));
