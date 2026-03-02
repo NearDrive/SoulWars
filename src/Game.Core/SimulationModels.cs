@@ -985,6 +985,7 @@ public sealed record WorldState(
         {
             ProjectileEvents = (projectileEvents.IsDefault ? ImmutableArray<ProjectileEvent>.Empty : projectileEvents)
                 .OrderBy(e => e.Tick)
+                .ThenBy(e => e.ZoneId.Value)
                 .ThenBy(e => e.ProjectileId)
                 .ThenBy(e => (int)e.Kind)
                 .ThenBy(e => e.OwnerId.Value)

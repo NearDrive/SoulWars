@@ -9,6 +9,7 @@ public enum ProjectileEventKind : byte
 
 public readonly record struct ProjectileEvent(
     int Tick,
+    ZoneId ZoneId,
     int ProjectileId,
     ProjectileEventKind Kind,
     EntityId OwnerId,

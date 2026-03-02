@@ -248,6 +248,7 @@ public static class StateChecksum
             foreach (ProjectileEvent evt in orderedProjectileEvents)
             {
                 writer.Write(evt.Tick);
+                writer.Write(evt.ZoneId.Value);
                 writer.Write(evt.ProjectileId);
                 writer.Write((byte)evt.Kind);
                 writer.Write(evt.OwnerId.Value);

@@ -46,12 +46,7 @@ public static class ProjectileSystem
             EntityState owner = zone.Entities[ownerIndex];
             Vec2Fix targetPos = ResolveTargetPosition(zone, intent);
             Fix32 speed = new Fix32(skill.Value.ProjectileSpeedRaw);
-            Fix32 velX = Fix32.Clamp(targetPos.X - owner.Pos.X, -speed, speed);
-            Fix32 velY = Fix32.Clamp(targetPos.Y - owner.Pos.Y, -speed, speed);
-            if (velX.Raw == 0 && velY.Raw == 0)
-            {
-                velX = speed;
-            }
+            (Fix32 velX, Fix32 velY) = ComputeProjectileVelocity(owner.Pos, targetPos, speed);
 
             ProjectileComponent projectile = new(
                 ProjectileId: nextProjectileId++,
@@ -71,7 +66,7 @@ public static class ProjectileSystem
                 RequiresLoSOnSpawn: (skill.Value.Flags & SkillFlags.RequiresLineOfSight) != 0);
 
             mutable.Add(projectile);
-            events.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Spawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, projectile.PosX, projectile.PosY));
+            events.Add(new ProjectileEvent(tick, zone.Id, projectile.ProjectileId, ProjectileEventKind.Spawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, projectile.PosX, projectile.PosY));
         }
 
         ImmutableArray<ProjectileComponent> orderedProjectiles = mutable.OrderBy(p => p.ProjectileId).ToImmutableArray();
@@ -95,7 +90,7 @@ public static class ProjectileSystem
         {
             if (tick - projectile.SpawnTick >= projectile.MaxLifetimeTicks)
             {
-                projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, projectile.PosX, projectile.PosY));
+                projectileEvents.Add(new ProjectileEvent(tick, zone.Id, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, projectile.PosX, projectile.PosY));
                 continue;
             }
 
@@ -108,7 +103,7 @@ public static class ProjectileSystem
                 int tileY = Fix32.FloorToInt(nextY);
                 if (zone.Map.Get(tileX, tileY) == TileKind.Solid)
                 {
-                    projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, nextX, nextY));
+                    projectileEvents.Add(new ProjectileEvent(tick, zone.Id, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, nextX, nextY));
                     continue;
                 }
             }
@@ -116,7 +111,7 @@ public static class ProjectileSystem
             EntityId? firstHit = ResolveFirstHitTarget(zone, projectile, nextX, nextY);
             if (firstHit is EntityId targetId)
             {
-                projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Hit, projectile.OwnerId, targetId, projectile.SkillId, nextX, nextY));
+                projectileEvents.Add(new ProjectileEvent(tick, zone.Id, projectile.ProjectileId, ProjectileEventKind.Hit, projectile.OwnerId, targetId, projectile.SkillId, nextX, nextY));
                 continue;
             }
 
@@ -146,7 +141,7 @@ public static class ProjectileSystem
             Fix32 dx = entity.Pos.X - nextX;
             Fix32 dy = entity.Pos.Y - nextY;
             Fix32 distSq = (dx * dx) + (dy * dy);
-            if (distSq > radiusSq)
+            if (distSq >= radiusSq)
             {
                 continue;
             }
@@ -172,6 +167,23 @@ public static class ProjectileSystem
         }
 
         return zone.Entities[index].Pos;
+    }
+
+    private static (Fix32 VelX, Fix32 VelY) ComputeProjectileVelocity(Vec2Fix origin, Vec2Fix target, Fix32 speed)
+    {
+        Fix32 dx = target.X - origin.X;
+        Fix32 dy = target.Y - origin.Y;
+        Fix32 absDx = Fix32.Abs(dx);
+        Fix32 absDy = Fix32.Abs(dy);
+        Fix32 maxAbs = absDx >= absDy ? absDx : absDy;
+
+        if (maxAbs.Raw == 0)
+        {
+            return (speed, Fix32.Zero);
+        }
+
+        Fix32 scale = speed / maxAbs;
+        return (dx * scale, dy * scale);
     }
 
     private static SkillDefinition? FindSkill(SimulationConfig config, SkillId skillId)

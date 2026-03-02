@@ -405,18 +405,21 @@ public static class CoreInvariants
         }
 
         int lastProjectileEventTick = int.MinValue;
+        int lastProjectileEventZoneId = int.MinValue;
         int lastProjectileEventId = int.MinValue;
         int lastProjectileEventKind = int.MinValue;
         foreach (ProjectileEvent projectileEvent in (world.ProjectileEvents.IsDefault ? ImmutableArray<ProjectileEvent>.Empty : world.ProjectileEvents))
         {
             if (projectileEvent.Tick < lastProjectileEventTick
-                || (projectileEvent.Tick == lastProjectileEventTick && projectileEvent.ProjectileId < lastProjectileEventId)
-                || (projectileEvent.Tick == lastProjectileEventTick && projectileEvent.ProjectileId == lastProjectileEventId && (int)projectileEvent.Kind < lastProjectileEventKind))
+                || (projectileEvent.Tick == lastProjectileEventTick && projectileEvent.ZoneId.Value < lastProjectileEventZoneId)
+                || (projectileEvent.Tick == lastProjectileEventTick && projectileEvent.ZoneId.Value == lastProjectileEventZoneId && projectileEvent.ProjectileId < lastProjectileEventId)
+                || (projectileEvent.Tick == lastProjectileEventTick && projectileEvent.ZoneId.Value == lastProjectileEventZoneId && projectileEvent.ProjectileId == lastProjectileEventId && (int)projectileEvent.Kind < lastProjectileEventKind))
             {
-                throw new InvariantViolationException($"invariant=ProjectileEventsOrdered tick={tick} eventTick={projectileEvent.Tick} projectileId={projectileEvent.ProjectileId} kind={projectileEvent.Kind}");
+                throw new InvariantViolationException($"invariant=ProjectileEventsOrdered tick={tick} eventTick={projectileEvent.Tick} zoneId={projectileEvent.ZoneId.Value} projectileId={projectileEvent.ProjectileId} kind={projectileEvent.Kind}");
             }
 
             lastProjectileEventTick = projectileEvent.Tick;
+            lastProjectileEventZoneId = projectileEvent.ZoneId.Value;
             lastProjectileEventId = projectileEvent.ProjectileId;
             lastProjectileEventKind = (int)projectileEvent.Kind;
         }

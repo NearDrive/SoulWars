@@ -1216,6 +1216,7 @@ public sealed class ServerHost
                 if (session.SupportsSnapshotAckV2)
                 {
                     ProjectileSnapshotV1[] projectiles = zone.Projectiles
+                        .Where(projectile => IsProjectileVisibleToSession(snapshotContext, zone, projectile))
                         .OrderBy(projectile => projectile.ProjectileId)
                         .Select(projectile => new ProjectileSnapshotV1(
                             ProjectileId: projectile.ProjectileId,
@@ -1231,12 +1232,14 @@ public sealed class ServerHost
                         .ToArray();
 
                     ProjectileEventV1[] projectileEvents = (_world.ProjectileEvents.IsDefault ? System.Collections.Immutable.ImmutableArray<ProjectileEvent>.Empty : _world.ProjectileEvents)
+                        .Where(evt => evt.ZoneId.Value == zone.Id.Value)
+                        .Where(evt => IsProjectileEventVisibleToSession(snapshotContext, zone, evt))
                         .OrderBy(evt => evt.Tick)
                         .ThenBy(evt => evt.ProjectileId)
                         .ThenBy(evt => (int)evt.Kind)
                         .Select(evt => new ProjectileEventV1(
                             TickId: evt.Tick,
-                            ZoneId: zone.Id.Value,
+                            ZoneId: evt.ZoneId.Value,
                             ProjectileId: evt.ProjectileId,
                             Kind: (byte)evt.Kind,
                             SourceEntityId: evt.OwnerId.Value,
@@ -1409,6 +1412,60 @@ public sealed class ServerHost
             reason,
             session.MsgsThisTick,
             session.BytesThisTick);
+    }
+
+    private static bool IsProjectileEventVisibleToSession(SessionSnapshotContext session, ZoneState zone, ProjectileEvent projectileEvent)
+        => IsProjectileVisibleToSession(session, zone, projectileEvent.OwnerId.Value, projectileEvent.TargetId.Value, projectileEvent.PosX, projectileEvent.PosY);
+
+    private static bool IsProjectileVisibleToSession(SessionSnapshotContext session, ZoneState zone, ProjectileComponent projectile)
+        => IsProjectileVisibleToSession(session, zone, projectile.OwnerId.Value, projectile.TargetId.Value, projectile.PosX, projectile.PosY);
+
+    private static bool IsProjectileVisibleToSession(SessionSnapshotContext session, ZoneState zone, int sourceEntityId, int targetEntityId, Fix32 projectilePosX, Fix32 projectilePosY)
+    {
+        if (session.FactionId == FactionId.None)
+        {
+            return true;
+        }
+
+        if (session.SelfEntityId is int selfEntityId && (sourceEntityId == selfEntityId || targetEntityId == selfEntityId))
+        {
+            return true;
+        }
+
+        if (IsAliveEntityVisibleToSession(session, zone, sourceEntityId)
+            || IsAliveEntityVisibleToSession(session, zone, targetEntityId))
+        {
+            return true;
+        }
+
+        int tileX = Fix32.FloorToInt(projectilePosX);
+        int tileY = Fix32.FloorToInt(projectilePosY);
+        return zone.Visibility.IsVisible(session.FactionId, tileX, tileY);
+    }
+
+    private static bool IsAliveEntityVisibleToSession(SessionSnapshotContext session, ZoneState zone, int entityId)
+    {
+        if (!TryGetAliveEntity(zone, entityId, out EntityState entity))
+        {
+            return false;
+        }
+
+        int tileX = Fix32.FloorToInt(entity.Pos.X);
+        int tileY = Fix32.FloorToInt(entity.Pos.Y);
+        return zone.Visibility.IsVisible(session.FactionId, tileX, tileY);
+    }
+
+    private static bool TryGetAliveEntity(ZoneState zone, int entityId, out EntityState entity)
+    {
+        int index = ZoneEntities.FindIndex(zone.EntitiesData.AliveIds, new EntityId(entityId));
+        if (index < 0)
+        {
+            entity = null!;
+            return false;
+        }
+
+        entity = zone.Entities[index];
+        return true;
     }
 
     private void DisconnectSession(SessionState session, string reason)
