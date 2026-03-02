@@ -3,6 +3,7 @@ using Game.Core;
 using Game.Protocol;
 using Game.Server;
 using Xunit;
+using ProtocolCastSkillCommand = Game.Protocol.CastSkillCommand;
 
 namespace Game.Server.Tests;
 
@@ -44,6 +45,48 @@ public sealed class SnapshotRedactionTests
         Assert.DoesNotContain(snapshotA.Enters, entity => entity.EntityId is 21 or 22);
         Assert.DoesNotContain(snapshotA.Updates, entity => entity.EntityId is 21 or 22);
         Assert.DoesNotContain(snapshotA.Leaves, entityId => entityId is 21 or 22);
+    }
+
+    [Fact]
+    [Trait("Category", "Canary")]
+    public void SnapshotV2_RedactsInvisibleProjectiles()
+    {
+        ProjectileComponent hiddenProjectile = new(
+            ProjectileId: 1,
+            OwnerId: new EntityId(21),
+            TargetId: new EntityId(22),
+            VelX: Fix32.Zero,
+            VelY: Fix32.Zero,
+            Radius: Fix32.One,
+            TargetX: Fix32.FromInt(9),
+            TargetY: Fix32.FromInt(9),
+            PosX: Fix32.FromInt(9),
+            PosY: Fix32.FromInt(9),
+            SkillId: new SkillId(1),
+            SpawnTick: 0,
+            MaxLifetimeTicks: 100,
+            CollidesWithWorld: false,
+            RequiresLoSOnSpawn: false);
+
+        ServerHost host = SnapshotRedactionTestHelpers.CreateHostForTwoFactionWorld(projectiles: ImmutableArray.Create(hiddenProjectile));
+        InMemoryEndpoint endpointA = new();
+        InMemoryEndpoint endpointB = new();
+
+        host.Connect(endpointA);
+        host.Connect(endpointB);
+        SnapshotRedactionTestHelpers.HandshakeAndEnter(endpointA, "acc-a");
+        SnapshotRedactionTestHelpers.HandshakeAndEnter(endpointB, "acc-b");
+
+        host.AdvanceTicks(2);
+        _ = SnapshotRedactionTestHelpers.DrainMessages(endpointA);
+        _ = SnapshotRedactionTestHelpers.DrainMessages(endpointB);
+
+        endpointA.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
+        endpointB.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
+        host.StepOnce();
+
+        SnapshotV2 snapshotA = SnapshotRedactionTestHelpers.DrainMessages(endpointA).OfType<SnapshotV2>().Last();
+        Assert.DoesNotContain(snapshotA.Projectiles, projectile => projectile.ProjectileId == 1);
     }
 }
 
@@ -133,9 +176,58 @@ public sealed class EntityPayloadIsolationTests
     }
 }
 
+[Trait("Category", "PR82")]
+public sealed class ProjectileSnapshotIsolationTests
+{
+    [Fact]
+    [Trait("Category", "Canary")]
+    public void SnapshotV2_ProjectileEvents_AreScopedToSessionZone()
+    {
+        ServerHost host = new(ServerConfig.Default(seed: 8201) with { SnapshotEveryTicks = 1, ZoneCount = 2, NpcCountPerZone = 0 });
+        InMemoryEndpoint endpointZone1 = new();
+        InMemoryEndpoint endpointZone2 = new();
+
+        host.Connect(endpointZone1);
+        host.Connect(endpointZone2);
+
+        endpointZone1.EnqueueToServer(ProtocolCodec.Encode(new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, "z1")));
+        endpointZone1.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(1)));
+        endpointZone2.EnqueueToServer(ProtocolCodec.Encode(new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, "z2")));
+        endpointZone2.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(2)));
+
+        host.StepOnce();
+
+        List<IServerMessage> initialZone2Messages = SnapshotRedactionTestHelpers.DrainMessages(endpointZone2);
+        EnterZoneAck zone2Ack = initialZone2Messages.OfType<EnterZoneAck>().Last();
+
+        _ = SnapshotRedactionTestHelpers.DrainMessages(endpointZone1);
+        endpointZone1.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
+        endpointZone2.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(2, 0)));
+        host.StepOnce();
+        _ = SnapshotRedactionTestHelpers.DrainMessages(endpointZone1);
+
+        ProtocolCastSkillCommand zone2Cast = new(
+            Tick: host.CurrentWorld.Tick + 1,
+            CasterId: zone2Ack.EntityId,
+            SkillId: 1,
+            ZoneId: 2,
+            TargetKind: (byte)CastTargetKind.Point,
+            TargetEntityId: 0,
+            TargetPosXRaw: Fix32.FromInt(4).Raw,
+            TargetPosYRaw: Fix32.FromInt(4).Raw);
+        endpointZone2.EnqueueToServer(ProtocolCodec.Encode(zone2Cast));
+
+        host.StepOnce();
+
+        SnapshotV2 zone1Snapshot = SnapshotRedactionTestHelpers.DrainMessages(endpointZone1).OfType<SnapshotV2>().Last();
+        Assert.Empty(zone1Snapshot.Projectiles);
+        Assert.Empty(zone1Snapshot.ProjectileEvents);
+    }
+}
+
 file static class SnapshotRedactionTestHelpers
 {
-    public static ServerHost CreateHostForTwoFactionWorld()
+    public static ServerHost CreateHostForTwoFactionWorld(ImmutableArray<ProjectileComponent> projectiles = default)
     {
         TileMap map = OpenMap(12, 12);
         ImmutableArray<EntityState> entities =
@@ -146,7 +238,7 @@ file static class SnapshotRedactionTestHelpers
             new EntityState(new EntityId(22), At(10, 9), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(2), VisionRadiusTiles: 1)
         ];
 
-        return CreateHost(map, entities);
+        return CreateHost(map, entities, projectiles);
     }
 
     public static ServerHost CreateHostForVisibilityTransitionWorld()
@@ -210,9 +302,10 @@ file static class SnapshotRedactionTestHelpers
         return decoded;
     }
 
-    private static ServerHost CreateHost(TileMap map, ImmutableArray<EntityState> entities)
+    private static ServerHost CreateHost(TileMap map, ImmutableArray<EntityState> entities, ImmutableArray<ProjectileComponent> projectiles = default)
     {
-        ZoneState zone = new(new ZoneId(1), map, entities);
+        ZoneState zone = new(new ZoneId(1), map, entities)
+            .WithProjectiles(projectiles.IsDefault ? ImmutableArray<ProjectileComponent>.Empty : projectiles);
         ImmutableArray<EntityLocation> locations = entities
             .OrderBy(entity => entity.Id.Value)
             .Select(entity => new EntityLocation(entity.Id, zone.Id))

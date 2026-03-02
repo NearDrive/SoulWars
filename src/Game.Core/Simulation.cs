@@ -2894,9 +2894,9 @@ public static class Simulation
             ? new Vec2Fix(new Fix32(command.TargetPosXRaw), new Fix32(command.TargetPosYRaw))
             : default;
 
+        ImmutableArray<int> resolvedIndices = ResolveCastTargetIndices(zone, casterIndex, command, skill.Value);
         if (command.TargetKind != CastTargetKind.Point)
         {
-            ImmutableArray<int> resolvedIndices = ResolveCastTargetIndices(zone, casterIndex, command, skill.Value);
             if (resolvedIndices.IsDefaultOrEmpty)
             {
                 return CastResult.Rejected_InvalidTarget;
@@ -2912,6 +2912,10 @@ public static class Simulation
             }
 
             targetPos = entities[resolvedIndices[0]].Pos;
+        }
+        else if (!ProjectileSystem.IsProjectileSkill(skill.Value) && resolvedIndices.IsDefaultOrEmpty)
+        {
+            return CastResult.Rejected_InvalidTarget;
         }
 
         Fix32 dx = caster.Pos.X - targetPos.X;

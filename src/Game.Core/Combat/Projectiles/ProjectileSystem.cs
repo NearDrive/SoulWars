@@ -46,12 +46,7 @@ public static class ProjectileSystem
             EntityState owner = zone.Entities[ownerIndex];
             Vec2Fix targetPos = ResolveTargetPosition(zone, intent);
             Fix32 speed = new Fix32(skill.Value.ProjectileSpeedRaw);
-            Fix32 velX = Fix32.Clamp(targetPos.X - owner.Pos.X, -speed, speed);
-            Fix32 velY = Fix32.Clamp(targetPos.Y - owner.Pos.Y, -speed, speed);
-            if (velX.Raw == 0 && velY.Raw == 0)
-            {
-                velX = speed;
-            }
+            (Fix32 velX, Fix32 velY) = ComputeProjectileVelocity(owner.Pos, targetPos, speed);
 
             ProjectileComponent projectile = new(
                 ProjectileId: nextProjectileId++,
@@ -172,6 +167,23 @@ public static class ProjectileSystem
         }
 
         return zone.Entities[index].Pos;
+    }
+
+    private static (Fix32 VelX, Fix32 VelY) ComputeProjectileVelocity(Vec2Fix origin, Vec2Fix target, Fix32 speed)
+    {
+        Fix32 dx = target.X - origin.X;
+        Fix32 dy = target.Y - origin.Y;
+        Fix32 absDx = Fix32.Abs(dx);
+        Fix32 absDy = Fix32.Abs(dy);
+        Fix32 maxAbs = absDx >= absDy ? absDx : absDy;
+
+        if (maxAbs.Raw == 0)
+        {
+            return (speed, Fix32.Zero);
+        }
+
+        Fix32 scale = speed / maxAbs;
+        return (dx * scale, dy * scale);
     }
 
     private static SkillDefinition? FindSkill(SimulationConfig config, SkillId skillId)
