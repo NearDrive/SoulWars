@@ -304,7 +304,7 @@ file static class SnapshotRedactionTestHelpers
 
     private static ServerHost CreateHost(TileMap map, ImmutableArray<EntityState> entities, ImmutableArray<ProjectileComponent> projectiles = default)
     {
-        ZoneState zone = new(new ZoneId(1), map, entities)
+        ZoneState zone = new ZoneState(new ZoneId(1), map, entities)
             .WithProjectiles(projectiles.IsDefault ? ImmutableArray<ProjectileComponent>.Empty : projectiles);
         ImmutableArray<EntityLocation> locations = entities
             .OrderBy(entity => entity.Id.Value)
