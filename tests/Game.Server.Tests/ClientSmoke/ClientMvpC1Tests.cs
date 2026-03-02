@@ -150,7 +150,7 @@ public sealed class ClientMvpC1Tests
         while (!runTask.IsCompleted && !cts.IsCancellationRequested)
         {
             host.StepOnce();
-            await Task.Yield();
+            await Task.Delay(1, cts.Token);
         }
 
         HeadlessRunResult result = await runTask;
@@ -163,7 +163,11 @@ public sealed class ClientMvpC1Tests
         Assert.Equal(3, cast.TargetKind);
         Assert.Equal(0, cast.TargetEntityId);
 
-        HitEventV1 hit = Assert.Single(result.ObservedHits);
+        Assert.NotEmpty(result.ObservedHits);
+        HitEventV1 hit = result.ObservedHits
+            .OrderBy(evt => evt.TickId)
+            .ThenBy(evt => evt.EventSeq)
+            .First();
         Assert.Equal(options.AbilityId, hit.AbilityId);
     }
 

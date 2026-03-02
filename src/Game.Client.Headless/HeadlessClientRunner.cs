@@ -35,8 +35,10 @@ public sealed class HeadlessClientRunner
 
         while (!cancellationToken.IsCancellationRequested)
         {
+            bool hadPayload = false;
             while (_transport.TryRead(out byte[] payload))
             {
+                hadPayload = true;
                 IServerMessage message = ProtocolCodec.DecodeServer(payload);
                 switch (message)
                 {
@@ -63,9 +65,11 @@ public sealed class HeadlessClientRunner
 
                         if (!castSent && PlayerEntityId != 0)
                         {
+                            SnapshotEntity? self = snapshot.Entities.FirstOrDefault(entity => entity.EntityId == PlayerEntityId);
                             SnapshotEntity? target = snapshot.Entities
                                 .Where(entity => entity.EntityId != PlayerEntityId)
-                                .OrderBy(entity => entity.EntityId)
+                                .OrderBy(entity => self is null ? int.MaxValue : DistanceSq(self, entity))
+                                .ThenBy(entity => entity.EntityId)
                                 .FirstOrDefault();
 
                             if (target is not null)
@@ -106,7 +110,10 @@ public sealed class HeadlessClientRunner
                 }
             }
 
-            await Task.Yield();
+            if (!hadPayload)
+            {
+                await Task.Delay(1, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         return new HeadlessRunResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted);
@@ -115,6 +122,13 @@ public sealed class HeadlessClientRunner
     private void Send(IClientMessage message)
     {
         _transport.Send(ProtocolCodec.Encode(message));
+    }
+
+    private static long DistanceSq(SnapshotEntity a, SnapshotEntity b)
+    {
+        long dx = (long)a.PosXRaw - b.PosXRaw;
+        long dy = (long)a.PosYRaw - b.PosYRaw;
+        return dx * dx + dy * dy;
     }
 }
 
