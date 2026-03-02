@@ -141,7 +141,7 @@ public static class ProjectileSystem
             Fix32 dx = entity.Pos.X - nextX;
             Fix32 dy = entity.Pos.Y - nextY;
             Fix32 distSq = (dx * dx) + (dy * dy);
-            if (distSq > radiusSq)
+            if (distSq >= radiusSq)
             {
                 continue;
             }
