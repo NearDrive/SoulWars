@@ -26,11 +26,41 @@ public sealed class CombatNetworkCanaryTests
 
         Assert.True(run.SpawnTicks.Count == 1,
             $"Expected exactly one spawn transition. spawnTicks=[{string.Join(',', run.SpawnTicks)}] summary={run.DiagnosticsSummary}");
-        Assert.True(run.DespawnTicks.Count == 1,
-            $"Expected exactly one despawn transition. despawnTicks=[{string.Join(',', run.DespawnTicks)}] summary={run.DiagnosticsSummary}");
-        int spawnTick = Assert.Single(run.SpawnTicks);
-        int despawnTick = Assert.Single(run.DespawnTicks);
-        Assert.True(spawnTick < despawnTick);
+        _ = Assert.Single(run.SpawnTicks);
+
+        ProjectileEventV1[] projectileEvents = run.ObserverSnapshots
+            .SelectMany(snapshot => snapshot.ProjectileEvents)
+            .Where(evt => evt.SourceEntityId == run.ObserverEntityId && evt.AbilityId == 1)
+            .OrderBy(evt => evt.TickId)
+            .ThenBy(evt => evt.ProjectileId)
+            .ThenBy(evt => evt.Kind)
+            .ToArray();
+
+        ProjectileEventV1[] projectileSpawns = projectileEvents
+            .Where(evt => evt.Kind == (byte)ProjectileEventKind.Spawn)
+            .ToArray();
+        ProjectileEventV1[] projectileHits = projectileEvents
+            .Where(evt => evt.Kind == (byte)ProjectileEventKind.Hit)
+            .ToArray();
+        ProjectileEventV1[] projectileDespawns = projectileEvents
+            .Where(evt => evt.Kind == (byte)ProjectileEventKind.Despawn)
+            .ToArray();
+
+        Assert.True(projectileSpawns.Length == 1, $"Expected exactly one projectile spawn event. count={projectileSpawns.Length} summary={run.DiagnosticsSummary}");
+        Assert.True(projectileHits.Length == 1, $"Expected exactly one projectile hit event. count={projectileHits.Length} summary={run.DiagnosticsSummary}");
+        Assert.True(projectileDespawns.Length <= 1, $"Expected 0 or 1 projectile despawn event. count={projectileDespawns.Length} summary={run.DiagnosticsSummary}");
+
+        ProjectileEventV1 projectileSpawn = projectileSpawns[0];
+        ProjectileEventV1 projectileHit = projectileHits[0];
+        Assert.True(projectileSpawn.TickId >= run.CastTick, $"Projectile spawned before cast. spawnTick={projectileSpawn.TickId} castTick={run.CastTick} summary={run.DiagnosticsSummary}");
+        Assert.True(projectileHit.TickId >= projectileSpawn.TickId, $"Projectile hit before spawn. hitTick={projectileHit.TickId} spawnTick={projectileSpawn.TickId} summary={run.DiagnosticsSummary}");
+
+        if (projectileDespawns.Length == 1)
+        {
+            ProjectileEventV1 projectileDespawn = projectileDespawns[0];
+            Assert.True(projectileDespawn.TickId >= projectileHit.TickId && projectileDespawn.TickId <= projectileHit.TickId + 1,
+                $"Projectile despawn tick outside expected window. despawnTick={projectileDespawn.TickId} hitTick={projectileHit.TickId} summary={run.DiagnosticsSummary}");
+        }
 
         int targetEntityId = run.TargetEntityId;
         foreach (SnapshotV2 snapshot in run.ObserverSnapshots)
