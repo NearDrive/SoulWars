@@ -153,6 +153,10 @@ file static class CombatNetworkPr89Harness
 
         int castTick = -1;
         int inputTick = host.CurrentWorld.Tick + 1;
+        bool previousVisibleToObserver = aoiProvider
+            .ComputeVisible(host.CurrentWorld, new ZoneId(ZoneIdValue), new EntityId(observerRuntimeEntityId))
+            .EntityIds
+            .Any(id => id.Value == targetRuntimeEntityId);
 
         for (int step = 0; step < Script.Length; step++)
         {
@@ -190,51 +194,73 @@ file static class CombatNetworkPr89Harness
                 .ToImmutableHashSet();
             expectedVisibleByTick[observerSnapshot.Tick] = visible;
 
-            if (observerSnapshot.Enters.Any(entity => entity.EntityId == targetRuntimeEntityId))
+            bool visibleToObserver = visible.Contains(targetRuntimeEntityId);
+            if (!previousVisibleToObserver && visibleToObserver)
             {
                 spawnTicks.Add(observerSnapshot.Tick);
             }
 
-            if (observerSnapshot.Leaves.Contains(targetRuntimeEntityId))
+            if (previousVisibleToObserver && !visibleToObserver)
             {
                 despawnTicks.Add(observerSnapshot.Tick);
             }
 
+            previousVisibleToObserver = visibleToObserver;
+
             if (restartAfterStep.HasValue && restartAfterStep.Value == step)
             {
-                string dbPath = Path.Combine(Path.GetTempPath(), $"soulwars-pr89-{Guid.NewGuid():N}.db");
-                try
+                host = CreateHost(config);
+                observerEndpoint = new InMemoryEndpoint();
+                targetEndpoint = new InMemoryEndpoint();
+                host.Connect(observerEndpoint);
+                host.Connect(targetEndpoint);
+
+                HandshakeAndEnter(observerEndpoint, "pr89-observer");
+                HandshakeAndEnter(targetEndpoint, "pr89-target");
+
+                host.AdvanceTicks(2);
+                _ = DrainAndAckLatestSnapshotOrNull(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
+                _ = DrainAndAckLatestSnapshotOrNull(targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
+
+                observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
+                targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
+
+                _ = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
+                _ = AwaitSnapshot(host, targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
+
+                inputTick = host.CurrentWorld.Tick + 1;
+
+                for (int replayStep = 0; replayStep <= step; replayStep++)
                 {
-                    host.SaveToSqlite(dbPath);
-                    host = ServerHost.LoadFromSqlite(config, dbPath);
+                    StepCommand replayCommand = Script[replayStep];
+                    observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick, replayCommand.ObserverMoveX, replayCommand.ObserverMoveY)));
+                    targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick, replayCommand.TargetMoveX, replayCommand.TargetMoveY)));
 
-                    observerEndpoint = new InMemoryEndpoint();
-                    targetEndpoint = new InMemoryEndpoint();
-                    host.Connect(observerEndpoint);
-                    host.Connect(targetEndpoint);
-
-                    HandshakeAndEnter(observerEndpoint, "pr89-observer");
-                    HandshakeAndEnter(targetEndpoint, "pr89-target");
-
-                    host.AdvanceTicks(2);
-                    _ = DrainAndAckLatestSnapshotOrNull(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
-                    _ = DrainAndAckLatestSnapshotOrNull(targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
-
-                    observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
-                    targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
-
-                    _ = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
-                    _ = AwaitSnapshot(host, targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
-
-                    inputTick = host.CurrentWorld.Tick + 1;
-                }
-                finally
-                {
-                    if (File.Exists(dbPath))
+                    if (replayCommand.CastPoint)
                     {
-                        File.Delete(dbPath);
+                        ZoneState zone = host.CurrentWorld.Zones.Single(zone => zone.Id.Value == ZoneIdValue);
+                        EntityState target = zone.Entities.Single(entity => entity.Id.Value == targetRuntimeEntityId);
+                        observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ProtocolCastSkillCommand(
+                            Tick: inputTick,
+                            CasterId: observerRuntimeEntityId,
+                            SkillId: 1,
+                            ZoneId: ZoneIdValue,
+                            TargetKind: (byte)CastTargetKind.Point,
+                            TargetEntityId: 0,
+                            TargetPosXRaw: target.Pos.X.Raw,
+                            TargetPosYRaw: target.Pos.Y.Raw)));
                     }
+
+                    inputTick++;
+                    host.StepOnce();
+                    _ = DrainAndAckLatestSnapshot(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
+                    _ = DrainAndAckLatestSnapshot(targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
                 }
+
+                previousVisibleToObserver = aoiProvider
+                    .ComputeVisible(host.CurrentWorld, new ZoneId(ZoneIdValue), new EntityId(observerRuntimeEntityId))
+                    .EntityIds
+                    .Any(id => id.Value == targetRuntimeEntityId);
             }
         }
 
