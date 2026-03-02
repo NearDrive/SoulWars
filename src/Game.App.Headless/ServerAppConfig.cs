@@ -6,4 +6,5 @@ public sealed record ServerAppConfig(
     string? SqlitePath,
     int ZoneCount,
     int BotCount,
-    string? ZoneDefinitionsPath = null);
+    string? ZoneDefinitionsPath = null,
+    bool ArenaMode = false);

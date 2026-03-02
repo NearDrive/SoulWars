@@ -31,7 +31,8 @@ public readonly record struct ServerConfig(
     bool EnableMetrics,
     string? ZoneDefinitionsPath,
     string? VendorDefinitionsPath,
-    bool EnableTickReports)
+    bool EnableTickReports,
+    bool ArenaMode)
 {
     public Fix32 AoiRadius => VisionRadius;
 
@@ -97,5 +98,6 @@ public readonly record struct ServerConfig(
         EnableMetrics: true,
         ZoneDefinitionsPath: null,
         VendorDefinitionsPath: null,
-        EnableTickReports: false);
+        EnableTickReports: false,
+        ArenaMode: false);
 }

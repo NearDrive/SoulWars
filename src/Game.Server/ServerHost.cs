@@ -48,7 +48,9 @@ public sealed class ServerHost
         _vendorDefinitions = string.IsNullOrWhiteSpace(config.VendorDefinitionsPath)
             ? ImmutableArray<VendorDefinition>.Empty
             : VendorDefinitionsLoader.LoadFromDirectory(config.VendorDefinitionsPath);
-        _world = bootstrap?.World ?? Simulation.CreateInitialState(_simulationConfig, _zoneDefinitions);
+        _world = bootstrap?.World ?? (_serverConfig.ArenaMode
+            ? ArenaZoneFactory.CreateWorld(_simulationConfig)
+            : Simulation.CreateInitialState(_simulationConfig, _zoneDefinitions));
         if (!_vendorDefinitions.IsDefaultOrEmpty)
         {
             _world = _world.WithVendors(_vendorDefinitions);
@@ -752,10 +754,15 @@ public sealed class ServerHost
         else
         {
             entityId = playerState.EntityId ?? _nextEntityId++;
+            Vec2Fix? spawnPos = _serverConfig.ArenaMode
+                ? ArenaZoneFactory.ResolvePlayerSpawnPoint(session.PlayerId.Value.Value)
+                : null;
+
             worldCommands.Add(new WorldCommand(
                 Kind: WorldCommandKind.EnterZone,
                 EntityId: new EntityId(entityId),
-                ZoneId: new ZoneId(zoneId)));
+                ZoneId: new ZoneId(zoneId),
+                SpawnPos: spawnPos));
         }
 
         session.EntityId = entityId;
