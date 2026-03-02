@@ -142,7 +142,7 @@ file static class CombatNetworkPr89Harness
         targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
 
         List<string> payloadHashes = new();
-        SnapshotV2 bootstrapObserverSnapshot = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
+        _ = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
         _ = AwaitSnapshot(host, targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
 
         VisibilityAoiProvider aoiProvider = new();
@@ -153,7 +153,7 @@ file static class CombatNetworkPr89Harness
 
         int castTick = -1;
         int inputTick = host.CurrentWorld.Tick + 1;
-        bool previousVisibleToObserver = bootstrapObserverSnapshot.Entities.Any(entity => entity.EntityId == targetRuntimeEntityId);
+        bool previousVisibleToObserver = false;
 
         for (int step = 0; step < Script.Length; step++)
         {
@@ -222,7 +222,7 @@ file static class CombatNetworkPr89Harness
                 observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
                 targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
 
-                SnapshotV2 restartBootstrapObserverSnapshot = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
+                _ = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
                 _ = AwaitSnapshot(host, targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
 
                 inputTick = host.CurrentWorld.Tick + 1;
@@ -254,7 +254,7 @@ file static class CombatNetworkPr89Harness
                     _ = DrainAndAckLatestSnapshot(targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
                 }
 
-                previousVisibleToObserver = restartBootstrapObserverSnapshot.Entities.Any(entity => entity.EntityId == targetRuntimeEntityId);
+                previousVisibleToObserver = false;
             }
         }
 
