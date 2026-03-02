@@ -59,7 +59,7 @@ public sealed class ClientWorldView
     public string DumpCanonical()
     {
         StringBuilder builder = new();
-        builder.Append("tick=").Append(Tick).Append(" zone=").Append(ZoneId).Append('\n');
+        builder.Append(FormattableString.Invariant($"tick={Tick} zone={ZoneId}\n"));
 
         foreach (SnapshotEntity entity in _entities.Values
                      .OrderBy(e => e.EntityId)
@@ -67,12 +67,8 @@ public sealed class ClientWorldView
                      .ThenBy(e => e.PosXRaw)
                      .ThenBy(e => e.PosYRaw))
         {
-            builder
-                .Append("entity=").Append(entity.EntityId)
-                .Append(" kind=").Append(entity.Kind)
-                .Append(" pos=(").Append(entity.PosXRaw).Append(',').Append(entity.PosYRaw).Append(')')
-                .Append(" hp=").Append(entity.Hp)
-                .Append('\n');
+            builder.Append(FormattableString.Invariant(
+                $"entity={entity.EntityId} kind={entity.Kind} pos=({entity.PosXRaw},{entity.PosYRaw}) hp={entity.Hp}\n"));
         }
 
         return builder.ToString().TrimEnd('\n');
