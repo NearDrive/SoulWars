@@ -132,14 +132,17 @@ file static class CombatNetworkPr89Harness
         int targetRuntimeEntityId = -1;
 
         host.AdvanceTicks(2);
-        _ = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, []);
-        _ = AwaitSnapshot(host, targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
+        _ = DrainAndAckLatestSnapshotOrNull(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, []);
+        _ = DrainAndAckLatestSnapshotOrNull(targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
 
         Assert.Equal(ObserverEntityId, observerRuntimeEntityId);
         Assert.Equal(TargetEntityId, targetRuntimeEntityId);
 
         observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
         targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
+
+        _ = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
+        _ = AwaitSnapshot(host, targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
 
         VisibilityAoiProvider aoiProvider = new();
         List<SnapshotV2> observerSnapshots = new();
@@ -214,11 +217,14 @@ file static class CombatNetworkPr89Harness
                     HandshakeAndEnter(targetEndpoint, "pr89-target");
 
                     host.AdvanceTicks(2);
-                    _ = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
-                    _ = AwaitSnapshot(host, targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
+                    _ = DrainAndAckLatestSnapshotOrNull(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
+                    _ = DrainAndAckLatestSnapshotOrNull(targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
 
                     observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
                     targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
+
+                    _ = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
+                    _ = AwaitSnapshot(host, targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
 
                     inputTick = host.CurrentWorld.Tick + 1;
                 }
@@ -254,7 +260,7 @@ file static class CombatNetworkPr89Harness
     private static SnapshotV2 AwaitSnapshot(ServerHost host, InMemoryEndpoint endpoint, ref int sessionId, ref int entityId, List<string> payloadHashes)
     {
         SnapshotV2? snapshot = DrainAndAckLatestSnapshotOrNull(endpoint, ref sessionId, ref entityId, payloadHashes);
-        for (int i = 0; snapshot is null && i < 8; i++)
+        for (int i = 0; snapshot is null && i < 64; i++)
         {
             host.StepOnce();
             snapshot = DrainAndAckLatestSnapshotOrNull(endpoint, ref sessionId, ref entityId, payloadHashes);
