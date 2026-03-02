@@ -142,7 +142,7 @@ file static class CombatNetworkPr89Harness
         targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
 
         List<string> payloadHashes = new();
-        _ = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
+        SnapshotV2 bootstrapObserverSnapshot = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
         _ = AwaitSnapshot(host, targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
 
         VisibilityAoiProvider aoiProvider = new();
@@ -153,10 +153,7 @@ file static class CombatNetworkPr89Harness
 
         int castTick = -1;
         int inputTick = host.CurrentWorld.Tick + 1;
-        bool previousVisibleToObserver = aoiProvider
-            .ComputeVisible(host.CurrentWorld, new ZoneId(ZoneIdValue), new EntityId(observerRuntimeEntityId))
-            .EntityIds
-            .Any(id => id.Value == targetRuntimeEntityId);
+        bool previousVisibleToObserver = bootstrapObserverSnapshot.Entities.Any(entity => entity.EntityId == targetRuntimeEntityId);
 
         for (int step = 0; step < Script.Length; step++)
         {
@@ -194,7 +191,7 @@ file static class CombatNetworkPr89Harness
                 .ToImmutableHashSet();
             expectedVisibleByTick[observerSnapshot.Tick] = visible;
 
-            bool visibleToObserver = visible.Contains(targetRuntimeEntityId);
+            bool visibleToObserver = observerSnapshot.Entities.Any(entity => entity.EntityId == targetRuntimeEntityId);
             if (!previousVisibleToObserver && visibleToObserver)
             {
                 spawnTicks.Add(observerSnapshot.Tick);
@@ -225,7 +222,7 @@ file static class CombatNetworkPr89Harness
                 observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
                 targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
 
-                _ = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
+                SnapshotV2 restartBootstrapObserverSnapshot = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
                 _ = AwaitSnapshot(host, targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
 
                 inputTick = host.CurrentWorld.Tick + 1;
@@ -257,10 +254,7 @@ file static class CombatNetworkPr89Harness
                     _ = DrainAndAckLatestSnapshot(targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
                 }
 
-                previousVisibleToObserver = aoiProvider
-                    .ComputeVisible(host.CurrentWorld, new ZoneId(ZoneIdValue), new EntityId(observerRuntimeEntityId))
-                    .EntityIds
-                    .Any(id => id.Value == targetRuntimeEntityId);
+                previousVisibleToObserver = restartBootstrapObserverSnapshot.Entities.Any(entity => entity.EntityId == targetRuntimeEntityId);
             }
         }
 
