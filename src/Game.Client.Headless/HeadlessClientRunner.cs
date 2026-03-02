@@ -29,6 +29,9 @@ public sealed class HeadlessClientRunner
         int inputTick = 1;
         bool castSent = false;
         List<string> logs = new();
+        List<InputCommand> sentInputs = new();
+        List<CastSkillCommand> sentCasts = new();
+        List<HitEventV1> observedHits = new();
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -52,7 +55,9 @@ public sealed class HeadlessClientRunner
 
                         if (PlayerEntityId != 0 && inputTick <= snapshot.Tick + 1)
                         {
-                            Send(new InputCommand(inputTick, 1, 0));
+                            InputCommand move = new(inputTick, 1, 0);
+                            Send(move);
+                            sentInputs.Add(move);
                             inputTick++;
                         }
 
@@ -65,7 +70,7 @@ public sealed class HeadlessClientRunner
 
                             if (target is not null)
                             {
-                                Send(new CastSkillCommand(
+                                CastSkillCommand cast = new(
                                     Tick: Math.Max(inputTick, snapshot.Tick + 1),
                                     CasterId: PlayerEntityId,
                                     SkillId: _options.AbilityId,
@@ -73,7 +78,9 @@ public sealed class HeadlessClientRunner
                                     TargetKind: 3,
                                     TargetEntityId: 0,
                                     TargetPosXRaw: target.PosXRaw,
-                                    TargetPosYRaw: target.PosYRaw));
+                                    TargetPosYRaw: target.PosYRaw);
+                                Send(cast);
+                                sentCasts.Add(cast);
                                 castSent = true;
                                 logs.Add($"cast ability={_options.AbilityId} x={target.PosXRaw} y={target.PosYRaw}");
                             }
@@ -82,26 +89,27 @@ public sealed class HeadlessClientRunner
                         if (_world.LastHitEvents.Count > 0)
                         {
                             HitEventV1 hit = _world.LastHitEvents.First();
+                            observedHits.AddRange(_world.LastHitEvents);
                             logs.Add($"hit ability={hit.AbilityId} src={hit.SourceEntityId} dst={hit.TargetEntityId} tick={hit.TickId}");
-                            return new HeadlessRunResult(logs, true, HandshakeAccepted);
+                            return new HeadlessRunResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted);
                         }
 
                         if (snapshot.Tick >= maxTicks)
                         {
-                            return new HeadlessRunResult(logs, false, HandshakeAccepted);
+                            return new HeadlessRunResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted);
                         }
 
                         break;
                     case Disconnect disconnect:
                         logs.Add($"disconnect reason={disconnect.Reason}");
-                        return new HeadlessRunResult(logs, false, HandshakeAccepted);
+                        return new HeadlessRunResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted);
                 }
             }
 
-            await Task.Delay(1, cancellationToken).ConfigureAwait(false);
+            await Task.Yield();
         }
 
-        return new HeadlessRunResult(logs, false, HandshakeAccepted);
+        return new HeadlessRunResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted);
     }
 
     private void Send(IClientMessage message)
@@ -110,4 +118,12 @@ public sealed class HeadlessClientRunner
     }
 }
 
-public sealed record HeadlessRunResult(IReadOnlyList<string> Logs, bool HitObserved, bool HandshakeAccepted);
+public sealed record HeadlessRunResult(
+    IReadOnlyList<string> Logs,
+    IReadOnlyList<InputCommand> SentInputs,
+    IReadOnlyList<CastSkillCommand> SentCasts,
+    IReadOnlyList<HitEventV1> ObservedHits,
+    bool HandshakeAccepted)
+{
+    public bool HitObserved => ObservedHits.Count > 0;
+}

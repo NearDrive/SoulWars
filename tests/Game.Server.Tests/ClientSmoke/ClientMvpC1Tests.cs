@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq;
 using Game.Client.Headless;
 using Game.Core;
 using Game.Protocol;
@@ -149,12 +150,21 @@ public sealed class ClientMvpC1Tests
         while (!runTask.IsCompleted && !cts.IsCancellationRequested)
         {
             host.StepOnce();
-            await Task.Delay(1, cts.Token);
+            await Task.Yield();
         }
 
         HeadlessRunResult result = await runTask;
         Assert.True(result.HandshakeAccepted);
-        Assert.True(result.HitObserved, string.Join('\n', result.Logs));
+        Assert.NotEmpty(result.SentInputs);
+        Assert.True(result.SentInputs.Select(input => input.Tick).SequenceEqual(result.SentInputs.Select(input => input.Tick).OrderBy(tick => tick)));
+        Assert.True(result.SentInputs.Select(input => input.Tick).Distinct().Count() == result.SentInputs.Count);
+
+        CastSkillCommand cast = Assert.Single(result.SentCasts);
+        Assert.Equal(3, cast.TargetKind);
+        Assert.Equal(0, cast.TargetEntityId);
+
+        HitEventV1 hit = Assert.Single(result.ObservedHits);
+        Assert.Equal(options.AbilityId, hit.AbilityId);
     }
 
     private static T ReadSingle<T>(InMemoryEndpoint endpoint)
