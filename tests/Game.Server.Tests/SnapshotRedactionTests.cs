@@ -241,35 +241,21 @@ public sealed class ProjectileSnapshotIsolationTests
             PosY: Fix32.FromInt(2),
             SkillId: new SkillId(1),
             SpawnTick: 0,
-            MaxLifetimeTicks: 100,
+            MaxLifetimeTicks: 1,
             CollidesWithWorld: false,
             RequiresLoSOnSpawn: false);
-        ProjectileEvent evt = new(
-            Tick: 0,
-            ZoneId: new ZoneId(1),
-            ProjectileId: 7,
-            Kind: ProjectileEventKind.Spawn,
-            OwnerId: new EntityId(999),
-            TargetId: new EntityId(0),
-            AbilityId: new SkillId(1),
-            PosX: Fix32.FromInt(2),
-            PosY: Fix32.FromInt(2));
 
         ServerHost host = SnapshotRedactionTestHelpers.CreateHostForTwoFactionWorld(
-            projectiles: ImmutableArray.Create(projectile),
-            projectileEvents: ImmutableArray.Create(evt));
+            projectiles: ImmutableArray.Create(projectile));
         InMemoryEndpoint endpointA = new();
         host.Connect(endpointA);
         SnapshotRedactionTestHelpers.HandshakeAndEnter(endpointA, "acc-a");
-
-        host.AdvanceTicks(2);
-        _ = SnapshotRedactionTestHelpers.DrainMessages(endpointA);
-
         endpointA.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
+
         host.StepOnce();
 
         SnapshotV2 snapshot = SnapshotRedactionTestHelpers.DrainMessages(endpointA).OfType<SnapshotV2>().Last();
-        Assert.Contains(snapshot.Projectiles, p => p.ProjectileId == 7);
+        Assert.DoesNotContain(snapshot.Projectiles, p => p.ProjectileId == 7);
         Assert.Contains(snapshot.ProjectileEvents, e => e.ProjectileId == 7 && e.ZoneId == 1);
     }
 }
