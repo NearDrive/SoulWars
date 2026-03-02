@@ -66,7 +66,7 @@ public static class ProjectileSystem
                 RequiresLoSOnSpawn: (skill.Value.Flags & SkillFlags.RequiresLineOfSight) != 0);
 
             mutable.Add(projectile);
-            events.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Spawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, projectile.PosX, projectile.PosY));
+            events.Add(new ProjectileEvent(tick, zone.Id, projectile.ProjectileId, ProjectileEventKind.Spawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, projectile.PosX, projectile.PosY));
         }
 
         ImmutableArray<ProjectileComponent> orderedProjectiles = mutable.OrderBy(p => p.ProjectileId).ToImmutableArray();
@@ -90,7 +90,7 @@ public static class ProjectileSystem
         {
             if (tick - projectile.SpawnTick >= projectile.MaxLifetimeTicks)
             {
-                projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, projectile.PosX, projectile.PosY));
+                projectileEvents.Add(new ProjectileEvent(tick, zone.Id, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, projectile.PosX, projectile.PosY));
                 continue;
             }
 
@@ -103,7 +103,7 @@ public static class ProjectileSystem
                 int tileY = Fix32.FloorToInt(nextY);
                 if (zone.Map.Get(tileX, tileY) == TileKind.Solid)
                 {
-                    projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, nextX, nextY));
+                    projectileEvents.Add(new ProjectileEvent(tick, zone.Id, projectile.ProjectileId, ProjectileEventKind.Despawn, projectile.OwnerId, projectile.TargetId, projectile.SkillId, nextX, nextY));
                     continue;
                 }
             }
@@ -111,7 +111,7 @@ public static class ProjectileSystem
             EntityId? firstHit = ResolveFirstHitTarget(zone, projectile, nextX, nextY);
             if (firstHit is EntityId targetId)
             {
-                projectileEvents.Add(new ProjectileEvent(tick, projectile.ProjectileId, ProjectileEventKind.Hit, projectile.OwnerId, targetId, projectile.SkillId, nextX, nextY));
+                projectileEvents.Add(new ProjectileEvent(tick, zone.Id, projectile.ProjectileId, ProjectileEventKind.Hit, projectile.OwnerId, targetId, projectile.SkillId, nextX, nextY));
                 continue;
             }
 

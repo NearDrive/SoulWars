@@ -223,11 +223,60 @@ public sealed class ProjectileSnapshotIsolationTests
         Assert.Empty(zone1Snapshot.Projectiles);
         Assert.Empty(zone1Snapshot.ProjectileEvents);
     }
+
+    [Fact]
+    [Trait("Category", "Canary")]
+    public void SnapshotV2_ProjectileEvent_WithMissingEndpoints_IsRetainedByZoneAndPositionVisibility()
+    {
+        ProjectileComponent projectile = new(
+            ProjectileId: 7,
+            OwnerId: new EntityId(999),
+            TargetId: new EntityId(0),
+            VelX: Fix32.Zero,
+            VelY: Fix32.Zero,
+            Radius: Fix32.One,
+            TargetX: Fix32.FromInt(2),
+            TargetY: Fix32.FromInt(2),
+            PosX: Fix32.FromInt(2),
+            PosY: Fix32.FromInt(2),
+            SkillId: new SkillId(1),
+            SpawnTick: 0,
+            MaxLifetimeTicks: 100,
+            CollidesWithWorld: false,
+            RequiresLoSOnSpawn: false);
+        ProjectileEvent evt = new(
+            Tick: 0,
+            ZoneId: new ZoneId(1),
+            ProjectileId: 7,
+            Kind: ProjectileEventKind.Spawn,
+            OwnerId: new EntityId(999),
+            TargetId: new EntityId(0),
+            AbilityId: new SkillId(1),
+            PosX: Fix32.FromInt(2),
+            PosY: Fix32.FromInt(2));
+
+        ServerHost host = SnapshotRedactionTestHelpers.CreateHostForTwoFactionWorld(
+            projectiles: ImmutableArray.Create(projectile),
+            projectileEvents: ImmutableArray.Create(evt));
+        InMemoryEndpoint endpointA = new();
+        host.Connect(endpointA);
+        SnapshotRedactionTestHelpers.HandshakeAndEnter(endpointA, "acc-a");
+
+        host.AdvanceTicks(2);
+        _ = SnapshotRedactionTestHelpers.DrainMessages(endpointA);
+
+        endpointA.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(1, 0)));
+        host.StepOnce();
+
+        SnapshotV2 snapshot = SnapshotRedactionTestHelpers.DrainMessages(endpointA).OfType<SnapshotV2>().Last();
+        Assert.Contains(snapshot.Projectiles, p => p.ProjectileId == 7);
+        Assert.Contains(snapshot.ProjectileEvents, e => e.ProjectileId == 7 && e.ZoneId == 1);
+    }
 }
 
 file static class SnapshotRedactionTestHelpers
 {
-    public static ServerHost CreateHostForTwoFactionWorld(ImmutableArray<ProjectileComponent> projectiles = default)
+    public static ServerHost CreateHostForTwoFactionWorld(ImmutableArray<ProjectileComponent> projectiles = default, ImmutableArray<ProjectileEvent> projectileEvents = default)
     {
         TileMap map = OpenMap(12, 12);
         ImmutableArray<EntityState> entities =
@@ -238,7 +287,7 @@ file static class SnapshotRedactionTestHelpers
             new EntityState(new EntityId(22), At(10, 9), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(2), VisionRadiusTiles: 1)
         ];
 
-        return CreateHost(map, entities, projectiles);
+        return CreateHost(map, entities, projectiles, projectileEvents);
     }
 
     public static ServerHost CreateHostForVisibilityTransitionWorld()
@@ -302,7 +351,7 @@ file static class SnapshotRedactionTestHelpers
         return decoded;
     }
 
-    private static ServerHost CreateHost(TileMap map, ImmutableArray<EntityState> entities, ImmutableArray<ProjectileComponent> projectiles = default)
+    private static ServerHost CreateHost(TileMap map, ImmutableArray<EntityState> entities, ImmutableArray<ProjectileComponent> projectiles = default, ImmutableArray<ProjectileEvent> projectileEvents = default)
     {
         ZoneState zone = new ZoneState(new ZoneId(1), map, entities)
             .WithProjectiles(projectiles.IsDefault ? ImmutableArray<ProjectileComponent>.Empty : projectiles);
@@ -311,7 +360,11 @@ file static class SnapshotRedactionTestHelpers
             .Select(entity => new EntityLocation(entity.Id, zone.Id))
             .ToImmutableArray();
 
-        WorldState world = new(0, ImmutableArray.Create(zone), locations);
+        WorldState world = new(
+            0,
+            ImmutableArray.Create(zone),
+            locations,
+            ProjectileEvents: projectileEvents.IsDefault ? ImmutableArray<ProjectileEvent>.Empty : projectileEvents);
 
         ServerBootstrap bootstrap = new(
             world,
