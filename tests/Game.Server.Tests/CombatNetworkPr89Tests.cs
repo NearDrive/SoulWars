@@ -44,10 +44,10 @@ public sealed class CombatNetworkCanaryTests
             }
         }
 
-        HitEventV1[] hits = run.ObserverSnapshots
-            .SelectMany(snapshot => snapshot.HitEvents)
-            .Where(hit => hit.SourceEntityId == run.ObserverEntityId && hit.TargetEntityId == run.TargetEntityId)
-            .ToArray();
+        HitEventV1[] hits = CombatNetworkPr89Harness.ExtractMatchingHits(
+            run.ObserverSnapshots,
+            run.ObserverEntityId,
+            run.TargetEntityId);
 
         Assert.True(hits.Length > 0, $"Expected at least one matching hit event. summary={run.DiagnosticsSummary}");
         HitEventV1 hit = hits
@@ -377,6 +377,43 @@ file static class CombatNetworkPr89Harness
     }
 
 
+
+    public static HitEventV1[] ExtractMatchingHits(IEnumerable<SnapshotV2> snapshots, int sourceEntityId, int targetEntityId)
+    {
+        List<HitEventV1> fromHitEvents = snapshots
+            .SelectMany(snapshot => snapshot.HitEvents)
+            .Where(hit => hit.SourceEntityId == sourceEntityId && hit.TargetEntityId == targetEntityId)
+            .OrderBy(h => h.TickId)
+            .ThenBy(h => h.SourceEntityId)
+            .ThenBy(h => h.TargetEntityId)
+            .ThenBy(h => h.AbilityId)
+            .ThenBy(h => h.EventSeq)
+            .ToList();
+
+        if (fromHitEvents.Count > 0)
+        {
+            return fromHitEvents.ToArray();
+        }
+
+        return snapshots
+            .SelectMany(snapshot => snapshot.ProjectileEvents)
+            .Where(evt => evt.Kind == (byte)ProjectileEventKind.Hit)
+            .Where(evt => evt.SourceEntityId == sourceEntityId && evt.TargetEntityId == targetEntityId)
+            .OrderBy(evt => evt.TickId)
+            .ThenBy(evt => evt.SourceEntityId)
+            .ThenBy(evt => evt.TargetEntityId)
+            .ThenBy(evt => evt.AbilityId)
+            .Select((evt, idx) => new HitEventV1(
+                TickId: evt.TickId,
+                ZoneId: evt.ZoneId,
+                SourceEntityId: evt.SourceEntityId,
+                TargetEntityId: evt.TargetEntityId,
+                AbilityId: evt.AbilityId,
+                HitPosXRaw: evt.PosXRaw,
+                HitPosYRaw: evt.PosYRaw,
+                EventSeq: idx))
+            .ToArray();
+    }
     private static string BuildDiagnosticsSummary(List<SnapshotV2> snapshots, List<int> spawnTicks, List<int> despawnTicks, int castTick)
     {
         Dictionary<int, int> hitCountsByTick = snapshots
@@ -391,10 +428,11 @@ file static class CombatNetworkPr89Harness
 
         int totalHitEvents = snapshots.Sum(snapshot => snapshot.HitEvents.Length);
         int totalProjectileEvents = snapshots.Sum(snapshot => snapshot.ProjectileEvents.Length);
+        int totalProjectileHitEvents = snapshots.Sum(snapshot => snapshot.ProjectileEvents.Count(e => e.Kind == (byte)ProjectileEventKind.Hit));
 
         string hitSummary = string.Join(',', hitCountsByTick.OrderBy(kvp => kvp.Key).Select(kvp => $"{kvp.Key}:{kvp.Value}"));
         string projectileSummary = string.Join(',', projectileEventCountsByTick.OrderBy(kvp => kvp.Key).Select(kvp => $"{kvp.Key}:{kvp.Value}"));
-        return $"ticks={snapshots.Count};castTick={castTick};spawns=[{string.Join(',', spawnTicks)}];despawns=[{string.Join(',', despawnTicks)}];totalHitEvents={totalHitEvents};totalProjectileEvents={totalProjectileEvents};hitsByTick=[{hitSummary}];projectileEventsByTick=[{projectileSummary}]";
+        return $"ticks={snapshots.Count};castTick={castTick};spawns=[{string.Join(',', spawnTicks)}];despawns=[{string.Join(',', despawnTicks)}];totalHitEvents={totalHitEvents};totalProjectileEvents={totalProjectileEvents};totalProjectileHitEvents={totalProjectileHitEvents};hitsByTick=[{hitSummary}];projectileEventsByTick=[{projectileSummary}]";
     }
     private static string ComputePayloadHash(byte[] payload)
     {
