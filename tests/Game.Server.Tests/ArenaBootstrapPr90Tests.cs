@@ -10,6 +10,7 @@ public sealed class ArenaBootstrapPr90Tests
 {
     [Fact]
     [Trait("Category", "PR90")]
+    [Trait("Category", "Canary")]
     public void ArenaFixture_IsDeterministicAcrossRuns()
     {
         SimulationConfig config = SimulationConfig.Default(9001) with
@@ -41,6 +42,7 @@ public sealed class ArenaBootstrapPr90Tests
 
     [Fact]
     [Trait("Category", "PR90")]
+    [Trait("Category", "Canary")]
     public void ArenaFixture_RespectsFogAndAOI()
     {
         ServerConfig config = ServerConfig.Default(9002) with
