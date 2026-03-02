@@ -11,22 +11,22 @@ public sealed class ClientTraceRecorder
 
     public int TotalHitEvents { get; private set; }
 
-    public void RecordTick(SnapshotV2 snapshot)
+    public void RecordTick(SnapshotV2 snapshot, IReadOnlyList<int> visibleEntityIds)
     {
-        int[] visibleEntityIds = snapshot.Entities
-            .Select(static entity => entity.EntityId)
+        int[] canonicalVisibleEntityIds = visibleEntityIds
             .OrderBy(static entityId => entityId)
             .ToArray();
+
 
         List<EventTrace> events = new();
         foreach (SnapshotEntity spawn in snapshot.Enters.OrderBy(static entity => entity.EntityId))
         {
-            events.Add(new EventTrace(spawn.EntityId, EventKind: 1, TargetId: null, Amount: null));
+            events.Add(new EventTrace(spawn.EntityId, EventKind: 1, TargetId: null, Amount: null, AbilityId: null));
         }
 
         foreach (int entityId in snapshot.Leaves.OrderBy(static leaveId => leaveId))
         {
-            events.Add(new EventTrace(entityId, EventKind: 2, TargetId: null, Amount: null));
+            events.Add(new EventTrace(entityId, EventKind: 2, TargetId: null, Amount: null, AbilityId: null));
         }
 
         foreach (HitEventV1 hit in snapshot.HitEvents
@@ -35,7 +35,7 @@ public sealed class ClientTraceRecorder
                      .ThenBy(static evt => evt.AbilityId)
                      .ThenBy(static evt => evt.EventSeq))
         {
-            events.Add(new EventTrace(hit.SourceEntityId, EventKind: 3, TargetId: hit.TargetEntityId, Amount: null));
+            events.Add(new EventTrace(hit.SourceEntityId, EventKind: 3, TargetId: hit.TargetEntityId, Amount: null, AbilityId: hit.AbilityId));
             TotalHitEvents++;
         }
 
@@ -44,12 +44,13 @@ public sealed class ClientTraceRecorder
             .ThenBy(static evt => evt.EventKind)
             .ThenBy(static evt => evt.TargetId ?? int.MinValue)
             .ThenBy(static evt => evt.Amount ?? int.MinValue)
+            .ThenBy(static evt => evt.AbilityId ?? int.MinValue)
             .ToArray();
 
         _ticks.Add(new TickTrace(
             TickId: snapshot.Tick,
             ZoneId: snapshot.ZoneId,
-            VisibleEntityIds: visibleEntityIds,
+            VisibleEntityIds: canonicalVisibleEntityIds,
             Events: sortedEvents));
     }
 
@@ -102,6 +103,8 @@ public sealed class ClientTraceRecorder
             builder.Append(evt.TargetId?.ToString(CultureInfo.InvariantCulture) ?? "-");
             builder.Append(':');
             builder.Append(evt.Amount?.ToString(CultureInfo.InvariantCulture) ?? "-");
+            builder.Append(":");
+            builder.Append(evt.AbilityId?.ToString(CultureInfo.InvariantCulture) ?? "-");
         }
     }
 
@@ -121,4 +124,4 @@ public sealed class ClientTraceRecorder
 
 public sealed record TickTrace(int TickId, int ZoneId, int[] VisibleEntityIds, EventTrace[] Events);
 
-public sealed record EventTrace(int EntityId, byte EventKind, int? TargetId, int? Amount);
+public sealed record EventTrace(int EntityId, byte EventKind, int? TargetId, int? Amount, int? AbilityId);

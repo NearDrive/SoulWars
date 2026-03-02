@@ -55,7 +55,7 @@ public sealed class HeadlessClientRunner
                         break;
                     case SnapshotV2 snapshot:
                         _world.ApplySnapshot(snapshot);
-                        traceRecorder.RecordTick(snapshot);
+                        traceRecorder.RecordTick(snapshot, _world.GetVisibleEntityIdsCanonical());
                         Send(new ClientAckV2(snapshot.ZoneId, snapshot.SnapshotSeq));
                         logs.Add(_world.DumpCanonical());
 
