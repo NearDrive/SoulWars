@@ -10,7 +10,8 @@ public static class ServerAppConfigParser
             SqlitePath: null,
             ZoneCount: 1,
             BotCount: 0,
-            ZoneDefinitionsPath: null);
+            ZoneDefinitionsPath: null,
+            ArenaMode: false);
         error = string.Empty;
 
         if (args is null)
@@ -24,6 +25,12 @@ public static class ServerAppConfigParser
             for (int i = 0; i < args.Length; i++)
             {
                 string key = args[i];
+                if (string.Equals(key, "--arena", StringComparison.Ordinal))
+                {
+                    config = config with { ArenaMode = true };
+                    continue;
+                }
+
                 if (i + 1 >= args.Length)
                 {
                     error = $"Argument '{key}' requires a value.";
