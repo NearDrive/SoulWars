@@ -24,9 +24,9 @@ public sealed class CombatNetworkCanaryTests
             tick => run.ExpectedVisibleByTick[tick],
             run.ObserverSessionId);
 
-        Assert.Equal(1, run.SpawnTicks.Count);
-        Assert.Equal(1, run.DespawnTicks.Count);
-        Assert.True(run.SpawnTicks[0] < run.DespawnTicks[0]);
+        int spawnTick = Assert.Single(run.SpawnTicks);
+        int despawnTick = Assert.Single(run.DespawnTicks);
+        Assert.True(spawnTick < despawnTick);
 
         int targetEntityId = run.TargetEntityId;
         foreach (SnapshotV2 snapshot in run.ObserverSnapshots)
@@ -50,7 +50,7 @@ public sealed class CombatNetworkCanaryTests
         Assert.True(run.ExpectedVisibleByTick[hit.TickId].Contains(run.TargetEntityId));
 
         SnapshotV2 hitTickSnapshot = run.ObserverSnapshots.Single(snapshot => snapshot.Tick == hit.TickId);
-        SnapshotEntity targetAtHit = Assert.Single(hitTickSnapshot.Entities.Where(entity => entity.EntityId == run.TargetEntityId));
+        SnapshotEntity targetAtHit = Assert.Single(hitTickSnapshot.Entities, entity => entity.EntityId == run.TargetEntityId);
         long dx = (long)targetAtHit.PosXRaw - hit.HitPosXRaw;
         long dy = (long)targetAtHit.PosYRaw - hit.HitPosYRaw;
         long distanceSq = dx * dx + dy * dy;
