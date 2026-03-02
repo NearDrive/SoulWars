@@ -110,13 +110,13 @@ file static class CombatNetworkPr89Harness
 
     private static readonly ImmutableArray<StepCommand> Script =
     [
-        new StepCommand(0, 1, 0, 0, CastPoint: false),
-        new StepCommand(0, 1, 0, 0, CastPoint: false),
+        new StepCommand(1, 0, 0, 0, CastPoint: false),
+        new StepCommand(1, 0, 0, 0, CastPoint: false),
         new StepCommand(0, 0, 0, 0, CastPoint: false),
         new StepCommand(0, 0, 0, 0, CastPoint: false),
         new StepCommand(0, 0, 0, 0, CastPoint: false),
-        new StepCommand(0, -1, 0, 0, CastPoint: false),
-        new StepCommand(0, -1, 0, 0, CastPoint: false),
+        new StepCommand(-1, 0, 0, 0, CastPoint: false),
+        new StepCommand(-1, 0, 0, 0, CastPoint: false),
         new StepCommand(0, 0, 0, 0, CastPoint: false),
     ];
 
@@ -126,8 +126,8 @@ file static class CombatNetworkPr89Harness
         {
             SnapshotEveryTicks = 1,
             NpcCountPerZone = 0,
-            VisionRadius = Fix32.FromInt(8),
-            VisionRadiusSq = Fix32.FromInt(64)
+            VisionRadius = Fix32.FromInt(4),
+            VisionRadiusSq = Fix32.FromInt(16)
         };
 
         ServerHost host = CreateHost(config);
@@ -448,11 +448,11 @@ file static class CombatNetworkPr89Harness
 
     private static ServerHost CreateHost(ServerConfig config)
     {
-        TileMap map = CreateObstacleMap();
+        TileMap map = CreateOpenMap();
         ImmutableArray<EntityState> entities =
         [
-            new EntityState(new EntityId(ObserverEntityId), At(2, 2), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(1), VisionRadiusTiles: 8),
-            new EntityState(new EntityId(TargetEntityId), At(8, 2), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(2), VisionRadiusTiles: 8)
+            new EntityState(new EntityId(ObserverEntityId), At(2, 2), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(1), VisionRadiusTiles: 4),
+            new EntityState(new EntityId(TargetEntityId), At(9, 2), Vec2Fix.Zero, 100, 100, true, Fix32.One, 1, 1, 0, FactionId: new FactionId(2), VisionRadiusTiles: 4)
         ];
 
         ZoneState zone = new(new ZoneId(ZoneIdValue), map, entities);
@@ -472,7 +472,7 @@ file static class CombatNetworkPr89Harness
         return new ServerHost(config, bootstrap: bootstrap);
     }
 
-    private static TileMap CreateObstacleMap()
+    private static TileMap CreateOpenMap()
     {
         const int width = 12;
         const int height = 8;
@@ -487,16 +487,6 @@ file static class CombatNetworkPr89Harness
                     tiles[(y * width) + x] = TileKind.Solid;
                 }
             }
-        }
-
-        for (int y = 1; y <= 6; y++)
-        {
-            if (y == 4)
-            {
-                continue;
-            }
-
-            tiles[(y * width) + 5] = TileKind.Solid;
         }
 
         return new TileMap(width, height, tiles.ToImmutableArray());
