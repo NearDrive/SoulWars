@@ -24,6 +24,10 @@ public sealed class CombatNetworkCanaryTests
             tick => run.ExpectedVisibleByTick[tick],
             run.ObserverSessionId);
 
+        Assert.True(run.SpawnTicks.Count == 1,
+            $"Expected exactly one spawn transition. spawnTicks=[{string.Join(',', run.SpawnTicks)}] summary={run.DiagnosticsSummary}");
+        Assert.True(run.DespawnTicks.Count == 1,
+            $"Expected exactly one despawn transition. despawnTicks=[{string.Join(',', run.DespawnTicks)}] summary={run.DiagnosticsSummary}");
         int spawnTick = Assert.Single(run.SpawnTicks);
         int despawnTick = Assert.Single(run.DespawnTicks);
         Assert.True(spawnTick < despawnTick);
@@ -94,6 +98,7 @@ file static class CombatNetworkPr89Harness
     private const int ZoneIdValue = 1;
     private const int ObserverEntityId = 51;
     private const int TargetEntityId = 61;
+    private const int TicksPerStep = 10;
 
     private static readonly ImmutableArray<StepCommand> Script =
     [
@@ -158,51 +163,54 @@ file static class CombatNetworkPr89Harness
         for (int step = 0; step < Script.Length; step++)
         {
             StepCommand command = Script[step];
-            observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick, command.ObserverMoveX, command.ObserverMoveY)));
-            targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick, command.TargetMoveX, command.TargetMoveY)));
-
-            if (command.CastPoint)
+            for (int tickInStep = 0; tickInStep < TicksPerStep; tickInStep++)
             {
-                ZoneState zone = host.CurrentWorld.Zones.Single(zone => zone.Id.Value == ZoneIdValue);
-                EntityState target = zone.Entities.Single(entity => entity.Id.Value == targetRuntimeEntityId);
+                observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick, command.ObserverMoveX, command.ObserverMoveY)));
+                targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick, command.TargetMoveX, command.TargetMoveY)));
 
-                observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ProtocolCastSkillCommand(
-                    Tick: inputTick,
-                    CasterId: observerRuntimeEntityId,
-                    SkillId: 1,
-                    ZoneId: ZoneIdValue,
-                    TargetKind: (byte)CastTargetKind.Point,
-                    TargetEntityId: 0,
-                    TargetPosXRaw: target.Pos.X.Raw,
-                    TargetPosYRaw: target.Pos.Y.Raw)));
+                if (command.CastPoint && tickInStep == 0)
+                {
+                    ZoneState zone = host.CurrentWorld.Zones.Single(zone => zone.Id.Value == ZoneIdValue);
+                    EntityState target = zone.Entities.Single(entity => entity.Id.Value == targetRuntimeEntityId);
 
-                castTick = inputTick;
+                    observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ProtocolCastSkillCommand(
+                        Tick: inputTick,
+                        CasterId: observerRuntimeEntityId,
+                        SkillId: 1,
+                        ZoneId: ZoneIdValue,
+                        TargetKind: (byte)CastTargetKind.Point,
+                        TargetEntityId: 0,
+                        TargetPosXRaw: target.Pos.X.Raw,
+                        TargetPosYRaw: target.Pos.Y.Raw)));
+
+                    castTick = inputTick;
+                }
+
+                inputTick++;
+                host.StepOnce();
+
+                SnapshotV2 observerSnapshot = DrainAndAckLatestSnapshot(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
+                _ = DrainAndAckLatestSnapshot(targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
+                observerSnapshots.Add(observerSnapshot);
+
+                ImmutableHashSet<int> visible = aoiProvider.ComputeVisible(host.CurrentWorld, new ZoneId(ZoneIdValue), new EntityId(observerRuntimeEntityId)).EntityIds
+                    .Select(entityId => entityId.Value)
+                    .ToImmutableHashSet();
+                expectedVisibleByTick[observerSnapshot.Tick] = visible;
+
+                bool visibleToObserver = observerSnapshot.Entities.Any(entity => entity.EntityId == targetRuntimeEntityId);
+                if (!previousVisibleToObserver && visibleToObserver)
+                {
+                    spawnTicks.Add(observerSnapshot.Tick);
+                }
+
+                if (previousVisibleToObserver && !visibleToObserver)
+                {
+                    despawnTicks.Add(observerSnapshot.Tick);
+                }
+
+                previousVisibleToObserver = visibleToObserver;
             }
-
-            inputTick++;
-            host.StepOnce();
-
-            SnapshotV2 observerSnapshot = DrainAndAckLatestSnapshot(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
-            _ = DrainAndAckLatestSnapshot(targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
-            observerSnapshots.Add(observerSnapshot);
-
-            ImmutableHashSet<int> visible = aoiProvider.ComputeVisible(host.CurrentWorld, new ZoneId(ZoneIdValue), new EntityId(observerRuntimeEntityId)).EntityIds
-                .Select(entityId => entityId.Value)
-                .ToImmutableHashSet();
-            expectedVisibleByTick[observerSnapshot.Tick] = visible;
-
-            bool visibleToObserver = observerSnapshot.Entities.Any(entity => entity.EntityId == targetRuntimeEntityId);
-            if (!previousVisibleToObserver && visibleToObserver)
-            {
-                spawnTicks.Add(observerSnapshot.Tick);
-            }
-
-            if (previousVisibleToObserver && !visibleToObserver)
-            {
-                despawnTicks.Add(observerSnapshot.Tick);
-            }
-
-            previousVisibleToObserver = visibleToObserver;
 
             if (restartAfterStep.HasValue && restartAfterStep.Value == step)
             {
@@ -230,28 +238,31 @@ file static class CombatNetworkPr89Harness
                 for (int replayStep = 0; replayStep <= step; replayStep++)
                 {
                     StepCommand replayCommand = Script[replayStep];
-                    observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick, replayCommand.ObserverMoveX, replayCommand.ObserverMoveY)));
-                    targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick, replayCommand.TargetMoveX, replayCommand.TargetMoveY)));
-
-                    if (replayCommand.CastPoint)
+                    for (int replayTickInStep = 0; replayTickInStep < TicksPerStep; replayTickInStep++)
                     {
-                        ZoneState zone = host.CurrentWorld.Zones.Single(zone => zone.Id.Value == ZoneIdValue);
-                        EntityState target = zone.Entities.Single(entity => entity.Id.Value == targetRuntimeEntityId);
-                        observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ProtocolCastSkillCommand(
-                            Tick: inputTick,
-                            CasterId: observerRuntimeEntityId,
-                            SkillId: 1,
-                            ZoneId: ZoneIdValue,
-                            TargetKind: (byte)CastTargetKind.Point,
-                            TargetEntityId: 0,
-                            TargetPosXRaw: target.Pos.X.Raw,
-                            TargetPosYRaw: target.Pos.Y.Raw)));
-                    }
+                        observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick, replayCommand.ObserverMoveX, replayCommand.ObserverMoveY)));
+                        targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new InputCommand(inputTick, replayCommand.TargetMoveX, replayCommand.TargetMoveY)));
 
-                    inputTick++;
-                    host.StepOnce();
-                    _ = DrainAndAckLatestSnapshot(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
-                    _ = DrainAndAckLatestSnapshot(targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
+                        if (replayCommand.CastPoint && replayTickInStep == 0)
+                        {
+                            ZoneState zone = host.CurrentWorld.Zones.Single(zone => zone.Id.Value == ZoneIdValue);
+                            EntityState target = zone.Entities.Single(entity => entity.Id.Value == targetRuntimeEntityId);
+                            observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ProtocolCastSkillCommand(
+                                Tick: inputTick,
+                                CasterId: observerRuntimeEntityId,
+                                SkillId: 1,
+                                ZoneId: ZoneIdValue,
+                                TargetKind: (byte)CastTargetKind.Point,
+                                TargetEntityId: 0,
+                                TargetPosXRaw: target.Pos.X.Raw,
+                                TargetPosYRaw: target.Pos.Y.Raw)));
+                        }
+
+                        inputTick++;
+                        host.StepOnce();
+                        _ = DrainAndAckLatestSnapshot(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
+                        _ = DrainAndAckLatestSnapshot(targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
+                    }
                 }
 
                 previousVisibleToObserver = false;
@@ -270,7 +281,8 @@ file static class CombatNetworkPr89Harness
             spawnTicks,
             despawnTicks,
             payloadHashes,
-            StateChecksum.Compute(host.CurrentWorld));
+            StateChecksum.Compute(host.CurrentWorld),
+            BuildDiagnosticsSummary(observerSnapshots, spawnTicks, despawnTicks, castTick));
     }
 
     private static SnapshotV2 DrainAndAckLatestSnapshot(InMemoryEndpoint endpoint, ref int sessionId, ref int entityId, List<string> payloadHashes)
@@ -321,6 +333,17 @@ file static class CombatNetworkPr89Harness
         return latestSnapshot;
     }
 
+
+    private static string BuildDiagnosticsSummary(List<SnapshotV2> snapshots, List<int> spawnTicks, List<int> despawnTicks, int castTick)
+    {
+        Dictionary<int, int> hitCountsByTick = snapshots
+            .SelectMany(s => s.HitEvents.Select(h => h.TickId))
+            .GroupBy(tick => tick)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        string hitSummary = string.Join(',', hitCountsByTick.OrderBy(kvp => kvp.Key).Select(kvp => $"{kvp.Key}:{kvp.Value}"));
+        return $"ticks={snapshots.Count};castTick={castTick};spawns=[{string.Join(',', spawnTicks)}];despawns=[{string.Join(',', despawnTicks)}];hitsByTick=[{hitSummary}]";
+    }
     private static string ComputePayloadHash(byte[] payload)
     {
         byte[] bytes = SHA256.HashData(payload);
@@ -410,4 +433,5 @@ public sealed record CombatScenarioRun(
     List<int> SpawnTicks,
     List<int> DespawnTicks,
     List<string> ObserverPayloadHashes,
-    string FinalChecksum);
+    string FinalChecksum,
+    string DiagnosticsSummary);
