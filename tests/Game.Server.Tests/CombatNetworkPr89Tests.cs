@@ -132,8 +132,8 @@ file static class CombatNetworkPr89Harness
         int targetRuntimeEntityId = -1;
 
         host.AdvanceTicks(2);
-        _ = DrainAndAckLatestSnapshot(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, []);
-        _ = DrainAndAckLatestSnapshot(targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
+        _ = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, []);
+        _ = AwaitSnapshot(host, targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
 
         Assert.Equal(ObserverEntityId, observerRuntimeEntityId);
         Assert.Equal(TargetEntityId, targetRuntimeEntityId);
@@ -214,8 +214,8 @@ file static class CombatNetworkPr89Harness
                     HandshakeAndEnter(targetEndpoint, "pr89-target");
 
                     host.AdvanceTicks(2);
-                    _ = DrainAndAckLatestSnapshot(observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
-                    _ = DrainAndAckLatestSnapshot(targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
+                    _ = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
+                    _ = AwaitSnapshot(host, targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
 
                     observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
                     targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
@@ -248,6 +248,22 @@ file static class CombatNetworkPr89Harness
     }
 
     private static SnapshotV2 DrainAndAckLatestSnapshot(InMemoryEndpoint endpoint, ref int sessionId, ref int entityId, List<string> payloadHashes)
+        => DrainAndAckLatestSnapshotOrNull(endpoint, ref sessionId, ref entityId, payloadHashes)
+            ?? throw new Xunit.Sdk.XunitException("Expected snapshot.");
+
+    private static SnapshotV2 AwaitSnapshot(ServerHost host, InMemoryEndpoint endpoint, ref int sessionId, ref int entityId, List<string> payloadHashes)
+    {
+        SnapshotV2? snapshot = DrainAndAckLatestSnapshotOrNull(endpoint, ref sessionId, ref entityId, payloadHashes);
+        for (int i = 0; snapshot is null && i < 8; i++)
+        {
+            host.StepOnce();
+            snapshot = DrainAndAckLatestSnapshotOrNull(endpoint, ref sessionId, ref entityId, payloadHashes);
+        }
+
+        return snapshot ?? throw new Xunit.Sdk.XunitException("Expected snapshot after bootstrap ticks.");
+    }
+
+    private static SnapshotV2? DrainAndAckLatestSnapshotOrNull(InMemoryEndpoint endpoint, ref int sessionId, ref int entityId, List<string> payloadHashes)
     {
         SnapshotV2? latestSnapshot = null;
 
@@ -276,7 +292,7 @@ file static class CombatNetworkPr89Harness
             }
         }
 
-        return latestSnapshot ?? throw new Xunit.Sdk.XunitException("Expected snapshot.");
+        return latestSnapshot;
     }
 
     private static string ComputePayloadHash(byte[] payload)
