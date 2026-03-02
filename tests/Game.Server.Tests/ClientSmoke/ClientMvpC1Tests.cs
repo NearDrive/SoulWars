@@ -1,3 +1,4 @@
+using System.Globalization;
 using Game.Client.Headless;
 using Game.Core;
 using Game.Protocol;
@@ -72,6 +73,52 @@ public sealed class ClientMvpC1Tests
             "entity=9 kind=Npc pos=(200,100) hp=99");
 
         Assert.Equal(expected, actual);
+    }
+
+
+    [Fact]
+    [Trait("Category", "PR92")]
+    [Trait("Category", "ClientSmoke")]
+    [Trait("Category", "Canary")]
+    public void ClientStateDump_IsCultureInvariant()
+    {
+        CultureInfo originalCulture = CultureInfo.CurrentCulture;
+        CultureInfo originalUiCulture = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("tr-TR");
+
+            ClientWorldView view = new();
+            SnapshotV2 snapshot = new(
+                Tick: 5,
+                ZoneId: 1,
+                SnapshotSeq: 10,
+                IsFull: true,
+                Entities:
+                [
+                    new SnapshotEntity(9, 200, 100, Hp: 99, Kind: SnapshotEntityKind.Npc),
+                    new SnapshotEntity(2, 12, 8, Hp: 10, Kind: SnapshotEntityKind.Player),
+                    new SnapshotEntity(5, 16, 9, Hp: 17, Kind: SnapshotEntityKind.Player)
+                ]);
+
+            view.ApplySnapshot(snapshot);
+            string actual = view.DumpCanonical();
+
+            string expected = string.Join('\n',
+                "tick=5 zone=1",
+                "entity=2 kind=Player pos=(12,8) hp=10",
+                "entity=5 kind=Player pos=(16,9) hp=17",
+                "entity=9 kind=Npc pos=(200,100) hp=99");
+
+            Assert.Equal(expected, actual);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUiCulture;
+        }
     }
 
     [Fact]
