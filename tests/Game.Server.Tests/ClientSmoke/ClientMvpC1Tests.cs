@@ -159,7 +159,7 @@ public sealed class ClientMvpC1Tests
         Assert.True(result.SentInputs.Select(input => input.Tick).SequenceEqual(result.SentInputs.Select(input => input.Tick).OrderBy(tick => tick)));
         Assert.True(result.SentInputs.Select(input => input.Tick).Distinct().Count() == result.SentInputs.Count);
 
-        CastSkillCommand cast = Assert.Single(result.SentCasts);
+        Game.Protocol.CastSkillCommand cast = Assert.Single(result.SentCasts);
         Assert.Equal(3, cast.TargetKind);
         Assert.Equal(0, cast.TargetEntityId);
 
