@@ -141,6 +141,7 @@ file static class CombatNetworkPr89Harness
         observerEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
         targetEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ZoneIdValue, 0)));
 
+        List<string> payloadHashes = new();
         _ = AwaitSnapshot(host, observerEndpoint, ref observerSessionId, ref observerRuntimeEntityId, payloadHashes);
         _ = AwaitSnapshot(host, targetEndpoint, ref targetSessionId, ref targetRuntimeEntityId, []);
 
@@ -149,7 +150,6 @@ file static class CombatNetworkPr89Harness
         Dictionary<int, IReadOnlySet<int>> expectedVisibleByTick = new();
         List<int> spawnTicks = new();
         List<int> despawnTicks = new();
-        List<string> payloadHashes = new();
 
         int castTick = -1;
         int inputTick = host.CurrentWorld.Tick + 1;
