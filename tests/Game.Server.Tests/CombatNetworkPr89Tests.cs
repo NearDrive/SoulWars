@@ -49,7 +49,15 @@ public sealed class CombatNetworkCanaryTests
             .Where(hit => hit.SourceEntityId == run.ObserverEntityId && hit.TargetEntityId == run.TargetEntityId)
             .ToArray();
 
-        HitEventV1 hit = Assert.Single(hits);
+        Assert.True(hits.Length > 0, $"Expected at least one matching hit event. summary={run.DiagnosticsSummary}");
+        HitEventV1 hit = hits
+            .OrderBy(h => h.TickId)
+            .ThenBy(h => h.SourceEntityId)
+            .ThenBy(h => h.TargetEntityId)
+            .ThenBy(h => h.AbilityId)
+            .ThenBy(h => h.EventSeq)
+            .First();
+        Assert.True(hits.Length == 1, $"Expected exactly one matching hit event. hitCount={hits.Length} summary={run.DiagnosticsSummary}");
         Assert.True(hit.TickId >= run.CastTick);
         Assert.True(run.ExpectedVisibleByTick[hit.TickId].Contains(run.TargetEntityId));
 
@@ -376,8 +384,17 @@ file static class CombatNetworkPr89Harness
             .GroupBy(tick => tick)
             .ToDictionary(g => g.Key, g => g.Count());
 
+        Dictionary<int, int> projectileEventCountsByTick = snapshots
+            .SelectMany(s => s.ProjectileEvents.Select(e => e.TickId))
+            .GroupBy(tick => tick)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        int totalHitEvents = snapshots.Sum(snapshot => snapshot.HitEvents.Length);
+        int totalProjectileEvents = snapshots.Sum(snapshot => snapshot.ProjectileEvents.Length);
+
         string hitSummary = string.Join(',', hitCountsByTick.OrderBy(kvp => kvp.Key).Select(kvp => $"{kvp.Key}:{kvp.Value}"));
-        return $"ticks={snapshots.Count};castTick={castTick};spawns=[{string.Join(',', spawnTicks)}];despawns=[{string.Join(',', despawnTicks)}];hitsByTick=[{hitSummary}]";
+        string projectileSummary = string.Join(',', projectileEventCountsByTick.OrderBy(kvp => kvp.Key).Select(kvp => $"{kvp.Key}:{kvp.Value}"));
+        return $"ticks={snapshots.Count};castTick={castTick};spawns=[{string.Join(',', spawnTicks)}];despawns=[{string.Join(',', despawnTicks)}];totalHitEvents={totalHitEvents};totalProjectileEvents={totalProjectileEvents};hitsByTick=[{hitSummary}];projectileEventsByTick=[{projectileSummary}]";
     }
     private static string ComputePayloadHash(byte[] payload)
     {
