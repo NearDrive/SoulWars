@@ -52,8 +52,6 @@ internal sealed class DelayedClientTransport : IClientTransport
     {
         lock (_gate)
         {
-            PumpAvailableFramesCore();
-
             if (_scheduled.Count == 0 || _scheduled.Peek().DeliverAtTick > _currentTick)
             {
                 payload = Array.Empty<byte>();

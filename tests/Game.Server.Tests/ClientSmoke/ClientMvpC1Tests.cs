@@ -230,6 +230,7 @@ public sealed class ClientMvpC1Tests
             new MultiPayloadTransport(frameA, frameB),
             delayTicks: 2);
 
+        delayed.PumpAvailableFrames();
         Assert.False(delayed.TryRead(out _));
 
         delayed.AdvanceTick();
