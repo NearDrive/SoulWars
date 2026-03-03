@@ -351,7 +351,7 @@ public sealed class ClientMvpC1Tests
             host.AdvanceSimulationOnce();
             transport.PumpAvailableFrames();
             transport.AdvanceTick();
-            await DrainClientOutboundQueueAsync(endpoint, runTask);
+            await DrainClientOutboundQueueAsync(endpoint, transport, runTask);
 
             const int maxInboundDrainSpins = 4096;
             int inboundDrainSpins = 0;
@@ -364,7 +364,7 @@ public sealed class ClientMvpC1Tests
 
                 host.ProcessInboundOnce();
                 transport.PumpAvailableFrames();
-                await DrainClientOutboundQueueAsync(endpoint, runTask);
+                await DrainClientOutboundQueueAsync(endpoint, transport, runTask);
             }
 
             await Task.Yield();
@@ -374,6 +374,21 @@ public sealed class ClientMvpC1Tests
         Assert.True(result.HandshakeAccepted);
         Assert.NotEmpty(result.CanonicalTrace);
         return result;
+    }
+
+    private static async Task DrainClientOutboundQueueAsync(InMemoryEndpoint endpoint, DelayedClientTransport transport, Task<ClientRunResult> runTask)
+    {
+        const int maxDrainSpins = 4096;
+        int spins = 0;
+        while (!runTask.IsCompleted && (endpoint.PendingToClientCount > 0 || transport.ReadyFrameCount > 0))
+        {
+            if (spins++ >= maxDrainSpins)
+            {
+                break;
+            }
+
+            await Task.Yield();
+        }
     }
 
     private static async Task DrainClientOutboundQueueAsync(InMemoryEndpoint endpoint, Task<ClientRunResult> runTask)
