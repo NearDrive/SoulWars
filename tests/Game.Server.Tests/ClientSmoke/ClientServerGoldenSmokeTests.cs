@@ -2,6 +2,7 @@ using Game.Client.Headless;
 using Game.Client.Headless.Runtime;
 using Game.Core;
 using Game.Server;
+using System.Collections.Immutable;
 using Xunit;
 
 namespace Game.Server.Tests.ClientSmoke;
@@ -44,7 +45,8 @@ public sealed class ClientServerGoldenSmokeTests
             VisionRadiusSq = Fix32.FromInt(8) * Fix32.FromInt(8)
         };
 
-        ServerHost host = new(config);
+        ServerBootstrap bootstrap = CreateDeterministicArenaBootstrap(config);
+        ServerHost host = new(config, bootstrap: bootstrap);
         InMemoryEndpoint endpoint = new();
         host.Connect(endpoint);
 
@@ -102,5 +104,35 @@ public sealed class ClientServerGoldenSmokeTests
 
             await Task.Yield();
         }
+    }
+
+    private static ServerBootstrap CreateDeterministicArenaBootstrap(ServerConfig config)
+    {
+        WorldState world = ArenaZoneFactory.CreateWorld(config.ToSimulationConfig());
+        ZoneState zone = world.Zones.Single(z => z.Id.Value == ArenaZoneFactory.ArenaZoneId);
+
+        Vec2Fix playerSpawn = ArenaZoneFactory.ResolvePlayerSpawnPoint(1);
+        EntityState guaranteedTarget = new(
+            new EntityId(1),
+            new Vec2Fix(playerSpawn.X + Fix32.One, playerSpawn.Y),
+            new Vec2Fix(Fix32.Zero, Fix32.Zero),
+            100,
+            100,
+            true,
+            Fix32.One,
+            1,
+            1,
+            0,
+            EntityKind.Npc);
+
+        ImmutableArray<EntityState> entities = ImmutableArray.Create(guaranteedTarget);
+        ZoneState updatedZone = zone.WithEntities(entities);
+        WorldState updatedWorld = world with
+        {
+            Zones = world.Zones.Select(z => z.Id.Value == ArenaZoneFactory.ArenaZoneId ? updatedZone : z).ToImmutableArray(),
+            EntityLocations = entities.Select(e => new EntityLocation(e.Id, new ZoneId(ArenaZoneFactory.ArenaZoneId))).ToImmutableArray()
+        };
+
+        return new ServerBootstrap(updatedWorld, config.Seed, ImmutableArray<BootstrapPlayerRecord>.Empty);
     }
 }
