@@ -56,6 +56,14 @@ public sealed class ClientWorldView
             .ToArray();
     }
 
+
+    public int[] GetVisibleEntityIdsCanonical()
+    {
+        return _entities.Keys
+            .OrderBy(static entityId => entityId)
+            .ToArray();
+    }
+
     public string DumpCanonical()
     {
         StringBuilder builder = new();

@@ -1,3 +1,5 @@
+using Game.Client.Headless.Diagnostics;
+using Game.Client.Headless.Runtime;
 using Game.Protocol;
 
 namespace Game.Client.Headless;
@@ -18,7 +20,7 @@ public sealed class HeadlessClientRunner
 
     public bool HandshakeAccepted { get; private set; }
 
-    public async Task<HeadlessRunResult> RunAsync(int maxTicks, CancellationToken cancellationToken)
+    public async Task<ClientRunResult> RunAsync(int maxTicks, CancellationToken cancellationToken)
     {
         await _transport.ConnectAsync(_options.Host, _options.Port, cancellationToken).ConfigureAwait(false);
 
@@ -32,6 +34,7 @@ public sealed class HeadlessClientRunner
         List<InputCommand> sentInputs = new();
         List<CastSkillCommand> sentCasts = new();
         List<HitEventV1> observedHits = new();
+        ClientTraceRecorder traceRecorder = new();
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -52,6 +55,7 @@ public sealed class HeadlessClientRunner
                         break;
                     case SnapshotV2 snapshot:
                         _world.ApplySnapshot(snapshot);
+                        traceRecorder.RecordTick(snapshot, _world.GetVisibleEntityIdsCanonical());
                         Send(new ClientAckV2(snapshot.ZoneId, snapshot.SnapshotSeq));
                         logs.Add(_world.DumpCanonical());
 
@@ -95,18 +99,18 @@ public sealed class HeadlessClientRunner
                             HitEventV1 hit = _world.LastHitEvents.First();
                             observedHits.AddRange(_world.LastHitEvents);
                             logs.Add($"hit ability={hit.AbilityId} src={hit.SourceEntityId} dst={hit.TargetEntityId} tick={hit.TickId}");
-                            return new HeadlessRunResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted);
+                            return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
                         }
 
                         if (snapshot.Tick >= maxTicks)
                         {
-                            return new HeadlessRunResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted);
+                            return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
                         }
 
                         break;
                     case Disconnect disconnect:
                         logs.Add($"disconnect reason={disconnect.Reason}");
-                        return new HeadlessRunResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted);
+                        return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
                 }
             }
 
@@ -116,7 +120,7 @@ public sealed class HeadlessClientRunner
             }
         }
 
-        return new HeadlessRunResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted);
+        return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
     }
 
     private void Send(IClientMessage message)
@@ -130,14 +134,27 @@ public sealed class HeadlessClientRunner
         long dy = (long)a.PosYRaw - b.PosYRaw;
         return dx * dx + dy * dy;
     }
-}
 
-public sealed record HeadlessRunResult(
-    IReadOnlyList<string> Logs,
-    IReadOnlyList<InputCommand> SentInputs,
-    IReadOnlyList<CastSkillCommand> SentCasts,
-    IReadOnlyList<HitEventV1> ObservedHits,
-    bool HandshakeAccepted)
-{
-    public bool HitObserved => ObservedHits.Count > 0;
+    private static ClientRunResult BuildResult(
+        IReadOnlyList<string> logs,
+        IReadOnlyList<InputCommand> sentInputs,
+        IReadOnlyList<CastSkillCommand> sentCasts,
+        IReadOnlyList<HitEventV1> observedHits,
+        bool handshakeAccepted,
+        int totalTicks,
+        ClientTraceRecorder traceRecorder)
+    {
+        string canonicalTrace = traceRecorder.BuildCanonicalTraceDump();
+        string traceHash = traceRecorder.ComputeTraceHash();
+        return new ClientRunResult(
+            logs,
+            sentInputs,
+            sentCasts,
+            observedHits,
+            handshakeAccepted,
+            totalTicks,
+            traceRecorder.TotalHitEvents,
+            traceHash,
+            canonicalTrace);
+    }
 }
