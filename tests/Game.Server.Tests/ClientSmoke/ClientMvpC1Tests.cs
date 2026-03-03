@@ -204,6 +204,43 @@ public sealed class ClientMvpC1Tests
         Assert.Equal(first, second);
     }
 
+    [Fact]
+    [Trait("Category", "PR97")]
+    [Trait("Category", "ClientSmoke")]
+    public async Task ClientWithFixedDelay_ProducesSameTrace()
+    {
+        ClientRunResult delay0 = await RunArenaScenarioWithFixedDelayAsync(delayTicks: 0, maxTicks: 600);
+        ClientRunResult delay3 = await RunArenaScenarioWithFixedDelayAsync(delayTicks: 3, maxTicks: 600);
+
+        Assert.Equal(delay0.TraceHash, delay3.TraceHash);
+        Assert.Equal(delay0.CanonicalTrace, delay3.CanonicalTrace);
+    }
+
+    [Fact]
+    [Trait("Category", "PR97")]
+    [Trait("Category", "ClientSmoke")]
+    public async Task DelayedTransport_DeliversOnlyAfterTick()
+    {
+        byte[] frameA = [1, 2, 3];
+        byte[] frameB = [4, 5, 6, 7];
+
+        await using DelayedClientTransport delayed = new(
+            new MultiPayloadTransport(frameA, frameB),
+            delayTicks: 2);
+
+        Assert.False(delayed.TryRead(out _));
+
+        delayed.AdvanceTick();
+        Assert.False(delayed.TryRead(out _));
+
+        delayed.AdvanceTick();
+        Assert.True(delayed.TryRead(out byte[] deliveredA));
+        Assert.True(delayed.TryRead(out byte[] deliveredB));
+        Assert.Equal(frameA, deliveredA);
+        Assert.Equal(frameB, deliveredB);
+        Assert.False(delayed.TryRead(out _));
+    }
+
     private static async Task<int[]> ReadChunkSizesAsync(byte[] payload, int[] chunkPattern)
     {
         await using ChunkingClientTransport chunked = new(
@@ -276,6 +313,65 @@ public sealed class ClientMvpC1Tests
         return result;
     }
 
+    private static async Task<ClientRunResult> RunArenaScenarioWithFixedDelayAsync(int delayTicks, int maxTicks)
+    {
+        ServerConfig config = ServerConfig.Default(seed: 9107) with
+        {
+            SnapshotEveryTicks = 1,
+            ArenaMode = true,
+            VisionRadius = Fix32.FromInt(8),
+            VisionRadiusSq = Fix32.FromInt(8) * Fix32.FromInt(8)
+        };
+
+        ServerHost host = new(config);
+        InMemoryEndpoint endpoint = new();
+        host.Connect(endpoint);
+
+        ClientOptions options = new("inproc", 0, 1, "basic", ArenaZoneFactory.ArenaZoneId, 1, "client-smoke-pr97", StopOnFirstHit: false);
+        await using DelayedClientTransport transport = new(new InMemoryClientTransport(endpoint), delayTicks);
+        HeadlessClientRunner runner = new(transport, options);
+
+        using CancellationTokenSource cts = new();
+        Task<ClientRunResult> runTask = runner.RunAsync(maxTicks, cts.Token);
+
+        const int maxServerSteps = 12000;
+        int serverSteps = 0;
+        while (!runTask.IsCompleted)
+        {
+            if (serverSteps++ >= maxServerSteps)
+            {
+                cts.Cancel();
+                throw new Xunit.Sdk.XunitException($"Client run did not complete within {maxServerSteps} deterministic server steps.");
+            }
+
+            host.ProcessInboundOnce();
+            host.AdvanceSimulationOnce();
+            transport.AdvanceTick();
+            await DrainClientOutboundQueueAsync(endpoint, runTask);
+
+            const int maxInboundDrainSpins = 4096;
+            int inboundDrainSpins = 0;
+            while (!runTask.IsCompleted && endpoint.PendingToServerCount > 0)
+            {
+                if (inboundDrainSpins++ >= maxInboundDrainSpins)
+                {
+                    break;
+                }
+
+                host.ProcessInboundOnce();
+                transport.AdvanceTick();
+                await DrainClientOutboundQueueAsync(endpoint, runTask);
+            }
+
+            await Task.Yield();
+        }
+
+        ClientRunResult result = await runTask;
+        Assert.True(result.HandshakeAccepted);
+        Assert.NotEmpty(result.CanonicalTrace);
+        return result;
+    }
+
     private static async Task DrainClientOutboundQueueAsync(InMemoryEndpoint endpoint, Task<ClientRunResult> runTask)
     {
         const int maxDrainSpins = 4096;
@@ -314,6 +410,36 @@ internal sealed class SinglePayloadTransport : IClientTransport
     public SinglePayloadTransport(byte[] payload)
     {
         _payloads = new Queue<byte[]>([payload]);
+    }
+
+    public Task ConnectAsync(string host, int port, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public void Send(byte[] payload)
+    {
+    }
+
+    public bool TryRead(out byte[] payload)
+    {
+        if (_payloads.Count == 0)
+        {
+            payload = Array.Empty<byte>();
+            return false;
+        }
+
+        payload = _payloads.Dequeue();
+        return true;
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+internal sealed class MultiPayloadTransport : IClientTransport
+{
+    private readonly Queue<byte[]> _payloads;
+
+    public MultiPayloadTransport(params byte[][] payloads)
+    {
+        _payloads = new Queue<byte[]>(payloads);
     }
 
     public Task ConnectAsync(string host, int port, CancellationToken cancellationToken) => Task.CompletedTask;
