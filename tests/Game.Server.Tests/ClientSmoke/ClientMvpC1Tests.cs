@@ -233,7 +233,7 @@ public sealed class ClientMvpC1Tests
         InMemoryEndpoint endpoint = new();
         host.Connect(endpoint);
 
-        ClientOptions options = new("inproc", 0, 1, "basic", ArenaZoneFactory.ArenaZoneId, 1, "client-smoke-pr96");
+        ClientOptions options = new("inproc", 0, 1, "basic", ArenaZoneFactory.ArenaZoneId, 1, "client-smoke-pr96", StopOnFirstHit: false);
         await using IClientTransport transport = createTransport(endpoint);
         HeadlessClientRunner runner = new(transport, options);
 

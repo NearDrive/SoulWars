@@ -149,6 +149,11 @@ public sealed class HeadlessClientRunner
                     }
                 }
 
+                if (_options.StopOnFirstHit && observedHits.Count > 0)
+                {
+                    return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
+                }
+
                 if (snapshot.Tick >= maxTicks)
                 {
                     return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
