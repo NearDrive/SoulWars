@@ -123,7 +123,7 @@ public sealed class ClientServerGoldenSmokeTests
             1,
             1,
             0,
-            EntityKind.Npc);
+            EntityKind.Player);
 
         ImmutableArray<EntityState> entities = ImmutableArray.Create(guaranteedTarget);
         ZoneState updatedZone = zone.WithEntities(entities);
