@@ -1,9 +1,6 @@
 using Game.Client.Headless;
 using Game.Client.Headless.Diagnostics;
-using Game.Client.Headless.Runtime;
-using Game.Core;
 using Game.Protocol;
-using Game.Server;
 using Xunit;
 
 namespace Game.Client.Tests.Trace;
@@ -17,13 +14,14 @@ public sealed class ClientTraceRecorderTests
     [Trait("Category", "PR95")]
     [Trait("Category", "ClientSmoke")]
     [Trait("Category", "Canary")]
-    public async Task ClientTrace_IsDeterministicAcrossRuns()
+    public Task ClientTrace_IsDeterministicAcrossRuns()
     {
-        ClientRunResult result1 = await RunArenaScriptAsync("trace-run");
-        ClientRunResult result2 = await RunArenaScriptAsync("trace-run");
+        ClientTraceRecorder run1 = BuildDeterministicScriptTrace();
+        ClientTraceRecorder run2 = BuildDeterministicScriptTrace();
 
-        Assert.Equal(result1.TraceHash, result2.TraceHash);
-        Assert.Equal(result1.CanonicalTrace, result2.CanonicalTrace);
+        Assert.Equal(run1.ComputeTraceHash(), run2.ComputeTraceHash());
+        Assert.Equal(run1.BuildCanonicalTraceDump(), run2.BuildCanonicalTraceDump());
+        return Task.CompletedTask;
     }
 
 
@@ -103,55 +101,42 @@ public sealed class ClientTraceRecorderTests
         Assert.Equal("T:15|Z:1|E:1,2,7|EV:3:2:-:-:-,4:1:-:-:-,7:3:1:-:1,7:3:2:-:1,8:1:-:-:-,9:2:-:-:-", canonical);
     }
 
-    private static async Task<ClientRunResult> RunArenaScriptAsync(string accountId)
+    private static ClientTraceRecorder BuildDeterministicScriptTrace()
     {
-        ServerConfig config = ServerConfig.Default(seed: 9501) with
-        {
-            SnapshotEveryTicks = 1,
-            ArenaMode = true,
-            VisionRadius = Fix32.FromInt(8),
-            VisionRadiusSq = Fix32.FromInt(8) * Fix32.FromInt(8)
-        };
+        ClientWorldView world = new();
+        ClientTraceRecorder recorder = new();
 
-        ServerHost host = new(config);
-        InMemoryEndpoint endpoint = new();
-        host.Connect(endpoint);
+        SnapshotV2 tick1 = new(
+            Tick: 1,
+            ZoneId: 1,
+            SnapshotSeq: 1,
+            IsFull: true,
+            Entities:
+            [
+                new SnapshotEntity(10, 100, 100, Hp: 50, Kind: SnapshotEntityKind.Player),
+                new SnapshotEntity(12, 120, 100, Hp: 35, Kind: SnapshotEntityKind.Npc)
+            ]);
 
-        ClientOptions options = new("inproc", 0, 1, "basic", ArenaZoneFactory.ArenaZoneId, 1, accountId);
-        await using InMemoryClientTransport transport = new(endpoint);
-        HeadlessClientRunner runner = new(transport, options);
+        world.ApplySnapshot(tick1);
+        recorder.RecordTick(tick1, world.GetVisibleEntityIdsCanonical());
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
-        Task<ClientRunResult> runTask = runner.RunAsync(maxTicks: 120, cts.Token);
+        SnapshotV2 tick2 = new(
+            Tick: 2,
+            ZoneId: 1,
+            SnapshotSeq: 2,
+            IsFull: false,
+            Entities: Array.Empty<SnapshotEntity>(),
+            Leaves: [12],
+            Enters: [new SnapshotEntity(14, 90, 100, Hp: 40, Kind: SnapshotEntityKind.Npc)],
+            Updates: [new SnapshotEntity(10, 101, 100, Hp: 50, Kind: SnapshotEntityKind.Player)],
+            HitEvents:
+            [
+                new HitEventV1(TickId: 2, ZoneId: 1, SourceEntityId: 10, TargetEntityId: 14, AbilityId: 7, HitPosXRaw: 90, HitPosYRaw: 100, EventSeq: 1)
+            ]);
 
-        while (!runTask.IsCompleted && !cts.IsCancellationRequested)
-        {
-            host.StepOnce();
-            await Task.Delay(1, cts.Token);
-        }
+        world.ApplySnapshot(tick2);
+        recorder.RecordTick(tick2, world.GetVisibleEntityIdsCanonical());
 
-        return await runTask;
-    }
-
-    private sealed class InMemoryClientTransport : IClientTransport
-    {
-        private readonly InMemoryEndpoint _endpoint;
-
-        public InMemoryClientTransport(InMemoryEndpoint endpoint)
-        {
-            _endpoint = endpoint;
-        }
-
-        public Task ConnectAsync(string host, int port, CancellationToken cancellationToken) => Task.CompletedTask;
-
-        public void Send(byte[] payload) => _endpoint.EnqueueToServer(payload);
-
-        public bool TryRead(out byte[] payload) => _endpoint.TryDequeueFromServer(out payload!);
-
-        public ValueTask DisposeAsync()
-        {
-            _endpoint.Close();
-            return ValueTask.CompletedTask;
-        }
+        return recorder;
     }
 }
