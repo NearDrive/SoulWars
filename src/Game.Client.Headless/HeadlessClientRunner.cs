@@ -1,11 +1,14 @@
 using Game.Client.Headless.Diagnostics;
 using Game.Client.Headless.Runtime;
 using Game.Protocol;
+using Game.Client.Headless.Transport;
 
 namespace Game.Client.Headless;
 
 public sealed class HeadlessClientRunner
 {
+    private const int MaxFrameLength = 1024 * 1024;
+
     private readonly IClientTransport _transport;
     private readonly ClientOptions _options;
     private readonly ClientWorldView _world = new();
@@ -35,82 +38,32 @@ public sealed class HeadlessClientRunner
         List<CastSkillCommand> sentCasts = new();
         List<HitEventV1> observedHits = new();
         ClientTraceRecorder traceRecorder = new();
+        ClientFrameDecoder decoder = new(MaxFrameLength);
 
         while (!cancellationToken.IsCancellationRequested)
         {
             bool hadPayload = false;
-            while (_transport.TryRead(out byte[] payload))
+            while (_transport.TryRead(out byte[] chunk))
             {
                 hadPayload = true;
-                IServerMessage message = ProtocolCodec.DecodeServer(payload);
-                switch (message)
+                decoder.Push(chunk);
+
+                while (decoder.TryDequeueFrame(out byte[] payload))
                 {
-                    case Welcome:
-                        HandshakeAccepted = true;
-                        logs.Add("welcome protocol=1");
-                        break;
-                    case EnterZoneAck ack:
-                        PlayerEntityId = ack.EntityId;
-                        logs.Add($"enter-zone zone={ack.ZoneId} entity={ack.EntityId}");
-                        break;
-                    case SnapshotV2 snapshot:
-                        _world.ApplySnapshot(snapshot);
-                        traceRecorder.RecordTick(snapshot, _world.GetVisibleEntityIdsCanonical());
-                        Send(new ClientAckV2(snapshot.ZoneId, snapshot.SnapshotSeq));
-                        logs.Add(_world.DumpCanonical());
-
-                        if (PlayerEntityId != 0 && inputTick <= snapshot.Tick + 1)
-                        {
-                            InputCommand move = new(inputTick, 1, 0);
-                            Send(move);
-                            sentInputs.Add(move);
-                            inputTick++;
-                        }
-
-                        if (!castSent && PlayerEntityId != 0)
-                        {
-                            SnapshotEntity? self = snapshot.Entities.FirstOrDefault(entity => entity.EntityId == PlayerEntityId);
-                            SnapshotEntity? target = snapshot.Entities
-                                .Where(entity => entity.EntityId != PlayerEntityId)
-                                .OrderBy(entity => self is null ? int.MaxValue : DistanceSq(self, entity))
-                                .ThenBy(entity => entity.EntityId)
-                                .FirstOrDefault();
-
-                            if (target is not null)
-                            {
-                                CastSkillCommand cast = new(
-                                    Tick: Math.Max(inputTick, snapshot.Tick + 1),
-                                    CasterId: PlayerEntityId,
-                                    SkillId: _options.AbilityId,
-                                    ZoneId: snapshot.ZoneId,
-                                    TargetKind: 3,
-                                    TargetEntityId: 0,
-                                    TargetPosXRaw: target.PosXRaw,
-                                    TargetPosYRaw: target.PosYRaw);
-                                Send(cast);
-                                sentCasts.Add(cast);
-                                castSent = true;
-                                logs.Add($"cast ability={_options.AbilityId} x={target.PosXRaw} y={target.PosYRaw}");
-                            }
-                        }
-
-                        if (_world.LastHitEvents.Count > 0)
-                        {
-                            HitEventV1 hit = _world.LastHitEvents.First();
-                            observedHits.AddRange(_world.LastHitEvents);
-                            logs.Add($"hit ability={hit.AbilityId} src={hit.SourceEntityId} dst={hit.TargetEntityId} tick={hit.TickId}");
-                            return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
-                        }
-
-                        if (snapshot.Tick >= maxTicks)
-                        {
-                            return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
-                        }
-
-                        break;
-                    case Disconnect disconnect:
-                        logs.Add($"disconnect reason={disconnect.Reason}");
-                        return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
+                    ClientRunResult? result = HandleServerMessage(
+                        ProtocolCodec.DecodeServer(payload),
+                        maxTicks,
+                        logs,
+                        sentInputs,
+                        sentCasts,
+                        observedHits,
+                        traceRecorder,
+                        ref inputTick,
+                        ref castSent);
+                    if (result is not null)
+                    {
+                        return result;
+                    }
                 }
             }
 
@@ -121,6 +74,90 @@ public sealed class HeadlessClientRunner
         }
 
         return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
+    }
+
+    private ClientRunResult? HandleServerMessage(
+        IServerMessage message,
+        int maxTicks,
+        List<string> logs,
+        List<InputCommand> sentInputs,
+        List<CastSkillCommand> sentCasts,
+        List<HitEventV1> observedHits,
+        ClientTraceRecorder traceRecorder,
+        ref int inputTick,
+        ref bool castSent)
+    {
+        switch (message)
+        {
+            case Welcome:
+                HandshakeAccepted = true;
+                logs.Add("welcome protocol=1");
+                return null;
+            case EnterZoneAck ack:
+                PlayerEntityId = ack.EntityId;
+                logs.Add($"enter-zone zone={ack.ZoneId} entity={ack.EntityId}");
+                return null;
+            case SnapshotV2 snapshot:
+                _world.ApplySnapshot(snapshot);
+                traceRecorder.RecordTick(snapshot, _world.GetVisibleEntityIdsCanonical());
+                Send(new ClientAckV2(snapshot.ZoneId, snapshot.SnapshotSeq));
+                logs.Add(_world.DumpCanonical());
+
+                if (PlayerEntityId != 0 && inputTick <= snapshot.Tick + 1)
+                {
+                    InputCommand move = new(inputTick, 1, 0);
+                    Send(move);
+                    sentInputs.Add(move);
+                    inputTick++;
+                }
+
+                if (!castSent && PlayerEntityId != 0)
+                {
+                    SnapshotEntity? self = snapshot.Entities.FirstOrDefault(entity => entity.EntityId == PlayerEntityId);
+                    SnapshotEntity? target = snapshot.Entities
+                        .Where(entity => entity.EntityId != PlayerEntityId)
+                        .OrderBy(entity => self is null ? int.MaxValue : DistanceSq(self, entity))
+                        .ThenBy(entity => entity.EntityId)
+                        .FirstOrDefault();
+
+                    if (target is not null)
+                    {
+                        CastSkillCommand cast = new(
+                            Tick: Math.Max(inputTick, snapshot.Tick + 1),
+                            CasterId: PlayerEntityId,
+                            SkillId: _options.AbilityId,
+                            ZoneId: snapshot.ZoneId,
+                            TargetKind: 3,
+                            TargetEntityId: 0,
+                            TargetPosXRaw: target.PosXRaw,
+                            TargetPosYRaw: target.PosYRaw);
+                        Send(cast);
+                        sentCasts.Add(cast);
+                        castSent = true;
+                        logs.Add($"cast ability={_options.AbilityId} x={target.PosXRaw} y={target.PosYRaw}");
+                    }
+                }
+
+                if (_world.LastHitEvents.Count > 0)
+                {
+                    HitEventV1 hit = _world.LastHitEvents.First();
+                    observedHits.AddRange(_world.LastHitEvents);
+                    logs.Add($"hit ability={hit.AbilityId} src={hit.SourceEntityId} dst={hit.TargetEntityId} tick={hit.TickId}");
+                    return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
+                }
+
+                if (snapshot.Tick >= maxTicks)
+                {
+                    return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
+                }
+
+                return null;
+            case Disconnect disconnect:
+                logs.Add($"disconnect reason={disconnect.Reason}");
+                return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
+            default:
+                return null;
+        }
     }
 
     private void Send(IClientMessage message)

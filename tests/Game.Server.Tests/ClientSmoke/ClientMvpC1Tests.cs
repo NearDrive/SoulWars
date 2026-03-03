@@ -172,6 +172,86 @@ public sealed class ClientMvpC1Tests
         Assert.Equal(options.AbilityId, hit.AbilityId);
     }
 
+    [Fact]
+    [Trait("Category", "PR96")]
+    [Trait("Category", "ClientSmoke")]
+    [Trait("Category", "Canary")]
+    public async Task ClientHandlesPartialReads()
+    {
+        int[] chunkPattern = [1, 2, 7, 3, 16, 1, 1, 8, 5, 2, 11];
+
+        ClientRunResult normal = await RunArenaScenarioAsync(endpoint => new InMemoryClientTransport(endpoint));
+        ClientRunResult chunked = await RunArenaScenarioAsync(endpoint =>
+            new ChunkingClientTransport(new InMemoryClientTransport(endpoint), chunkPattern));
+
+        Assert.Equal(normal.TraceHash, chunked.TraceHash);
+        Assert.Equal(normal.CanonicalTrace, chunked.CanonicalTrace);
+    }
+
+    [Fact]
+    [Trait("Category", "PR96")]
+    [Trait("Category", "ClientSmoke")]
+    [Trait("Category", "Canary")]
+    public async Task ChunkingTransport_IsDeterministic()
+    {
+        byte[] payload = Enumerable.Range(1, 24).Select(static value => (byte)value).ToArray();
+        int[] chunkPattern = [1, 2, 7, 3, 16, 1];
+
+        int[] first = await ReadChunkSizesAsync(payload, chunkPattern);
+        int[] second = await ReadChunkSizesAsync(payload, chunkPattern);
+
+        Assert.Equal(new[] { 1, 2, 7, 3, 11 }, first);
+        Assert.Equal(first, second);
+    }
+
+    private static async Task<int[]> ReadChunkSizesAsync(byte[] payload, int[] chunkPattern)
+    {
+        await using ChunkingClientTransport chunked = new(
+            new SinglePayloadTransport(payload),
+            chunkPattern);
+
+        List<int> sizes = new();
+        while (chunked.TryRead(out byte[] chunk))
+        {
+            sizes.Add(chunk.Length);
+        }
+
+        return sizes.ToArray();
+    }
+
+    private static async Task<ClientRunResult> RunArenaScenarioAsync(Func<InMemoryEndpoint, IClientTransport> createTransport)
+    {
+        ServerConfig config = ServerConfig.Default(seed: 9106) with
+        {
+            SnapshotEveryTicks = 1,
+            ArenaMode = true,
+            VisionRadius = Fix32.FromInt(8),
+            VisionRadiusSq = Fix32.FromInt(8) * Fix32.FromInt(8)
+        };
+
+        ServerHost host = new(config);
+        InMemoryEndpoint endpoint = new();
+        host.Connect(endpoint);
+
+        ClientOptions options = new("inproc", 0, 1, "basic", ArenaZoneFactory.ArenaZoneId, 1, "client-smoke-pr96");
+        await using IClientTransport transport = createTransport(endpoint);
+        HeadlessClientRunner runner = new(transport, options);
+
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
+        Task<ClientRunResult> runTask = runner.RunAsync(maxTicks: 120, cts.Token);
+
+        while (!runTask.IsCompleted && !cts.IsCancellationRequested)
+        {
+            host.StepOnce();
+            await Task.Delay(1, cts.Token);
+        }
+
+        ClientRunResult result = await runTask;
+        Assert.True(result.HandshakeAccepted);
+        Assert.NotEmpty(result.CanonicalTrace);
+        return result;
+    }
+
     private static T ReadSingle<T>(InMemoryEndpoint endpoint)
         where T : class, IServerMessage
     {
@@ -186,4 +266,34 @@ public sealed class ClientMvpC1Tests
 
         throw new Xunit.Sdk.XunitException($"Message {typeof(T).Name} not found.");
     }
+}
+
+internal sealed class SinglePayloadTransport : IClientTransport
+{
+    private readonly Queue<byte[]> _payloads;
+
+    public SinglePayloadTransport(byte[] payload)
+    {
+        _payloads = new Queue<byte[]>([payload]);
+    }
+
+    public Task ConnectAsync(string host, int port, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public void Send(byte[] payload)
+    {
+    }
+
+    public bool TryRead(out byte[] payload)
+    {
+        if (_payloads.Count == 0)
+        {
+            payload = Array.Empty<byte>();
+            return false;
+        }
+
+        payload = _payloads.Dequeue();
+        return true;
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

@@ -85,7 +85,10 @@ public sealed class TcpClientTransport : IClientTransport
 
                 byte[] payload = new byte[length];
                 await ReadExactlyAsync(_stream, payload, _cts.Token).ConfigureAwait(false);
-                _inbound.Enqueue(payload);
+                byte[] frame = new byte[4 + payload.Length];
+                BinaryPrimitives.WriteInt32LittleEndian(frame.AsSpan(0, 4), payload.Length);
+                payload.CopyTo(frame, 4);
+                _inbound.Enqueue(frame);
             }
         }
         catch
