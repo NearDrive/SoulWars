@@ -29,7 +29,7 @@ internal sealed class DelayedClientTransport : IClientTransport
 
     public bool TryRead(out byte[] payload)
     {
-        PumpInnerFrames();
+        PumpAvailableFrames();
 
         if (_scheduled.Count == 0 || _scheduled.Peek().DeliverAtTick > _currentTick)
         {
@@ -46,15 +46,15 @@ internal sealed class DelayedClientTransport : IClientTransport
         _currentTick++;
     }
 
-    public ValueTask DisposeAsync() => _inner.DisposeAsync();
-
-    private void PumpInnerFrames()
+    public void PumpAvailableFrames()
     {
         while (_inner.TryRead(out byte[] frame))
         {
             _scheduled.Enqueue(new ScheduledFrame(frame, _currentTick + _delayTicks));
         }
     }
+
+    public ValueTask DisposeAsync() => _inner.DisposeAsync();
 
     private sealed record ScheduledFrame(byte[] Payload, int DeliverAtTick);
 }

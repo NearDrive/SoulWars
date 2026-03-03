@@ -347,7 +347,9 @@ public sealed class ClientMvpC1Tests
             }
 
             host.ProcessInboundOnce();
+            transport.PumpAvailableFrames();
             host.AdvanceSimulationOnce();
+            transport.PumpAvailableFrames();
             transport.AdvanceTick();
             await DrainClientOutboundQueueAsync(endpoint, runTask);
 
@@ -361,6 +363,7 @@ public sealed class ClientMvpC1Tests
                 }
 
                 host.ProcessInboundOnce();
+                transport.PumpAvailableFrames();
                 await DrainClientOutboundQueueAsync(endpoint, runTask);
             }
 
