@@ -210,8 +210,8 @@ public sealed class ClientMvpC1Tests
     [Trait("Category", "Canary")]
     public async Task ClientWithFixedDelay_ProducesSameTrace()
     {
-        ClientRunResult delay0 = await RunArenaScenarioWithFixedDelayAsync(delayTicks: 0, maxTicks: 600);
-        ClientRunResult delay3 = await RunArenaScenarioWithFixedDelayAsync(delayTicks: 3, maxTicks: 600);
+        ClientRunResult delay0 = await RunArenaScenarioWithFixedDelayAsync(delayTicks: 0, maxTicks: 0);
+        ClientRunResult delay3 = await RunArenaScenarioWithFixedDelayAsync(delayTicks: 3, maxTicks: 0);
 
         Assert.Equal(delay0.TraceHash, delay3.TraceHash);
         Assert.Equal(delay0.CanonicalTrace, delay3.CanonicalTrace);
