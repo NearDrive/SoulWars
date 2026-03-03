@@ -237,18 +237,26 @@ public sealed class ClientMvpC1Tests
         await using IClientTransport transport = createTransport(endpoint);
         HeadlessClientRunner runner = new(transport, options);
 
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(3));
+        using CancellationTokenSource cts = new();
         Task<ClientRunResult> runTask = runner.RunAsync(maxTicks: 120, cts.Token);
 
-        while (!runTask.IsCompleted && !cts.IsCancellationRequested)
+        const int maxServerSteps = 5000;
+        int serverSteps = 0;
+        while (!runTask.IsCompleted)
         {
+            if (serverSteps++ >= maxServerSteps)
+            {
+                cts.Cancel();
+                throw new Xunit.Sdk.XunitException($"Client run did not complete within {maxServerSteps} deterministic server steps.");
+            }
+
             host.ProcessInboundOnce();
             host.AdvanceSimulationOnce();
-            await DrainClientOutboundQueueAsync(endpoint, runTask, cts.Token);
+            await DrainClientOutboundQueueAsync(endpoint, runTask);
 
-            const int maxInboundDrainSpins = 64;
+            const int maxInboundDrainSpins = 4096;
             int inboundDrainSpins = 0;
-            while (!runTask.IsCompleted && endpoint.PendingToServerCount > 0 && !cts.IsCancellationRequested)
+            while (!runTask.IsCompleted && endpoint.PendingToServerCount > 0)
             {
                 if (inboundDrainSpins++ >= maxInboundDrainSpins)
                 {
@@ -256,7 +264,7 @@ public sealed class ClientMvpC1Tests
                 }
 
                 host.ProcessInboundOnce();
-                await DrainClientOutboundQueueAsync(endpoint, runTask, cts.Token);
+                await DrainClientOutboundQueueAsync(endpoint, runTask);
             }
 
             await Task.Yield();
@@ -268,11 +276,11 @@ public sealed class ClientMvpC1Tests
         return result;
     }
 
-    private static async Task DrainClientOutboundQueueAsync(InMemoryEndpoint endpoint, Task<ClientRunResult> runTask, CancellationToken cancellationToken)
+    private static async Task DrainClientOutboundQueueAsync(InMemoryEndpoint endpoint, Task<ClientRunResult> runTask)
     {
-        const int maxDrainSpins = 64;
+        const int maxDrainSpins = 4096;
         int spins = 0;
-        while (!runTask.IsCompleted && endpoint.PendingToClientCount > 0 && !cancellationToken.IsCancellationRequested)
+        while (!runTask.IsCompleted && endpoint.PendingToClientCount > 0)
         {
             if (spins++ >= maxDrainSpins)
             {
