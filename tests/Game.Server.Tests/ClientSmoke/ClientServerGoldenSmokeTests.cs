@@ -41,6 +41,7 @@ public sealed class ClientServerGoldenSmokeTests
         {
             SnapshotEveryTicks = 1,
             ArenaMode = true,
+            MaxMoveSpeed = Fix32.Zero,
             VisionRadius = Fix32.FromInt(8),
             VisionRadiusSq = Fix32.FromInt(8) * Fix32.FromInt(8)
         };
