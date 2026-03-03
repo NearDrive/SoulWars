@@ -337,6 +337,7 @@ public sealed class ClientMvpC1Tests
         Task<ClientRunResult> runTask = runner.RunAsync(maxTicks, cts.Token);
 
         const int maxServerSteps = 12000;
+        const int maxNetworkTicksPerServerStep = 4096;
         int serverSteps = 0;
         while (!runTask.IsCompleted)
         {
@@ -348,23 +349,33 @@ public sealed class ClientMvpC1Tests
 
             host.ProcessInboundOnce();
             transport.PumpAvailableFrames();
+
             host.AdvanceSimulationOnce();
             transport.PumpAvailableFrames();
-            transport.AdvanceTick();
-            await DrainClientOutboundQueueAsync(endpoint, transport, runTask);
 
-            const int maxInboundDrainSpins = 4096;
-            int inboundDrainSpins = 0;
-            while (!runTask.IsCompleted && endpoint.PendingToServerCount > 0)
+            int networkTicks = 0;
+            while (!runTask.IsCompleted)
             {
-                if (inboundDrainSpins++ >= maxInboundDrainSpins)
+                if (networkTicks++ >= maxNetworkTicksPerServerStep)
+                {
+                    cts.Cancel();
+                    throw new Xunit.Sdk.XunitException($"Client run did not quiesce within {maxNetworkTicksPerServerStep} deterministic network ticks.");
+                }
+
+                transport.AdvanceTick();
+                await DrainClientOutboundQueueAsync(endpoint, transport, runTask);
+
+                while (!runTask.IsCompleted && endpoint.PendingToServerCount > 0)
+                {
+                    host.ProcessInboundOnce();
+                    transport.PumpAvailableFrames();
+                    await DrainClientOutboundQueueAsync(endpoint, transport, runTask);
+                }
+
+                if (endpoint.PendingToClientCount == 0 && endpoint.PendingToServerCount == 0 && transport.PendingScheduledCount == 0)
                 {
                     break;
                 }
-
-                host.ProcessInboundOnce();
-                transport.PumpAvailableFrames();
-                await DrainClientOutboundQueueAsync(endpoint, transport, runTask);
             }
 
             await Task.Yield();
@@ -380,7 +391,7 @@ public sealed class ClientMvpC1Tests
     {
         const int maxDrainSpins = 4096;
         int spins = 0;
-        while (!runTask.IsCompleted && (endpoint.PendingToClientCount > 0 || transport.ReadyFrameCount > 0))
+        while (!runTask.IsCompleted && (endpoint.PendingToClientCount > 0 || endpoint.PendingToServerCount > 0 || transport.PendingScheduledCount > 0))
         {
             if (spins++ >= maxDrainSpins)
             {

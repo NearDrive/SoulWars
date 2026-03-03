@@ -43,26 +43,6 @@ internal sealed class DelayedClientTransport : IClientTransport
         }
     }
 
-    public int ReadyFrameCount
-    {
-        get
-        {
-            lock (_gate)
-            {
-                int count = 0;
-                foreach (ScheduledFrame frame in _scheduled)
-                {
-                    if (frame.DeliverAtTick <= _currentTick)
-                    {
-                        count++;
-                    }
-                }
-
-                return count;
-            }
-        }
-    }
-
     public Task ConnectAsync(string host, int port, CancellationToken cancellationToken)
         => _inner.ConnectAsync(host, port, cancellationToken);
 
