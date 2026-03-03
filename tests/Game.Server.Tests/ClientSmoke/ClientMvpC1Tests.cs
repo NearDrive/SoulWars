@@ -242,8 +242,23 @@ public sealed class ClientMvpC1Tests
 
         while (!runTask.IsCompleted && !cts.IsCancellationRequested)
         {
-            host.StepOnce();
+            host.ProcessInboundOnce();
+            host.AdvanceSimulationOnce();
             await DrainClientOutboundQueueAsync(endpoint, runTask, cts.Token);
+
+            const int maxInboundDrainSpins = 64;
+            int inboundDrainSpins = 0;
+            while (!runTask.IsCompleted && endpoint.PendingToServerCount > 0 && !cts.IsCancellationRequested)
+            {
+                if (inboundDrainSpins++ >= maxInboundDrainSpins)
+                {
+                    break;
+                }
+
+                host.ProcessInboundOnce();
+                await DrainClientOutboundQueueAsync(endpoint, runTask, cts.Token);
+            }
+
             await Task.Yield();
         }
 
