@@ -350,9 +350,6 @@ public sealed class ClientMvpC1Tests
             host.ProcessInboundOnce();
             transport.PumpAvailableFrames();
 
-            host.AdvanceSimulationOnce();
-            transport.PumpAvailableFrames();
-
             int networkTicks = 0;
             while (!runTask.IsCompleted)
             {
@@ -377,6 +374,9 @@ public sealed class ClientMvpC1Tests
                     break;
                 }
             }
+
+            host.AdvanceSimulationOnce();
+            transport.PumpAvailableFrames();
 
             await Task.Yield();
         }
