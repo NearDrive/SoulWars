@@ -19,5 +19,5 @@ public sealed record ClientRunResult(
 
     public int TicksProcessed => TotalTicks;
 
-    public int HitEventsSeen => TotalHitEvents;
+    public int HitEventsSeen => ObservedHits.Count;
 }
