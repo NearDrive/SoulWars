@@ -19,8 +19,8 @@ public sealed class ClientTraceRecorderTests
     [Trait("Category", "Canary")]
     public async Task ClientTrace_IsDeterministicAcrossRuns()
     {
-        ClientRunResult result1 = await RunArenaScriptAsync("trace-run-1");
-        ClientRunResult result2 = await RunArenaScriptAsync("trace-run-2");
+        ClientRunResult result1 = await RunArenaScriptAsync("trace-run");
+        ClientRunResult result2 = await RunArenaScriptAsync("trace-run");
 
         Assert.Equal(result1.TraceHash, result2.TraceHash);
         Assert.Equal(result1.CanonicalTrace, result2.CanonicalTrace);
