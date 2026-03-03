@@ -197,22 +197,22 @@ public sealed class ServerHostIntegrationTests
 
         using IncrementalHash checksum = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         int logicalTick = currentSnapshot.Tick;
+        // Keep a deterministic lead so TCP receive scheduling jitter cannot shift command application by a tick.
+        const int inputLeadTicks = 4;
         for (int i = 0; i < inputCount; i++)
         {
             sbyte moveX = (sbyte)deterministic.Next(-1, 2);
             sbyte moveY = (sbyte)deterministic.Next(-1, 2);
 
             int previousTick = logicalTick;
-            int targetTick = previousTick + 1;
-            client.SendInput(previousTick + 1, moveX, moveY);
-            runtime.StepOnce();
+            int targetTick = previousTick + inputLeadTicks;
+            client.SendInput(targetTick, moveX, moveY);
 
             currentSnapshot = await WaitForMessageAsync<Snapshot>(
                 runtime,
                 client,
                 TimeSpan.FromSeconds(2),
-                s => s.Tick == targetTick && s.Entities.Any(e => e.EntityId == ack.EntityId),
-                advanceServer: false);
+                s => s.Tick == targetTick && s.Entities.Any(e => e.EntityId == ack.EntityId));
 
             logicalTick = targetTick;
             AppendSnapshot(checksum, currentSnapshot with { Tick = i + 1 });
