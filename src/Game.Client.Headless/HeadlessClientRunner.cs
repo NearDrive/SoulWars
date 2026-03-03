@@ -140,10 +140,13 @@ public sealed class HeadlessClientRunner
 
                 if (_world.LastHitEvents.Count > 0)
                 {
-                    HitEventV1 hit = _world.LastHitEvents.First();
+                    bool firstObservedHit = observedHits.Count == 0;
                     observedHits.AddRange(_world.LastHitEvents);
-                    logs.Add($"hit ability={hit.AbilityId} src={hit.SourceEntityId} dst={hit.TargetEntityId} tick={hit.TickId}");
-                    return BuildResult(logs, sentInputs, sentCasts, observedHits, HandshakeAccepted, _world.Tick, traceRecorder);
+                    if (firstObservedHit)
+                    {
+                        HitEventV1 hit = _world.LastHitEvents.First();
+                        logs.Add($"hit ability={hit.AbilityId} src={hit.SourceEntityId} dst={hit.TargetEntityId} tick={hit.TickId}");
+                    }
                 }
 
                 if (snapshot.Tick >= maxTicks)
