@@ -151,7 +151,7 @@ public sealed class ClientMvpC1Tests
         while (!runTask.IsCompleted && !cts.IsCancellationRequested)
         {
             host.StepOnce();
-            await Task.Delay(1, cts.Token);
+            await Task.Yield();
         }
 
         ClientRunResult result = await runTask;
@@ -243,7 +243,7 @@ public sealed class ClientMvpC1Tests
         while (!runTask.IsCompleted && !cts.IsCancellationRequested)
         {
             host.StepOnce();
-            await Task.Delay(1, cts.Token);
+            await Task.Yield();
         }
 
         ClientRunResult result = await runTask;

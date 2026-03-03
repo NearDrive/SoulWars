@@ -69,7 +69,7 @@ public sealed class HeadlessClientRunner
 
             if (!hadPayload)
             {
-                await Task.Delay(1, cancellationToken).ConfigureAwait(false);
+                await Task.Yield();
             }
         }
 
