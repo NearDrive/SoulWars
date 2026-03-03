@@ -26,8 +26,7 @@ public sealed class ClientServerGoldenSmokeTests
 
         if (GoldenHash == "TODO_SET_FROM_CI")
         {
-            Assert.True(false,
-                $"GoldenHash placeholder detected. Set GoldenHash to the CI-produced TraceHash: {result.TraceHash}");
+            Assert.Fail($"GoldenHash placeholder detected. Set GoldenHash to the CI-produced TraceHash: {result.TraceHash}");
         }
 
         Assert.True(
