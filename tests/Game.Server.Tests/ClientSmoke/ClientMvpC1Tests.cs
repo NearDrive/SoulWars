@@ -361,7 +361,6 @@ public sealed class ClientMvpC1Tests
                 }
 
                 host.ProcessInboundOnce();
-                transport.AdvanceTick();
                 await DrainClientOutboundQueueAsync(endpoint, runTask);
             }
 
