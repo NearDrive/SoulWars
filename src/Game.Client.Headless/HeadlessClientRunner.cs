@@ -33,6 +33,7 @@ public sealed class HeadlessClientRunner
 
         int inputTick = 1;
         bool castSent = false;
+        int lastProcessedSnapshotSeq = 0;
         List<string> logs = new();
         List<InputCommand> sentInputs = new();
         List<CastSkillCommand> sentCasts = new();
@@ -59,7 +60,8 @@ public sealed class HeadlessClientRunner
                         observedHits,
                         traceRecorder,
                         ref inputTick,
-                        ref castSent);
+                        ref castSent,
+                        ref lastProcessedSnapshotSeq);
                     if (result is not null)
                     {
                         return result;
@@ -85,7 +87,8 @@ public sealed class HeadlessClientRunner
         List<HitEventV1> observedHits,
         ClientTraceRecorder traceRecorder,
         ref int inputTick,
-        ref bool castSent)
+        ref bool castSent,
+        ref int lastProcessedSnapshotSeq)
     {
         switch (message)
         {
@@ -98,9 +101,15 @@ public sealed class HeadlessClientRunner
                 logs.Add($"enter-zone zone={ack.ZoneId} entity={ack.EntityId}");
                 return null;
             case SnapshotV2 snapshot:
+                Send(new ClientAckV2(snapshot.ZoneId, snapshot.SnapshotSeq));
+                if (snapshot.SnapshotSeq <= lastProcessedSnapshotSeq)
+                {
+                    return null;
+                }
+
+                lastProcessedSnapshotSeq = snapshot.SnapshotSeq;
                 _world.ApplySnapshot(snapshot);
                 traceRecorder.RecordTick(snapshot, _world.GetVisibleEntityIdsCanonical());
-                Send(new ClientAckV2(snapshot.ZoneId, snapshot.SnapshotSeq));
                 logs.Add(_world.DumpCanonical());
 
                 if (PlayerEntityId != 0 && inputTick <= snapshot.Tick + 1)
