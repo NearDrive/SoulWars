@@ -114,7 +114,7 @@ public sealed class ClientServerGoldenSmokeTests
 
         Vec2Fix playerSpawn = ArenaZoneFactory.ResolvePlayerSpawnPoint(1);
         EntityState guaranteedTarget = new(
-            new EntityId(1),
+            new EntityId(9000),
             new Vec2Fix(playerSpawn.X - Fix32.One, playerSpawn.Y),
             new Vec2Fix(Fix32.Zero, Fix32.Zero),
             100,
