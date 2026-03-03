@@ -8,6 +8,7 @@ namespace Game.Client.Headless;
 public sealed class HeadlessClientRunner
 {
     private const int MaxFrameLength = 1024 * 1024;
+    private const int RetryCastCooldownTicks = 6;
 
     private readonly IClientTransport _transport;
     private readonly ClientOptions _options;
@@ -33,6 +34,7 @@ public sealed class HeadlessClientRunner
 
         int inputTick = 1;
         bool castSent = false;
+        int nextCastTick = 0;
         int lastProcessedSnapshotSeq = 0;
         List<string> logs = new();
         List<InputCommand> sentInputs = new();
@@ -61,6 +63,7 @@ public sealed class HeadlessClientRunner
                         traceRecorder,
                         ref inputTick,
                         ref castSent,
+                        ref nextCastTick,
                         ref lastProcessedSnapshotSeq);
                     if (result is not null)
                     {
@@ -88,6 +91,7 @@ public sealed class HeadlessClientRunner
         ClientTraceRecorder traceRecorder,
         ref int inputTick,
         ref bool castSent,
+        ref int nextCastTick,
         ref int lastProcessedSnapshotSeq)
     {
         switch (message)
@@ -120,7 +124,8 @@ public sealed class HeadlessClientRunner
                     inputTick++;
                 }
 
-                if (!castSent && PlayerEntityId != 0)
+                bool shouldTryCast = !castSent || (!_options.StopOnFirstHit && observedHits.Count == 0 && snapshot.Tick >= nextCastTick);
+                if (shouldTryCast && PlayerEntityId != 0)
                 {
                     SnapshotEntity? self = snapshot.Entities.FirstOrDefault(entity => entity.EntityId == PlayerEntityId);
                     SnapshotEntity? target = snapshot.Entities
@@ -143,6 +148,7 @@ public sealed class HeadlessClientRunner
                         Send(cast);
                         sentCasts.Add(cast);
                         castSent = true;
+                        nextCastTick = snapshot.Tick + RetryCastCooldownTicks;
                         logs.Add($"cast ability={_options.AbilityId} x={target.PosXRaw} y={target.PosYRaw}");
                     }
                 }
