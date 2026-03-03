@@ -9,7 +9,8 @@ public sealed record ClientOptions(
     string Script,
     int ZoneId,
     int AbilityId,
-    string AccountId)
+    string AccountId,
+    bool StopOnFirstHit = true)
 {
     public static ClientOptions Parse(string[] args)
     {
@@ -63,6 +64,6 @@ public sealed record ClientOptions(
             }
         }
 
-        return new ClientOptions(host, port, protocol, script, zoneId, abilityId, accountId);
+        return new ClientOptions(host, port, protocol, script, zoneId, abilityId, accountId, StopOnFirstHit: true);
     }
 }
