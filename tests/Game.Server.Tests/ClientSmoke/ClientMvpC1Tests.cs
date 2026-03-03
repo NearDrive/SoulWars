@@ -243,6 +243,7 @@ public sealed class ClientMvpC1Tests
         while (!runTask.IsCompleted && !cts.IsCancellationRequested)
         {
             host.StepOnce();
+            await DrainClientOutboundQueueAsync(endpoint, runTask, cts.Token);
             await Task.Yield();
         }
 
@@ -250,6 +251,21 @@ public sealed class ClientMvpC1Tests
         Assert.True(result.HandshakeAccepted);
         Assert.NotEmpty(result.CanonicalTrace);
         return result;
+    }
+
+    private static async Task DrainClientOutboundQueueAsync(InMemoryEndpoint endpoint, Task<ClientRunResult> runTask, CancellationToken cancellationToken)
+    {
+        const int maxDrainSpins = 64;
+        int spins = 0;
+        while (!runTask.IsCompleted && endpoint.PendingToClientCount > 0 && !cancellationToken.IsCancellationRequested)
+        {
+            if (spins++ >= maxDrainSpins)
+            {
+                break;
+            }
+
+            await Task.Yield();
+        }
     }
 
     private static T ReadSingle<T>(InMemoryEndpoint endpoint)
