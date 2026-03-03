@@ -207,6 +207,7 @@ public sealed class ClientMvpC1Tests
     [Fact]
     [Trait("Category", "PR97")]
     [Trait("Category", "ClientSmoke")]
+    [Trait("Category", "Canary")]
     public async Task ClientWithFixedDelay_ProducesSameTrace()
     {
         ClientRunResult delay0 = await RunArenaScenarioWithFixedDelayAsync(delayTicks: 0, maxTicks: 600);
@@ -219,6 +220,7 @@ public sealed class ClientMvpC1Tests
     [Fact]
     [Trait("Category", "PR97")]
     [Trait("Category", "ClientSmoke")]
+    [Trait("Category", "Canary")]
     public async Task DelayedTransport_DeliversOnlyAfterTick()
     {
         byte[] frameA = [1, 2, 3];
