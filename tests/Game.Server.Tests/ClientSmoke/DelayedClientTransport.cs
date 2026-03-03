@@ -7,6 +7,7 @@ internal sealed class DelayedClientTransport : IClientTransport
     private readonly IClientTransport _inner;
     private readonly int _delayTicks;
     private readonly Queue<ScheduledFrame> _scheduled = new();
+    private readonly object _gate = new();
     private int _currentTick;
 
     public DelayedClientTransport(IClientTransport inner, int delayTicks)
@@ -20,24 +21,45 @@ internal sealed class DelayedClientTransport : IClientTransport
         _delayTicks = delayTicks;
     }
 
-    public int CurrentTick => _currentTick;
+    public int CurrentTick
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _currentTick;
+            }
+        }
+    }
 
-    public int PendingScheduledCount => _scheduled.Count;
+    public int PendingScheduledCount
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _scheduled.Count;
+            }
+        }
+    }
 
     public int ReadyFrameCount
     {
         get
         {
-            int count = 0;
-            foreach (ScheduledFrame frame in _scheduled)
+            lock (_gate)
             {
-                if (frame.DeliverAtTick <= _currentTick)
+                int count = 0;
+                foreach (ScheduledFrame frame in _scheduled)
                 {
-                    count++;
+                    if (frame.DeliverAtTick <= _currentTick)
+                    {
+                        count++;
+                    }
                 }
-            }
 
-            return count;
+                return count;
+            }
         }
     }
 
@@ -48,32 +70,46 @@ internal sealed class DelayedClientTransport : IClientTransport
 
     public bool TryRead(out byte[] payload)
     {
-        PumpAvailableFrames();
-
-        if (_scheduled.Count == 0 || _scheduled.Peek().DeliverAtTick > _currentTick)
+        lock (_gate)
         {
-            payload = Array.Empty<byte>();
-            return false;
-        }
+            PumpAvailableFramesCore();
 
-        payload = _scheduled.Dequeue().Payload;
-        return true;
+            if (_scheduled.Count == 0 || _scheduled.Peek().DeliverAtTick > _currentTick)
+            {
+                payload = Array.Empty<byte>();
+                return false;
+            }
+
+            payload = _scheduled.Dequeue().Payload;
+            return true;
+        }
     }
 
     public void AdvanceTick()
     {
-        _currentTick++;
+        lock (_gate)
+        {
+            _currentTick++;
+        }
     }
 
     public void PumpAvailableFrames()
+    {
+        lock (_gate)
+        {
+            PumpAvailableFramesCore();
+        }
+    }
+
+    public ValueTask DisposeAsync() => _inner.DisposeAsync();
+
+    private void PumpAvailableFramesCore()
     {
         while (_inner.TryRead(out byte[] frame))
         {
             _scheduled.Enqueue(new ScheduledFrame(frame, _currentTick + _delayTicks));
         }
     }
-
-    public ValueTask DisposeAsync() => _inner.DisposeAsync();
 
     private sealed record ScheduledFrame(byte[] Payload, int DeliverAtTick);
 }
