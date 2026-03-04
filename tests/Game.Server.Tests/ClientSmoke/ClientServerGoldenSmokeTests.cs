@@ -61,6 +61,10 @@ public sealed class ClientServerGoldenSmokeTests
         };
 
         ServerHost host = new(config);
+        InMemoryEndpoint dummyEndpoint = new();
+        host.Connect(dummyEndpoint);
+        PrimeDummySession(host, dummyEndpoint);
+
         InMemoryEndpoint endpoint = new();
         host.Connect(endpoint);
 
@@ -121,6 +125,42 @@ public sealed class ClientServerGoldenSmokeTests
 
             await Task.Yield();
         }
+    }
+
+    private static void PrimeDummySession(ServerHost host, InMemoryEndpoint dummyEndpoint)
+    {
+        dummyEndpoint.EnqueueToServer(ProtocolCodec.Encode(new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, "client-smoke-pr98-dummy")));
+        dummyEndpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(ArenaZoneFactory.ArenaZoneId)));
+        dummyEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ArenaZoneFactory.ArenaZoneId, 0)));
+
+        const int maxPrimeSteps = 64;
+        for (int i = 0; i < maxPrimeSteps; i++)
+        {
+            host.ProcessInboundOnce();
+            host.AdvanceSimulationOnce();
+
+            if (ContainsServerMessage<EnterZoneAck>(dummyEndpoint))
+            {
+                return;
+            }
+        }
+
+        throw new Xunit.Sdk.XunitException("Dummy session did not enter arena within deterministic priming steps.");
+    }
+
+    private static bool ContainsServerMessage<T>(InMemoryEndpoint endpoint)
+        where T : class, IServerMessage
+    {
+        while (endpoint.TryDequeueFromServer(out byte[] payload))
+        {
+            IServerMessage message = ProtocolCodec.DecodeServer(payload);
+            if (message is T)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 
