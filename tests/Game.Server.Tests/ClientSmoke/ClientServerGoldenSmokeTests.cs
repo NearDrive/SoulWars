@@ -124,7 +124,10 @@ public sealed class ClientServerGoldenSmokeTests
             1,
             1,
             0,
-            EntityKind.Player);
+            EntityKind.Npc,
+            NextWanderChangeTick: int.MaxValue,
+            WanderX: 0,
+            WanderY: 0);
 
         ImmutableArray<EntityState> entities = ImmutableArray.Create(guaranteedTarget);
         ZoneState updatedZone = zone.WithEntities(entities);
