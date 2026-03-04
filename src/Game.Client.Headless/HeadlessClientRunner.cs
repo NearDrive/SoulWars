@@ -9,6 +9,7 @@ public sealed class HeadlessClientRunner
 {
     private const int MaxFrameLength = 1024 * 1024;
     private const int RetryCastCooldownTicks = 6;
+    private const int TileStepRaw = 1 << 16;
 
     private readonly IClientTransport _transport;
     private readonly ClientOptions _options;
@@ -134,8 +135,11 @@ public sealed class HeadlessClientRunner
                         .ThenBy(entity => entity.EntityId)
                         .FirstOrDefault();
 
-                    if (target is not null)
+                    if (target is not null || (!castSent && !_options.StopOnFirstHit && self is not null))
                     {
+                        int targetPosXRaw = target?.PosXRaw ?? (self!.PosXRaw - TileStepRaw);
+                        int targetPosYRaw = target?.PosYRaw ?? self!.PosYRaw;
+
                         CastSkillCommand cast = new(
                             Tick: Math.Max(inputTick, snapshot.Tick + 1),
                             CasterId: PlayerEntityId,
@@ -143,13 +147,13 @@ public sealed class HeadlessClientRunner
                             ZoneId: snapshot.ZoneId,
                             TargetKind: 3,
                             TargetEntityId: 0,
-                            TargetPosXRaw: target.PosXRaw,
-                            TargetPosYRaw: target.PosYRaw);
+                            TargetPosXRaw: targetPosXRaw,
+                            TargetPosYRaw: targetPosYRaw);
                         Send(cast);
                         sentCasts.Add(cast);
                         castSent = true;
                         nextCastTick = snapshot.Tick + RetryCastCooldownTicks;
-                        logs.Add($"cast ability={_options.AbilityId} x={target.PosXRaw} y={target.PosYRaw}");
+                        logs.Add($"cast ability={_options.AbilityId} x={targetPosXRaw} y={targetPosYRaw}");
                     }
                 }
 
