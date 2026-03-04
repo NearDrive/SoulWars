@@ -9,7 +9,6 @@ public sealed class HeadlessClientRunner
 {
     private const int MaxFrameLength = 1024 * 1024;
     private const int RetryCastCooldownTicks = 6;
-    private const int TileStepRaw = 1 << 16;
 
     private readonly IClientTransport _transport;
     private readonly ClientOptions _options;
@@ -140,10 +139,10 @@ public sealed class HeadlessClientRunner
                         .ThenBy(entity => entity.EntityId)
                         .FirstOrDefault();
 
-                    if (target is not null || (!castSent && !_options.StopOnFirstHit))
+                    if (target is not null)
                     {
-                        int targetPosXRaw = target?.PosXRaw ?? (self.PosXRaw - TileStepRaw);
-                        int targetPosYRaw = target?.PosYRaw ?? self.PosYRaw;
+                        int targetPosXRaw = target.PosXRaw;
+                        int targetPosYRaw = target.PosYRaw;
 
                         CastSkillCommand cast = new(
                             Tick: Math.Max(inputTick, snapshot.Tick + 1),
