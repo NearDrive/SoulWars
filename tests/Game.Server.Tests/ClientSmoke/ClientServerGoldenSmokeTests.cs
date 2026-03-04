@@ -4,6 +4,7 @@ using Game.Client.Headless.Transport;
 using Game.Core;
 using Game.Protocol;
 using Game.Server;
+using System.Collections.Immutable;
 using Xunit;
 
 namespace Game.Server.Tests.ClientSmoke;
@@ -60,10 +61,8 @@ public sealed class ClientServerGoldenSmokeTests
             VisionRadiusSq = Fix32.FromInt(8) * Fix32.FromInt(8)
         };
 
-        ServerHost host = new(config);
-        InMemoryEndpoint dummyEndpoint = new();
-        host.Connect(dummyEndpoint);
-        PrimeDummySession(host, dummyEndpoint);
+        ServerBootstrap bootstrap = CreateDeterministicArenaBootstrap(config);
+        ServerHost host = new(config, bootstrap: bootstrap);
 
         InMemoryEndpoint endpoint = new();
         host.Connect(endpoint);
@@ -127,40 +126,41 @@ public sealed class ClientServerGoldenSmokeTests
         }
     }
 
-    private static void PrimeDummySession(ServerHost host, InMemoryEndpoint dummyEndpoint)
+    private static ServerBootstrap CreateDeterministicArenaBootstrap(ServerConfig config)
     {
-        dummyEndpoint.EnqueueToServer(ProtocolCodec.Encode(new HandshakeRequest(ProtocolConstants.CurrentProtocolVersion, "client-smoke-pr98-dummy")));
-        dummyEndpoint.EnqueueToServer(ProtocolCodec.Encode(new EnterZoneRequestV2(ArenaZoneFactory.ArenaZoneId)));
-        dummyEndpoint.EnqueueToServer(ProtocolCodec.Encode(new ClientAckV2(ArenaZoneFactory.ArenaZoneId, 0)));
+        WorldState world = ArenaZoneFactory.CreateWorld(config.ToSimulationConfig());
+        ZoneState zone = world.Zones.Single(z => z.Id.Value == ArenaZoneFactory.ArenaZoneId);
 
-        const int maxPrimeSteps = 64;
-        for (int i = 0; i < maxPrimeSteps; i++)
+        Vec2Fix player1Spawn = ArenaZoneFactory.ResolvePlayerSpawnPoint(1);
+        EntityState deterministicTarget = new(
+            new EntityId(9000),
+            new Vec2Fix(player1Spawn.X - Fix32.One, player1Spawn.Y),
+            Vec2Fix.Zero,
+            100,
+            100,
+            true,
+            Fix32.One,
+            1,
+            1,
+            0,
+            EntityKind.Npc,
+            NextWanderChangeTick: int.MaxValue,
+            WanderX: 0,
+            WanderY: 0);
+
+        ImmutableArray<EntityState> entities = zone.Entities
+            .Add(deterministicTarget)
+            .OrderBy(e => e.Id.Value)
+            .ToImmutableArray();
+
+        ZoneState updatedZone = zone.WithEntities(entities);
+        WorldState updatedWorld = world with
         {
-            host.ProcessInboundOnce();
-            host.AdvanceSimulationOnce();
+            Zones = world.Zones.Select(z => z.Id.Value == ArenaZoneFactory.ArenaZoneId ? updatedZone : z).ToImmutableArray(),
+            EntityLocations = entities.Select(e => new EntityLocation(e.Id, new ZoneId(ArenaZoneFactory.ArenaZoneId))).ToImmutableArray()
+        };
 
-            if (ContainsServerMessage<EnterZoneAck>(dummyEndpoint))
-            {
-                return;
-            }
-        }
-
-        throw new Xunit.Sdk.XunitException("Dummy session did not enter arena within deterministic priming steps.");
-    }
-
-    private static bool ContainsServerMessage<T>(InMemoryEndpoint endpoint)
-        where T : class, IServerMessage
-    {
-        while (endpoint.TryDequeueFromServer(out byte[] payload))
-        {
-            IServerMessage message = ProtocolCodec.DecodeServer(payload);
-            if (message is T)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return new ServerBootstrap(updatedWorld, config.Seed, ImmutableArray<BootstrapPlayerRecord>.Empty);
     }
 }
 
