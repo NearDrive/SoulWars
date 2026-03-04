@@ -141,7 +141,7 @@ internal sealed class InstrumentedClientTransport : IClientTransport
     public void Send(byte[] payload)
     {
         if (ProtocolCodec.TryDecodeClient(payload, out IClientMessage? message, out _)
-            && message is CastSkillCommand cast)
+            && message is Game.Protocol.CastSkillCommand cast)
         {
             _diagnostics.RecordCastAttempt(cast);
         }
@@ -183,7 +183,7 @@ internal sealed class SmokeDiagnostics
 
     public int CastRejectedUnknown => Math.Max(0, CastAttempts - CastAccepted);
 
-    public void RecordCastAttempt(CastSkillCommand cast)
+    public void RecordCastAttempt(Game.Protocol.CastSkillCommand cast)
     {
         CastAttempts++;
         AppendSample($"cast-attempt tick={cast.Tick} ability={cast.SkillId} x={cast.TargetPosXRaw} y={cast.TargetPosYRaw}");
