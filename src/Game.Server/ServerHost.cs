@@ -10,6 +10,7 @@ namespace Game.Server;
 
 public sealed class ServerHost
 {
+    private const byte ClientCastSkillMessageTypeId = 13;
     private readonly SimulationConfig _simulationConfig;
     private readonly ServerConfig _serverConfig;
     private readonly Dictionary<int, SessionState> _sessions = new();
@@ -97,6 +98,8 @@ public sealed class ServerHost
     public PerfCounters Perf { get; }
 
     public Action<TickReport>? TickReportSink { get; set; }
+
+    public Action<ServerCastDiagnosticsEvent>? CastDiagnosticsSink { get; set; }
 
     public bool TryConnect(IServerEndpoint endpoint, out SessionId sessionId, out DisconnectReason? denyReason)
     {
@@ -238,6 +241,18 @@ public sealed class ServerHost
 
         foreach (PendingCastSkillCommand pending in OrderedPendingCastSkillCommands(targetTick))
         {
+            EmitCastDiagnostics(new ServerCastDiagnosticsEvent(
+                Tick: targetTick,
+                SessionId: pending.SessionId,
+                Stage: ServerCastDiagStage.ApplyAccepted,
+                AbilityId: pending.SkillId,
+                ZoneId: pending.ZoneId,
+                TargetPosXRaw: pending.TargetPosXRaw,
+                TargetPosYRaw: pending.TargetPosYRaw,
+                RawReasonCode: 0,
+                RawReasonName: nameof(CastResult.Ok),
+                Detail: "cast_queued_for_sim"));
+
             worldCommands.Add(new WorldCommand(
                 Kind: WorldCommandKind.CastSkill,
                 EntityId: new EntityId(pending.CasterId),
@@ -410,6 +425,21 @@ public sealed class ServerHost
 
             if (!decoded)
             {
+                if (payload.Length > 0 && payload[0] == ClientCastSkillMessageTypeId)
+                {
+                    EmitCastDiagnostics(new ServerCastDiagnosticsEvent(
+                        Tick: targetTick,
+                        SessionId: session.SessionId.Value,
+                        Stage: ServerCastDiagStage.DecodeReject,
+                        AbilityId: 0,
+                        ZoneId: session.CurrentZoneId ?? 0,
+                        TargetPosXRaw: 0,
+                        TargetPosYRaw: 0,
+                        RawReasonCode: (int)error,
+                        RawReasonName: Enum.GetName(typeof(ProtocolErrorCode), error) ?? "Unknown",
+                        Detail: "cast_decode_reject"));
+                }
+
                 Metrics.IncrementProtocolDecodeErrors();
                 if (error == ProtocolErrorCode.UnknownMessageType)
                 {
@@ -538,20 +568,37 @@ public sealed class ServerHost
 
     private PendingCastSkillCommand? CreatePendingCastSkillCommand(int targetTick, SessionState session, ProtocolCastSkillCommand castSkillCommand)
     {
+        PendingCastSkillCommand? Reject(int rawCode, string rawName, string detail)
+        {
+            EmitCastDiagnostics(new ServerCastDiagnosticsEvent(
+                Tick: targetTick,
+                SessionId: session.SessionId.Value,
+                Stage: ServerCastDiagStage.ValidateReject,
+                AbilityId: castSkillCommand.SkillId,
+                ZoneId: castSkillCommand.ZoneId,
+                TargetPosXRaw: castSkillCommand.TargetPosXRaw,
+                TargetPosYRaw: castSkillCommand.TargetPosYRaw,
+                RawReasonCode: rawCode,
+                RawReasonName: rawName,
+                Detail: detail));
+
+            return null;
+        }
+
         if (session.EntityId is null || session.CurrentZoneId is null)
         {
-            return null;
+            return Reject(1001, "SessionNotReady", "session_not_spawned_or_not_in_zone");
         }
 
         if (session.CurrentZoneId.Value != castSkillCommand.ZoneId)
         {
-            return null;
+            return Reject(1002, "ZoneMismatch", "cast_zone_mismatch");
         }
 
         if ((CastTargetKind)castSkillCommand.TargetKind == CastTargetKind.Point &&
             !IsPointInZoneBounds(castSkillCommand.ZoneId, castSkillCommand.TargetPosXRaw, castSkillCommand.TargetPosYRaw))
         {
-            return null;
+            return Reject(1003, "PointOutOfBounds", "cast_point_out_of_bounds");
         }
 
         if (TryGetKnownSkillCooldownTicks(castSkillCommand.SkillId, out int cooldownTicks) && cooldownTicks > 0)
@@ -559,7 +606,7 @@ public sealed class ServerHost
             if (session.CastCooldownUntilTickBySkillId.TryGetValue(castSkillCommand.SkillId, out int cooldownUntilTick) &&
                 cooldownUntilTick > targetTick)
             {
-                return null;
+                return Reject((int)CastResult.Rejected_OnCooldown, nameof(CastResult.Rejected_OnCooldown), "known_skill_cooldown_active");
             }
 
             session.CastCooldownUntilTickBySkillId[castSkillCommand.SkillId] = targetTick + cooldownTicks;
@@ -570,7 +617,7 @@ public sealed class ServerHost
             if (session.UnknownSkillCooldownSkillId == castSkillCommand.SkillId &&
                 session.UnknownSkillCooldownUntilTick > targetTick)
             {
-                return null;
+                return Reject((int)CastResult.Rejected_OnCooldown, nameof(CastResult.Rejected_OnCooldown), "unknown_skill_cooldown_active");
             }
 
             session.UnknownSkillCooldownSkillId = castSkillCommand.SkillId;
@@ -1274,6 +1321,21 @@ public sealed class ServerHost
                         .ThenBy(evt => evt.EventSeq)
                         .ToArray();
 
+                    foreach (HitEventV1 hit in hitEvents)
+                    {
+                        EmitCastDiagnostics(new ServerCastDiagnosticsEvent(
+                            Tick: hit.TickId,
+                            SessionId: session.SessionId.Value,
+                            Stage: ServerCastDiagStage.HitEmitted,
+                            AbilityId: hit.AbilityId,
+                            ZoneId: hit.ZoneId,
+                            TargetPosXRaw: hit.HitPosXRaw,
+                            TargetPosYRaw: hit.HitPosYRaw,
+                            RawReasonCode: 0,
+                            RawReasonName: nameof(CastResult.Ok),
+                            Detail: $"hit src={hit.SourceEntityId} dst={hit.TargetEntityId} seq={hit.EventSeq}"));
+                    }
+
                     int snapshotSeq = session.NextSnapshotSeq++;
                     SnapshotV2 snapshot = new(
                         Tick: _world.Tick,
@@ -1605,6 +1667,11 @@ public sealed class ServerHost
         }
 
         return difference.ToArray();
+    }
+
+    private void EmitCastDiagnostics(ServerCastDiagnosticsEvent evt)
+    {
+        CastDiagnosticsSink?.Invoke(evt);
     }
 
     private readonly record struct SessionSnapshotCache(int ZoneId, int SnapshotSeq, byte[] EncodedPayload);
