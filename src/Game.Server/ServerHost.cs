@@ -814,6 +814,18 @@ public sealed class ServerHost
 
         session.EntityId = entityId;
         session.CurrentZoneId = zoneId;
+        EmitCastDiagnostics(new ServerCastDiagnosticsEvent(
+            Tick: _world.Tick,
+            SessionId: session.SessionId.Value,
+            Stage: ServerCastDiagStage.SelfAssigned,
+            AbilityId: 0,
+            ZoneId: zoneId,
+            TargetPosXRaw: 0,
+            TargetPosYRaw: 0,
+            RawReasonCode: entityId,
+            RawReasonName: "SelfEntityAssigned",
+            Detail: $"self_entity_id={entityId}"));
+
         _playerRegistry.UpdateWorldState(session.PlayerId.Value, entityId, zoneId, isAlive: true);
 
         EnqueueToClient(session, ProtocolCodec.Encode(new EnterZoneAck(zoneId, entityId)));

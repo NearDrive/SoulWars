@@ -5,7 +5,8 @@ public enum ServerCastDiagStage
     DecodeReject = 1,
     ValidateReject = 2,
     ApplyAccepted = 3,
-    HitEmitted = 4
+    HitEmitted = 4,
+    SelfAssigned = 5
 }
 
 public readonly record struct ServerCastDiagnosticsEvent(

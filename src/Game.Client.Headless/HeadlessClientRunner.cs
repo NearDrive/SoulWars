@@ -129,16 +129,21 @@ public sealed class HeadlessClientRunner
                 if (shouldTryCast && PlayerEntityId != 0)
                 {
                     SnapshotEntity? self = snapshot.Entities.FirstOrDefault(entity => entity.EntityId == PlayerEntityId);
+                    if (self is null)
+                    {
+                        return null;
+                    }
+
                     SnapshotEntity? target = snapshot.Entities
                         .Where(entity => entity.EntityId != PlayerEntityId)
-                        .OrderBy(entity => self is null ? int.MaxValue : DistanceSq(self, entity))
+                        .OrderBy(entity => DistanceSq(self, entity))
                         .ThenBy(entity => entity.EntityId)
                         .FirstOrDefault();
 
-                    if (target is not null || (!castSent && !_options.StopOnFirstHit && self is not null))
+                    if (target is not null || (!castSent && !_options.StopOnFirstHit))
                     {
-                        int targetPosXRaw = target?.PosXRaw ?? (self!.PosXRaw - TileStepRaw);
-                        int targetPosYRaw = target?.PosYRaw ?? self!.PosYRaw;
+                        int targetPosXRaw = target?.PosXRaw ?? (self.PosXRaw - TileStepRaw);
+                        int targetPosYRaw = target?.PosYRaw ?? self.PosYRaw;
 
                         CastSkillCommand cast = new(
                             Tick: Math.Max(inputTick, snapshot.Tick + 1),

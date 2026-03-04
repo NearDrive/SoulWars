@@ -5,6 +5,7 @@ using Game.Core;
 using Game.Protocol;
 using Game.Server;
 using System.Collections.Immutable;
+using System.Buffers.Binary;
 using Xunit;
 
 namespace Game.Server.Tests.ClientSmoke;
@@ -50,6 +51,19 @@ public sealed class ClientServerGoldenSmokeTests
         Assert.True(diagnostics.CastAttempts > 0, diagnostics.ToDeterministicReport(result));
         Assert.True(diagnostics.CastAccepted > 0, diagnostics.ToDeterministicReport(result));
         Assert.True(result.HitEventsSeen > 0, diagnostics.ToDeterministicReport(result));
+    }
+
+    [Fact]
+    [Trait("Category", "PR98")]
+    [Trait("Category", "ClientSmoke")]
+    [Trait("Category", "Canary")]
+    public async Task ClientSmoke_KnowsSelfEntity_AfterEnterAndFirstSnapshot()
+    {
+        (ClientRunResult result, SmokeDiagnostics diagnostics) = await RunArenaGoldenSmokeAsync(runTicks: 64);
+
+        Assert.True(result.HandshakeOk, diagnostics.ToDeterministicReport(result));
+        Assert.True(diagnostics.SelfEntityId.HasValue, diagnostics.ToDeterministicReport(result));
+        Assert.True(diagnostics.FirstSelfSeenTick.HasValue, diagnostics.ToDeterministicReport(result));
     }
 
     private static async Task<(ClientRunResult Result, SmokeDiagnostics Diagnostics)> RunArenaGoldenSmokeAsync(int runTicks)
@@ -199,7 +213,19 @@ internal sealed class InstrumentedClientTransport : IClientTransport
             return false;
         }
 
-        if (ProtocolCodec.TryDecodeServer(payload, out IServerMessage? message, out _))
+        if (payload.Length < 4)
+        {
+            return true;
+        }
+
+        int frameLength = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0, 4));
+        if (frameLength <= 0 || payload.Length < 4 + frameLength)
+        {
+            return true;
+        }
+
+        ReadOnlySpan<byte> framedPayload = payload.AsSpan(4, frameLength);
+        if (ProtocolCodec.TryDecodeServer(framedPayload, out IServerMessage? message, out _))
         {
             _diagnostics.RecordServerMessage(message!);
         }
@@ -234,6 +260,10 @@ internal sealed class SmokeDiagnostics
     public int CastRejectedValidate { get; private set; }
 
     public int CastRejectedUnknown { get; private set; }
+
+    public int? SelfEntityId => _selfEntityId;
+
+    public int? FirstSelfSeenTick => _firstSelfSeenTick;
 
     public string CastRejectStage { get; private set; } = "None";
 
@@ -283,6 +313,10 @@ internal sealed class SmokeDiagnostics
                 LastTickWithAnyEvent = Math.Max(LastTickWithAnyEvent, evt.Tick);
                 break;
             case ServerCastDiagStage.HitEmitted:
+                LastTickWithAnyEvent = Math.Max(LastTickWithAnyEvent, evt.Tick);
+                break;
+            case ServerCastDiagStage.SelfAssigned:
+                _selfEntityId = evt.RawReasonCode;
                 LastTickWithAnyEvent = Math.Max(LastTickWithAnyEvent, evt.Tick);
                 break;
             default:
