@@ -47,11 +47,19 @@ public sealed class ClientTraceRecorder
             .ThenBy(static evt => evt.AbilityId ?? int.MinValue)
             .ToArray();
 
-        _ticks.Add(new TickTrace(
+        TickTrace trace = new(
             TickId: snapshot.Tick,
             ZoneId: snapshot.ZoneId,
             VisibleEntityIds: canonicalVisibleEntityIds,
-            Events: sortedEvents));
+            Events: sortedEvents);
+
+        if (_ticks.Count > 0 && _ticks[^1].TickId == snapshot.Tick)
+        {
+            _ticks[^1] = trace;
+            return;
+        }
+
+        _ticks.Add(trace);
     }
 
     public string BuildCanonicalTraceDump()
