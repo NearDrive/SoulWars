@@ -13,7 +13,7 @@ namespace Game.Server.Tests.ClientSmoke;
 public sealed class ClientServerGoldenSmokeTests
 {
     private const int RunTicks = 3600;
-    private const string GoldenHash = "7798608B17FFC57E6C17A1675EE101D58F6828E3498EEEE5112DF9541E0CEC80";
+    private const string GoldenHash = "D2B4960A066F535DBDB9BCF9CF63E0070273D51DFCC44FB86837F128C89F0728";
 
     [Fact]
     [Trait("Category", "PR98")]
