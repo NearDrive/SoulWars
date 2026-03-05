@@ -28,11 +28,6 @@ public sealed class ClientServerGoldenSmokeTests
         Assert.True(result.HitEventsSeen > 0, $"Expected at least one HitEvent during the deterministic smoke run.\n{diagnostics.ToDeterministicReport(result)}");
         Assert.False(string.IsNullOrWhiteSpace(result.TraceHash), diagnostics.ToDeterministicReport(result));
 
-        if (GoldenHash == "TODO_SET_FROM_CI")
-        {
-            Assert.Fail($"GoldenHash placeholder detected. Set GoldenHash to the CI-produced TraceHash: {result.TraceHash}");
-        }
-
         Assert.True(
             string.Equals(result.TraceHash, GoldenHash, StringComparison.Ordinal),
             $"TraceHash mismatch. Expected GoldenHash='{GoldenHash}', Actual TraceHash='{result.TraceHash}'.");
