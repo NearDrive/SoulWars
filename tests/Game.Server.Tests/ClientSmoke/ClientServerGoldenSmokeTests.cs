@@ -30,7 +30,8 @@ public sealed class ClientServerGoldenSmokeTests
 
         Assert.True(
             string.Equals(result.TraceHash, GoldenHash, StringComparison.Ordinal),
-            $"TraceHash mismatch. Expected GoldenHash='{GoldenHash}', Actual TraceHash='{result.TraceHash}'.");
+            $"TraceHash mismatch. Expected GoldenHash='{GoldenHash}', Actual TraceHash='{result.TraceHash}'. " +
+            "If this change is intentional, follow docs/testing/golden-hash-update.md (dedicated golden-update commit/PR, then rerun canary).");
     }
 
     [Fact]
