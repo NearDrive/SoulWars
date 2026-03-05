@@ -47,27 +47,31 @@ public sealed class ClientTraceRecorder
             .ThenBy(static evt => evt.AbilityId ?? int.MinValue)
             .ToArray();
 
-        _ticks.Add(new TickTrace(
+        TickTrace trace = new(
             TickId: snapshot.Tick,
             ZoneId: snapshot.ZoneId,
             VisibleEntityIds: canonicalVisibleEntityIds,
-            Events: sortedEvents));
+            Events: sortedEvents);
+
+        if (_ticks.Count > 0 && _ticks[^1].TickId == snapshot.Tick)
+        {
+            _ticks[^1] = trace;
+            return;
+        }
+
+        _ticks.Add(trace);
     }
 
     public string BuildCanonicalTraceDump()
     {
-        StringBuilder builder = new();
-        foreach (TickTrace tick in _ticks.OrderBy(static trace => trace.TickId))
-        {
-            if (builder.Length > 0)
-            {
-                builder.Append('\n');
-            }
+        string[] orderedLines = _ticks
+            .Select(static trace => (trace.TickId, Line: BuildTickLine(trace)))
+            .OrderBy(static item => item.TickId)
+            .ThenBy(static item => item.Line, StringComparer.Ordinal)
+            .Select(static item => item.Line)
+            .ToArray();
 
-            AppendTick(builder, tick);
-        }
-
-        return builder.ToString();
+        return string.Join('\n', orderedLines);
     }
 
     public string ComputeTraceHash()
@@ -78,8 +82,9 @@ public sealed class ClientTraceRecorder
         return Convert.ToHexString(hash);
     }
 
-    private static void AppendTick(StringBuilder builder, TickTrace tick)
+    private static string BuildTickLine(TickTrace tick)
     {
+        StringBuilder builder = new();
         builder.Append("T:");
         builder.Append(tick.TickId.ToString(CultureInfo.InvariantCulture));
         builder.Append("|Z:");
@@ -106,6 +111,8 @@ public sealed class ClientTraceRecorder
             builder.Append(":");
             builder.Append(evt.AbilityId?.ToString(CultureInfo.InvariantCulture) ?? "-");
         }
+
+        return builder.ToString();
     }
 
     private static void AppendIntList(StringBuilder builder, IReadOnlyList<int> values)

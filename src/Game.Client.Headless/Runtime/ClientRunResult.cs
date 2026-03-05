@@ -14,4 +14,10 @@ public sealed record ClientRunResult(
     string CanonicalTrace)
 {
     public bool HitObserved => ObservedHits.Count > 0;
+
+    public bool HandshakeOk => HandshakeAccepted;
+
+    public int TicksProcessed => TotalTicks;
+
+    public int HitEventsSeen => ObservedHits.Count;
 }
