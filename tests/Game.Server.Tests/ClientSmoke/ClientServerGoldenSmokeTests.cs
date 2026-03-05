@@ -177,7 +177,10 @@ public sealed class ClientServerGoldenSmokeTests
             EntityLocations = entities.Select(e => new EntityLocation(e.Id, new ZoneId(ArenaZoneFactory.ArenaZoneId))).ToImmutableArray()
         };
 
-        return new ServerBootstrap(updatedWorld, config.Seed, ImmutableArray<BootstrapPlayerRecord>.Empty);
+        ImmutableArray<BootstrapPlayerRecord> players = ImmutableArray.Create(
+            new BootstrapPlayerRecord("client-smoke-pr98", 1, null, null));
+
+        return new ServerBootstrap(updatedWorld, config.Seed, players);
     }
 }
 
